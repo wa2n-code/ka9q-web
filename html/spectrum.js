@@ -376,11 +376,11 @@ Spectrum.prototype.setRange = function(min_db, max_db) {
     this.updateAxes();
 }
 
-Spectrum.prototype.rangeUp = function() {
+Spectrum.prototype.positionUp = function() {
     this.setRange(this.min_db - 5, this.max_db - 5);
 }
 
-Spectrum.prototype.rangeDown = function() {
+Spectrum.prototype.positionDown = function() {
     this.setRange(this.min_db + 5, this.max_db + 5);
 }
 
