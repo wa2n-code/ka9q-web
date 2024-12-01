@@ -25,16 +25,30 @@ Spectrum.prototype.squeeze = function(value, out_min, out_max) {
 }
 
 Spectrum.prototype.rowToImageData = function(bins) {
+    // newell 12/1/2024, 12:02:10
+    // Why the 4? I think it's decimating the FFT by 4 for the waterfall?
     for(var i=0;i<this.imagedata.data.length;i+=4) {
         try {
-          var cindex = this.squeeze(-(bins[i/4]-70), 0, 255);
+            //var cindex = this.squeeze(-(bins[i/4]-70), 0, 255);
+
+            // newell 12/1/2024, 11:44:29
+            // with this new bin amplitude scaling, the colormap lookup need to change
+            // I think the idea is that weak signals use colors from the start
+            // of the colormap array, and stronger ones use colors from the end
+            // I also noticed the default colormaps are not all the same length!
+            // perhaps that's what the catch(err) was all about?
+            var scaled=((bins[i / 4] - this.min_db) / (this.max_db - this.min_db));
+            if (scaled > 1.0) scaled = 1.0;
+            if (scaled < 0) scaled = 0;
+            var cindex = Math.round((this.colormap.length - 1) * scaled);
           var color = this.colormap[cindex];
           this.imagedata.data[i+0] = color[0];
           this.imagedata.data[i+1] = color[1];
           this.imagedata.data[i+2] = color[2];
           this.imagedata.data[i+3] = 255;
         } catch(err) {
-          var color = this.colormap[255];
+            console.error("rowToImageData() caught an error: color=", color, " colormap.length=", this.colormap.length);
+          var color = this.colormap[this.colormap.length-1];
           this.imagedata.data[i+0] = color[0];
           this.imagedata.data[i+1] = color[1];
           this.imagedata.data[i+2] = color[2];
@@ -120,7 +134,7 @@ Spectrum.prototype.drawFFT = function(bins) {
         this.min_db=this.min_db+5;
         this.max_db=this.max_db+5;
         this.rangeDown();
-	     }
+        }
     */
 }
 
@@ -353,6 +367,7 @@ Spectrum.prototype.toggleColor = function() {
         this.colorindex = 0;
     this.colormap = colormaps[this.colorindex];
     this.updateSpectrumRatio();
+    //console.info("New colormap index=", this.colorindex, ", map has ", this.colormap.length, " entries");
 }
 
 Spectrum.prototype.setRange = function(min_db, max_db) {
