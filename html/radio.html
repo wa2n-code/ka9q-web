@@ -27,9 +27,6 @@
     <td rowspan=1 colspan=1>
     <button id="rangeinc" onclick="spectrum.rangeIncrease()">Range +</button>
     </td>
-    <td rowspan=2 colspan=1>
-    <button id="colormap" onclick="spectrum.toggleColor()">Color Map</button>
-    </td>
     <td rowspan=2 colspan=2>
 <!--
     <span id="freq" style="color:green; font-size:40px; border: solid; width: 200px">16200000</span>
@@ -109,7 +106,6 @@
     <button id="zoomcenter" onclick="zoomcenter()">Zoom Center</button>
     </td>
     </tr>
-
     <tr>
       <td rowspan=1 colspan=1>
         <button id="fft_avg_up" onclick="spectrum.incrementAveraging()">FFT AVG +</button>
@@ -117,8 +113,20 @@
       <td rowspan=1 colspan=1>
         <button id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()">Spectrum +</button>
       </td>
-      <td></td>
-      <td></td>
+      <td rowspan=2 colspan=2>
+        <label for="colormap">Colormap:</label>
+        <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
+          <option value="0" selected>turbo</option>
+          <option value="1">fosphorz</option>
+          <option value="2">viridis</option>
+          <option value="3">inferno</option>
+          <option value="4">magma</option>
+          <option value="5">jet</option>
+          <option value="6">binary</option>
+          <option value="7">blue</option>
+          <option value="8">short</option>
+        </select>
+      </td>
       <td></td>
       <td rowspan=2 colspan=1>
         <button id="autoscale" style="height:50px" onclick="spectrum.forceAutoscale()">Autoscale</button>

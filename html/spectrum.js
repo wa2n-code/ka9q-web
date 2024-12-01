@@ -126,16 +126,6 @@ Spectrum.prototype.drawFFT = function(bins) {
     this.ctx.lineTo(x,this.spectrumHeight);
     this.ctx.strokeStyle = "#ff0000";
     this.ctx.stroke();
-
-    // newell 12/1/2024, 10:20:16
-    // disable autoscaling while I'm working on the bin amp and waterfall
-    /*
-    if(max_s>this.spectrumHeight) {
-        this.min_db=this.min_db+5;
-        this.max_db=this.max_db+5;
-        this.rangeDown();
-        }
-    */
 }
 
 Spectrum.prototype.drawSpectrum = function(bins) {
@@ -378,8 +368,8 @@ Spectrum.prototype.decrementSpectrumPercent = function() {
     }
 }
 
-Spectrum.prototype.toggleColor = function() {
-    this.colorindex++;
+Spectrum.prototype.setColormap = function(value) {
+    this.colorindex = value;
     if (this.colorindex >= colormaps.length)
         this.colorindex = 0;
     this.colormap = colormaps[this.colorindex];
