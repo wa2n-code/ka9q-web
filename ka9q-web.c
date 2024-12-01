@@ -828,6 +828,13 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       // Note these are still in FFT order
       for(int i=0; i < l_count; i++){
         power[i] = decode_float(cp,sizeof(float));
+
+        // newell 12/1/2024, 09:59:56
+        // I don't understand the spectrum bin amplitude scaling at all
+        // Guessing that the bins need to be scaled by 1/N
+        // And maybe by 32768 to account for the RX888 16 bit ADC?
+        // Open to corrections/advice on this!
+        power[i] /= (1.62e6*32768);
         cp += sizeof(float);
       }
       break;
@@ -939,12 +946,16 @@ void *ctrl_thread(void *arg) {
 	  float *fp=(float*)ip;
 
 	  // below center
+          // newell 12/1/2024, 10:00:15
+          // Now that I've hacked the scaling, I think we want to set a floor
+          // of -120 dB, not +120 dB. But I'm still confused and this is
+          // blind guesswork.
 	  for(int i=mid; i < npower; i++) {
-	    *fp++=(powers[i] == 0) ? 120.0 : 10*log10(powers[i]);
+	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
 	  }
 	  // above center
 	  for(int i=0; i < mid; i++) {
-	    *fp++=(powers[i] == 0) ? 120.0 : 10*log10(powers[i]);
+	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
 	  }
 
 	  // send the spectrum data to the client

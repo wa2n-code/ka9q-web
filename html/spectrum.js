@@ -81,7 +81,10 @@ Spectrum.prototype.drawFFT = function(bins) {
     var max_s=0;
     for(var i=0; i<bins.length; i++) {
         var s = bins[i];
-        s = (s+this.min_db)*dbm_per_line;
+        // newell 12/1/2024, 10:16:13
+        // With the spectrum bin amplitude ranging from -120 to 0 dB or so
+        // this needs to flip to draw the spectrum correctly
+        s = (s-this.min_db)*dbm_per_line;
         s = this.spectrumHeight-s;
         if(i==0) this.ctx.lineTo(-1,s);
         this.ctx.lineTo(i, s);
@@ -110,11 +113,15 @@ Spectrum.prototype.drawFFT = function(bins) {
     this.ctx.strokeStyle = "#ff0000";
     this.ctx.stroke();
 
+    // newell 12/1/2024, 10:20:16
+    // disable autoscaling while I'm working on the bin amp and waterfall
+    /*
     if(max_s>this.spectrumHeight) {
-      this.min_db=this.min_db+5;
-      this.max_db=this.max_db+5;
-      this.rangeDown();
-    }
+        this.min_db=this.min_db+5;
+        this.max_db=this.max_db+5;
+        this.rangeDown();
+	     }
+    */
 }
 
 Spectrum.prototype.drawSpectrum = function(bins) {
@@ -492,8 +499,10 @@ function Spectrum(id, options) {
     // Setup state
     this.paused = false;
     this.fullscreen = false;
-    this.min_db = -130;
-    this.max_db = -70;
+    // newell 12/1/2024, 10:16:50
+    // set default spectrum ranges to match the scaled bin amplitudes
+    this.min_db = -120;
+    this.max_db = 0;
     this.spectrumHeight = 0;
     this.spectrum_adjust = 0;
 
