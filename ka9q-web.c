@@ -620,7 +620,7 @@ int init_connections(const char *multicast_group) {
 
   pthread_mutex_init(&ctl_mutex,NULL);
 
-  resolve_mcast(multicast_group,&Metadata_dest_socket,DEFAULT_STAT_PORT,iface,sizeof(iface));
+  resolve_mcast(multicast_group,&Metadata_dest_socket,DEFAULT_STAT_PORT,iface,sizeof(iface),0);
   Status_fd = listen_mcast(&Metadata_dest_socket,iface);
   if(Status_fd == -1){
     fprintf(stderr,"Can't listen to mcast status %s\n",multicast_group);
