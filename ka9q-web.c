@@ -211,8 +211,8 @@ static void check_frequency(struct session *sp) {
   }
   if(min_f<0) {
     sp->center_frequency=(sp->bin_width*sp->bins)/2;
-  } else if(max_f>32200000) {
-    sp->center_frequency=32200000-(sp->bin_width*sp->bins)/2;
+  } else if(max_f>32400000) {
+    sp->center_frequency=32400000-(sp->bin_width*sp->bins)/2;
   }
 }
 
@@ -292,8 +292,8 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         }
         if(min_f<0) {
           sp->center_frequency=(sp->bin_width*sp->bins)/2;
-        } else if(max_f>32200000) {
-          sp->center_frequency=32200000-(sp->bin_width*sp->bins)/2;
+        } else if(max_f>32400000) {
+          sp->center_frequency=32400000-(sp->bin_width*sp->bins)/2;
         }
         control_set_frequency(sp,&tmp[2]);
         break;
