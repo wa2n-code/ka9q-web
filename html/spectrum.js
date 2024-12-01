@@ -79,7 +79,7 @@ Spectrum.prototype.addWaterfallRow = function(bins) {
         0, this.spectrumHeight, width, height - this.spectrumHeight);
 }
 
-Spectrum.prototype.drawFFT = function(bins) {
+Spectrum.prototype.drawFFT = function(bins,color) {
     var hz_per_pixel = this.spanHz/bins.length;
     var dbm_per_line=this.spectrumHeight/(this.max_db-this.min_db);
 /*
@@ -108,8 +108,12 @@ Spectrum.prototype.drawFFT = function(bins) {
         }
     }
     this.ctx.lineTo(this.wf_size+1,this.spectrumHeight+1);
-    this.ctx.strokeStyle = "#fefefe";
+    this.ctx.strokeStyle = color;
     this.ctx.stroke();
+}
+
+Spectrum.prototype.drawFilter = function(bins) {
+    var hz_per_pixel = this.spanHz/bins.length;
 
     // draw the filter
     // low filter edge
@@ -119,12 +123,17 @@ Spectrum.prototype.drawFFT = function(bins) {
     var width=x1-x;
     this.ctx.fillStyle = "#404040";
     this.ctx.fillRect(x,0,width,this.spectrumHeight);
+//  this.ctx.fillStyle = "black";
+}
+
+Spectrum.prototype.drawPointer = function(bins, color) {
+    var hz_per_pixel = this.spanHz/bins.length;
 
     // draw the cursor
-    x=(this.frequency-this.start_freq)/hz_per_pixel;
+    var x=(this.frequency-this.start_freq)/hz_per_pixel;
     this.ctx.moveTo(x,0);
     this.ctx.lineTo(x,this.spectrumHeight);
-    this.ctx.strokeStyle = "#ff0000";
+    this.ctx.strokeStyle = color;
     this.ctx.stroke();
 }
 
@@ -158,7 +167,7 @@ Spectrum.prototype.drawSpectrum = function(bins) {
                     this.binsMax[i] = bins[i];
                 } else {
                     // Decay
-                    this.binsMax[i] = 1.0025 * this.binsMax[i];
+                    //this.binsMax[i] = 1.0025 * this.binsMax[i];
                 }
             }
         }
@@ -168,24 +177,32 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     if (this.ctx_axes.canvas.height < 1) {
         return;
     }
-
     // Scale for FFT
     this.ctx.save();
     this.ctx.scale(width / this.wf_size, 1);
 
+    // draw filter band
+    this.drawFilter(bins);
+
     // Draw maxhold
-    if (this.maxHold)
-        this.drawFFT(this.binsMax);
-
+    if (this.maxHold) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMax,"#ffff00");
+    }
     // Draw FFT bins
-    this.drawFFT(bins);
-
-    // Restore scale
-    this.ctx.restore();
+    this.drawFFT(bins,"#ffffff");
 
     // Fill scaled path
     this.ctx.fillStyle = this.gradient;
     this.ctx.fill();
+
+    // newell 12/1/2024, 16:08:06
+    // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
+    // draw pointer
+    this.drawPointer(bins, "#ff0000");
+
+    // Restore scale
+    this.ctx.restore();
 
     // Copy axes from offscreen canvas
     this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
@@ -377,6 +394,15 @@ Spectrum.prototype.setColormap = function(value) {
     //console.info("New colormap index=", this.colorindex, ", map has ", this.colormap.length, " entries");
 }
 
+Spectrum.prototype.toggleColor = function() {
+    this.colorindex++;
+    if (this.colorindex >= colormaps.length)
+        this.colorindex = 0;
+    this.colormap = colormaps[this.colorindex];
+    this.updateSpectrumRatio();
+    document.getElementById("colormap").value = this.colorindex;
+}
+
 Spectrum.prototype.setRange = function(min_db, max_db) {
     this.min_db = min_db;
     this.max_db = max_db;
@@ -489,9 +515,9 @@ Spectrum.prototype.onKeypress = function(e) {
     } else if (e.key == "c") {
         this.toggleColor();
     } else if (e.key == "ArrowUp") {
-        this.rangeUp();
+        this.positionUp();
     } else if (e.key == "ArrowDown") {
-        this.rangeDown();
+        this.positionDown();
     } else if (e.key == "ArrowLeft") {
         this.rangeDecrease();
     } else if (e.key == "ArrowRight") {
