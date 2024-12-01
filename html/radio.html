@@ -40,10 +40,10 @@
     <button style="height:50px" onclick="setFrequency()">Set Frequency</button>
     </td>
     <td rowspan=2 colspan=1>
-    <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:60px; height:50px">  Freq -  </button>
+    <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:80px; height:50px">  Freq -  </button>
     </td>
     <td rowspan=2 colspan=1>
-    <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:60px; height:50px">  Freq +  </button>
+    <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:80px; height:50px">  Freq +  </button>
     </td>
     <td rowspan=2 colspan=2>
     <label for="step">Step:</label> 
@@ -69,7 +69,7 @@
         <option value="lsb">LSB</option> 
         <option value="am">AM</option> 
         <option value="sam">SAM</option> 
-	<option value="fm">FM</option>
+        <option value="fm">FM</option>
     </select>
     </td>
     <td rowspan=1 colspan=1>
@@ -108,6 +108,37 @@
     <td rowspan=1 colspan=2 align='center'>
     <button id="zoomcenter" onclick="zoomcenter()">Zoom Center</button>
     </td>
+    </tr>
+
+    <tr>
+      <td rowspan=1 colspan=1>
+        <button id="fft_avg_up" onclick="spectrum.incrementAveraging()">FFT AVG +</button>
+      </td>
+      <td rowspan=1 colspan=1>
+        <button id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()">Spectrum +</button>
+      </td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td rowspan=2 colspan=1>
+        <button id="autoscale" style="height:50px" onclick="spectrum.forceAutoscale()">Autoscale</button>
+      </td>
+      <td rowspan=2 colspan=1>
+        <button id="max_hold" style="width:80px; height:50px" onclick="spectrum.toggleMaxHold()">Max hold</button>
+      </td>
+      <td rowspan=2 colspan=1>
+        <button id="pause" style="width:80px; height:50px" onclick="spectrum.togglePaused()">Pause</button>
+      </td>
+    </tr>
+    <tr>
+      <td rowspan=1 colspan=1>
+        <button id="fft_avg_down" onclick="spectrum.decrementAveraging()">FFT AVG -</button>
+      </td>
+      <td rowspan=1 colspan=1>
+        <button id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()">Spectrum -</button>
+      </td>
+      <td></td>
+      <td></td>
     </tr>
     </table>
     <span id="info"> </span>

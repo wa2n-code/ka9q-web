@@ -301,9 +301,26 @@ Spectrum.prototype.addData = function(data) {
             this.ctx_wf.fillRect(0, 0, this.wf.width, this.wf.height);
             this.imagedata = this.ctx_wf.createImageData((data.length), 1);
         }
+
         this.nbins=data.length;
-        for(var i=0;i<data.length;i++) {
-          data[i]=data[i]+this.spectrum_adjust;
+
+        // autoscale?
+        // newell 12/1/2024, 13:47:12
+        // attempt to autoscale based on the min/max of the current spectrum
+        // or the current max hold (if it's turned on)
+        // should pick reasonable scale in 5 dB increments
+        if (this.autoscale) {
+            this.autoscale = false;
+
+            var increment = 5.0;
+            var data_max = Math.max(...data);
+            var data_min = Math.min(...data);
+            if (this.maxHold) {
+                // autoscale off peak bins in max hold mode
+                data_max = Math.max(...this.binsMax, data_max);
+                data_min = Math.min(...this.binsMax, data_min);
+            }
+            this.setRange(increment * Math.floor(data_min / increment),increment * Math.ceil(data_max / increment));
         }
         this.drawSpectrum(data);
         this.addWaterfallRow(data);
@@ -429,12 +446,9 @@ Spectrum.prototype.decrementAveraging = function() {
     }
 }
 
-Spectrum.prototype.setPaused = function(paused) {
-    this.paused = paused;
-}
-
 Spectrum.prototype.togglePaused = function() {
-    this.setPaused(!this.paused);
+    this.paused = !this.paused;
+    document.getElementById("pause").textContent = (this.paused ? "Run" : "Pause");
 }
 
 Spectrum.prototype.setMaxHold = function(maxhold) {
@@ -444,6 +458,7 @@ Spectrum.prototype.setMaxHold = function(maxhold) {
 
 Spectrum.prototype.toggleMaxHold = function() {
     this.setMaxHold(!this.maxHold);
+    document.getElementById("max_hold").textContent = (this.maxHold ? "Norm" : "Max hold");
 }
 
 Spectrum.prototype.toggleFullscreen = function() {
@@ -470,6 +485,10 @@ Spectrum.prototype.toggleFullscreen = function() {
         }
         this.fullscreen = false;
     }
+}
+
+Spectrum.prototype.forceAutoscale = function() {
+    this.autoscale = true;
 }
 
 Spectrum.prototype.onKeypress = function(e) {
@@ -519,7 +538,6 @@ function Spectrum(id, options) {
     this.min_db = -120;
     this.max_db = 0;
     this.spectrumHeight = 0;
-    this.spectrum_adjust = 0;
 
     // Colors
     this.colorindex = 0;
@@ -544,6 +562,8 @@ function Spectrum(id, options) {
     this.wf.height = this.wf_rows;
     this.wf.width = this.wf_size;
     this.ctx_wf = this.wf.getContext("2d");
+
+    this.autoscale = false;
 
     // Trigger first render
     this.setAveraging(this.averaging);
