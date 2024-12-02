@@ -100,6 +100,8 @@ int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
+float if_power;
+float noise_density;
 
 #define MAX_BINS 1620
 
@@ -841,6 +843,16 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
     case NONCOHERENT_BIN_BW:
       *bin_bw = decode_float(cp,optlen);
       break;
+    case IF_POWER:
+      // newell 12/1/2024, 19:09:01
+      // I expected decode_radio_status() to handle this and NOISE_DENSITY, but
+      // the values never seemed to be live. Maybe they're part of the channel
+      // instead? This seems to work for now at least.
+      if_power = decode_float(cp,optlen);
+      break;
+    case NOISE_DENSITY:
+      noise_density = decode_float(cp,optlen);
+      break;
     case BIN_COUNT: // Do we check that this equals the length of the BIN_DATA tlv?
       l_ccount = decode_int(cp,optlen);
       break;
@@ -920,6 +932,12 @@ void *ctrl_thread(void *arg) {
       if(ssrc%2==1) { // Spectrum data
         if((sp=find_session_from_ssrc(ssrc-1)) != NULL){
 	  //	  fprintf(stderr,"forward spectrum: ws=%p\n",sp->ws);
+
+          // newell 12/1/2024, 19:07:31
+          // is it kosher to call this here? It made some of the stat values
+          // update more often, so I hacked it in.
+          decode_radio_status(&Frontend,&Channel,buffer+1,length-1);
+
 	  struct rtp_header rtp;
 	  memset(&rtp,0,sizeof(rtp));
 	  rtp.type = 0x7F; // spectrum data
@@ -933,6 +951,23 @@ void *ctrl_thread(void *arg) {
 	  *ip++=htonl(sp->center_frequency);
 	  *ip++=htonl(sp->frequency);
 	  *ip++=htonl(sp->bin_width);
+
+          // newell 12/1/2024, 19:04:37
+          // Should this be TLV encoding like the radiod RTP streams?
+          // Dealing with endian and zero suppression in javascript
+          // looked painful, so I went quick-n-dirty here
+          memcpy((void*)ip,&Frontend.samprate,4); ip++;
+          memcpy((void*)ip,&Frontend.rf_agc,4); ip++;
+          memcpy((void*)ip,&Frontend.samples,8); ip+=2;
+          memcpy((void*)ip,&Frontend.overranges,8); ip+=2;
+          memcpy((void*)ip,&Frontend.samp_since_over,8); ip+=2;
+          memcpy((void*)ip,&Frontend.timestamp,8); ip+=2;
+          memcpy((void*)ip,&Channel.status.blocks_since_poll,8); ip+=2;
+          memcpy((void*)ip,&Frontend.rf_atten,4); ip++;
+          memcpy((void*)ip,&Frontend.rf_gain,4); ip++;
+          memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
+          memcpy((void*)ip,&if_power,4); ip++;
+          memcpy((void*)ip,&noise_density,4); ip++;
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);

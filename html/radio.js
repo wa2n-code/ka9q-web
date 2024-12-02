@@ -18,6 +18,20 @@
       var filter_high = 3000;
       var power = -120;
 
+      var gps_time = 0;
+      var input_samples = 0;
+      var input_samprate = 0;
+      var rf_gain = 0;
+      var rf_atten = 0;
+      var rf_level_cal = 0;
+      var rf_agc = 0;
+      var if_power = 0;
+      var ad_over = 0;
+      var samples_since_over = 0;
+      var noise_density = 0;
+      var blocks_since_last_poll = 0;
+      var last_poll = -1;
+
       var player = new PCMPlayer({
         encoding: '16bitInt',
         channels: 1,
@@ -154,20 +168,37 @@
                 update=1;
               }
 
-              if(update) {
+            // newell 12/1/2024, 19:18:05
+            // Turns out javascript can do big endian!
+            // What a pleasant and unexpected surprise!
+            // might want to refactor centerHz, frequencyHz, and spanHz, too
+            input_samprate = view.getUint32(i,true); i+=4;
+            rf_agc = view.getUint32(i,true); i+=4;
+            input_samples = view.getBigUint64(i,true); i+=8;
+            ad_over = view.getBigUint64(i,true); i+=8;
+            samples_since_over = view.getBigUint64(i,true); i+=8;
+            gps_time = view.getBigUint64(i,true); i+=8;
+            blocks_since_last_poll = view.getBigUint64(i,true); i+=8;
+            rf_atten = view.getFloat32(i,true); i+=4;
+            rf_gain = view.getFloat32(i,true); i+=4;
+            rf_level_cal = view.getFloat32(i,true); i+=4;
+            if_power = view.getFloat32(i,true); i+=4;
+            noise_density = view.getFloat32(i,true); i+=4;
+
+            if(update) {
                 lowHz=centerHz-((spanHz*samples)/2);
                 spectrum.setLowHz(lowHz);
                 highHz=centerHz+((spanHz*samples)/2);
                 spectrum.setHighHz(highHz);
                 info = document.getElementById('info');
-                info.innerHTML = "Samples="+samples.toString()+" Hz/sample="+spanHz.toString();
               }
 
 //console.log("center="+String(centerHz)+" freq="+String(frequencyHz)+" span="+String(spanHz)+" low="+String(lowHz)+" high="+String(highHz));
               var dataBuffer = evt.data.slice(i,data.byteLength);
               const arr = new Float32Array(dataBuffer);
               spectrum.addData(arr);
-              break;
+            update_stats();
+            break;
             case 0x7E: // Channel Data
               while(i<data.byteLength) {
                 var v=view.getInt8(i++);
@@ -261,7 +292,6 @@
 //        }
 
           info = document.getElementById('info');
-          info.innerHTML = "Samples="+samples.toString()+" Hz/sample="+spanHz.toString();
 
         player.volume(1.00);
       }
@@ -420,3 +450,50 @@
         }
     }
 
+function update_stats() {
+  if (spectrum.paused)
+    return;
+
+  // GPS time isn't UTC
+  var t = Number(gps_time) / 1e9;
+  t+=315964800;
+  t-=18;
+  var smp = Number(input_samples) / Number(input_samprate);
+
+  // newell 12/1/2024, 19:16:35
+  // ugly hack to get the stats on the webpage. Formatting is terrible, but
+  // perfect is the enemy of good, right?
+  document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
+  document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " M";
+  document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
+  document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();
+  document.getElementById('adc_last_over').innerHTML = "Last overrange: " + (samples_since_over / BigInt(input_samprate)).toString() + " s";
+  document.getElementById('uptime').innerHTML =  "Uptime: " + smp.toFixed(1) + " s";
+  document.getElementById('rf_gain').innerHTML = "RF Gain: " + rf_gain.toFixed(1) + " dB";
+  document.getElementById('rf_attn').innerHTML = "RF Atten: " + rf_atten.toFixed(1) + " dB";
+  document.getElementById('rf_cal').innerHTML = "RF lev cal: " + rf_level_cal.toFixed(1) + " dB";
+  document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
+  document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
+  document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(2) + " dBmJ";
+  document.getElementById('bins').innerHTML = "Bins: " + samples.toString();
+  document.getElementById('hz_per_bin').innerHTML = "Bin width: " + spanHz.toString() + " Hz";
+  document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
+  return;
+
+  // newell 12/1/2024, 19:10:56
+  // hack to change the title when the block since last poll is changing
+  // Could this be connected to the vertical 'bouncing' that is sometimes
+  // seen on the spectrum? My current theory is that radiod integrates bin
+  // energy between the forward fft bins and the decimated spec demod bins,
+  // then scales that by number of blocks since the last time the demod was
+  // polled. But if the polling rate varies, the scaling changes and the bin
+  // amplitudes appear to bounce.
+  // Hacking radiod to not integrate and not scale seems to make the display
+  // more stable, even when the blocks_since_last_poll value is changing.
+  // But I don't know if disabling the integration is sound practice.
+  if ((last_poll > 0) && (last_poll != blocks_since_last_poll))
+    document.getElementById('heading').innerHTML = 'Bouncing';
+  else
+    document.getElementById('heading').innerHTML = 'G0ORX Web SDR + ka9q-radio';
+  last_poll = blocks_since_last_poll;
+}
