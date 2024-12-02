@@ -131,6 +131,7 @@ Spectrum.prototype.drawPointer = function(bins, color) {
 
     // draw the cursor
     var x=(this.frequency-this.start_freq)/hz_per_pixel;
+    this.ctx.beginPath();
     this.ctx.moveTo(x,0);
     this.ctx.lineTo(x,this.spectrumHeight);
     this.ctx.strokeStyle = color;
