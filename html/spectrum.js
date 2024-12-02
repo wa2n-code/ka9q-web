@@ -167,7 +167,7 @@ Spectrum.prototype.drawSpectrum = function(bins) {
                     this.binsMax[i] = bins[i];
                 } else {
                     // Decay
-                    //this.binsMax[i] = 1.0025 * this.binsMax[i];
+                    this.binsMax[i] = this.decay * this.binsMax[i];
                 }
             }
         }
@@ -445,11 +445,16 @@ Spectrum.prototype.setHighHz = function(hz) {
     this.highHz = hz;
     this.updateAxes();
 }
+
 Spectrum.prototype.setAveraging = function(num) {
     if (num >= 0) {
         this.averaging = num;
         this.alpha = 2 / (this.averaging + 1)
     }
+}
+
+Spectrum.prototype.setDecay = function(num) {
+    this.decay = num;
 }
 
 Spectrum.prototype.incrementAveraging = function() {
@@ -580,6 +585,7 @@ function Spectrum(id, options) {
     this.ctx_wf = this.wf.getContext("2d");
 
     this.autoscale = false;
+    this.decay = 1.0;
 
     // Trigger first render
     this.setAveraging(this.averaging);

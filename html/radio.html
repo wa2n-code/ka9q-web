@@ -137,6 +137,21 @@
       <td rowspan=2 colspan=1>
         <button id="pause" style="width:80px; height:50px" onclick="spectrum.togglePaused()">Pause</button>
       </td>
+
+      <td rowspan=2 colspan=2>
+        <label for="decay_list">Max hold decay:</label>
+        <select id="decay_list" onchange="spectrum.setDecay(this.value)">
+          <option value="1.0" selected>Infinite</option>
+          <option value="1.0001">1.0001</option>
+          <option value="1.0005">1.0005</option>
+          <option value="1.001">1.001</option>
+          <option value="1.005">1.005</option>
+          <option value="1.01">1.05</option>
+          <option value="1.05">1.01</option>
+          <option value="1.1">1.1</option>
+        </select>
+      </td>
+
     </tr>
     <tr>
       <td rowspan=1 colspan=1>
@@ -154,9 +169,9 @@
       <tr><td><span id="rf_gain"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="gps_time"></span></td></tr>
       <tr><td><span id="rf_attn"></span></td> <td><span id="hz_per_bin"></span></td><td><span id="uptime"></span></td></tr>
       <tr><td><span id="rf_cal"></span></td><td><span id="bins"></span></td> <td><span id="adc_overs"></span></td></tr>
-      <tr><td><span id="rf_agc"></span></td><td></td><td><span id="adc_last_over"></span></td></tr>
-      <tr><td><span id="if_power"></span></td><td></td><td><span id="blocks"></span></td></tr>
-      <tr><td><span id="noise_density"></span></td><td></td><td><span id="adc_samples"></span></td></tr>
+      <tr><td><span id="rf_agc"></span></td><td><span id="ssrc"></span></td><td><span id="adc_last_over"></span></td></tr>
+      <tr><td><span id="if_power"></span></td><td><span id="fft_avg"></span></td><td><span id="blocks"></span></td></tr>
+      <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
     </table>
 
     <span id="info"> </span>

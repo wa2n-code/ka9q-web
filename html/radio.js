@@ -2,7 +2,7 @@
 // G0ORX WebSDR using ka9q-radio
 //
 //
-      var ssrc;
+      var ssrc=0;
 
       var band;
 
@@ -478,6 +478,9 @@ function update_stats() {
   document.getElementById('bins').innerHTML = "Bins: " + samples.toString();
   document.getElementById('hz_per_bin').innerHTML = "Bin width: " + spanHz.toString() + " Hz";
   document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
+  document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
+  document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
+  document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   return;
 
   // newell 12/1/2024, 19:10:56
