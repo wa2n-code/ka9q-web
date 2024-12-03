@@ -126,11 +126,11 @@ Spectrum.prototype.drawFilter = function(bins) {
 //  this.ctx.fillStyle = "black";
 }
 
-Spectrum.prototype.drawPointer = function(bins, color) {
+Spectrum.prototype.drawCursor = function(f, bins, color) {
     var hz_per_pixel = this.spanHz/bins.length;
 
-    // draw the cursor
-    var x=(this.frequency-this.start_freq)/hz_per_pixel;
+    // draw vertical line
+    var x = (f - this.start_freq) / hz_per_pixel;
     this.ctx.beginPath();
     this.ctx.moveTo(x,0);
     this.ctx.lineTo(x,this.spectrumHeight);
@@ -200,7 +200,11 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // newell 12/1/2024, 16:08:06
     // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
     // draw pointer
-    this.drawPointer(bins, "#ff0000");
+    this.drawCursor(this.frequency, bins, "#ff0000");
+
+    // draw cursor
+    if (this.cursor_active)
+        this.drawCursor(this.cursor_freq, bins, "#00ffff");
 
     // Restore scale
     this.ctx.restore();
@@ -309,7 +313,7 @@ Spectrum.prototype.addData = function(data) {
             this.ctx_wf.fillRect(0, 0, this.wf.width, this.wf.height);
             this.imagedata = this.ctx_wf.createImageData((data.length), 1);
         }
-
+        this.bin_copy=data;
         this.nbins=data.length;
 
         // autoscale?
@@ -541,6 +545,44 @@ Spectrum.prototype.onKeypress = function(e) {
     }
 }
 
+Spectrum.prototype.pixel_to_bin = function(pixel) {
+    return Math.floor((pixel / this.canvas.width) * 1620);
+}
+
+Spectrum.prototype.bin_to_hz = function(bin) {
+    var start_freq = this.centerHz - (this.spanHz / 2.0);
+    return start_freq + ((this.spanHz / 1620) * bin);
+}
+
+Spectrum.prototype.hz_to_bin = function(hz) {
+    var start_freq = this.centerHz - (this.spanHz / 2.0);
+    return Math.floor(((hz - start_freq) / (this.spanHz)) * 1620);
+}
+
+Spectrum.prototype.cursorCheck = function() {
+    this.cursor_active=document.getElementById("cursor").checked;
+}
+
+Spectrum.prototype.limitCursor = function(freq) {
+    var start_freq = this.centerHz-(this.spanHz / 2.0);
+    var end_freq = this.centerHz+(this.spanHz / 2.0);
+    return Math.min(Math.max(start_freq,freq),end_freq);
+}
+
+Spectrum.prototype.cursorUpdate = function(freq) {
+    return;
+}
+
+Spectrum.prototype.cursorUp = function() {
+    this.cursor_freq = this.limitCursor(this.cursor_freq + parseInt(document.getElementById("step").value));
+    this.cursorUpdate(this.cursor_freq);
+}
+
+Spectrum.prototype.cursorDown = function() {
+    this.cursor_freq = this.limitCursor(this.cursor_freq - parseInt(document.getElementById("step").value));
+    this.cursorUpdate(this.cursor_freq);
+}
+
 function Spectrum(id, options) {
     // Handle options
     this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
@@ -587,6 +629,9 @@ function Spectrum(id, options) {
 
     this.autoscale = false;
     this.decay = 1.0;
+    this.cursor_active = false;
+    this.cursor_step = 1000;
+    this.cursor_freq = 16.2e6;
 
     // Trigger first render
     this.setAveraging(this.averaging);

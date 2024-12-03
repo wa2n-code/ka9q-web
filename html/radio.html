@@ -45,6 +45,7 @@
     <td rowspan=2 colspan=2>
     <label for="step">Step:</label> 
     <select name="step" id="step" onchange="step_changed(this.value)"> 
+        <option value="1">1Hz</option>
         <option value="10">10Hz</option> 
         <option value="100">100Hz</option> 
         <option value="250">250Hz</option> 
@@ -137,7 +138,6 @@
       <td rowspan=2 colspan=1>
         <button id="pause" style="width:80px; height:50px" onclick="spectrum.togglePaused()">Pause</button>
       </td>
-
       <td rowspan=2 colspan=2>
         <label for="decay_list">Max hold decay:</label>
         <select id="decay_list" onchange="spectrum.setDecay(this.value)">
@@ -151,7 +151,6 @@
           <option value="1.1">1.1</option>
         </select>
       </td>
-
     </tr>
     <tr>
       <td rowspan=1 colspan=1>
@@ -174,6 +173,8 @@
       <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
     </table>
 
+    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor"/>  <label for="cursor">Activate cursor</label>
+    <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
     <br>
@@ -181,6 +182,20 @@
     <li>Use mouse to click to a frequency.</li>
     <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
     <li>Enter frequency in Hz and hit Return or press <b>Set Frequency</b>.</li>
+    <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
+    <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
+    <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
+    </ul>
+    <ul>
+      If the spectrum display/waterfall is focused, keyboard shortcuts are active:
+      <li>Press space to toggle pause/run mode</li>
+      <li>'f' to toggle fullscreen mode</li>
+      <li>'c' to step through the colormap options</li>
+      <li>up/down arrow shifts the spectrum trace up/down</li>
+      <li>left/right arrow increases/decreases amplitude range</li>
+      <li>'s'/'w' to increase/decrease size of spectrum display</li>
+      <li>'+'/'-' to increase/decrease FFT averaging</li>
+      <li>'m' to toggle max hold mode</li>
     </ul>
     <i>Web Server by John Melton, G0ORX (https://github.com/g0orx/ka9q-radio)</i>
     <br>

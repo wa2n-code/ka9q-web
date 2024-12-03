@@ -2,7 +2,7 @@
 // G0ORX WebSDR using ka9q-radio
 //
 //
-      var ssrc=0;
+      var ssrc;
 
       var band;
 
@@ -306,8 +306,12 @@
       hzPerPixel=span/width;
       f=Math.round((centerHz-(span/2))+(hzPerPixel*e.pageX));
       f=f-(f%increment);
-      document.getElementById("freq").value=f.toString();
-      setFrequency();
+      if (!spectrum.cursor_active) {
+        document.getElementById("freq").value=f.toString();
+        setFrequency();
+      } else {
+        spectrum.cursor_freq = spectrum.limitCursor(Math.round((centerHz - (span / 2)) + (hzPerPixel * e.pageX)));
+      }
     }
 
     var pressed=false;
@@ -345,12 +349,20 @@
 
     function onWheel(e) {
       event.preventDefault();
-      if(e.deltaY<0) {
-        //scroll up
-        incrementFrequency();
+      if (!spectrum.cursor_active) {
+        if(e.deltaY<0) {
+          //scroll up
+          decrementFrequency();
+        } else {
+          // scroll down
+          incrementFrequency();
+        }
       } else {
-        // scroll down
-        decrementFrequency();
+        if(e.deltaY < 0) {
+          spectrum.cursorDown();
+        } else {
+          spectrum.cursorUp();
+        }
       }
     }
 
@@ -478,9 +490,35 @@ function update_stats() {
   document.getElementById('bins').innerHTML = "Bins: " + samples.toString();
   document.getElementById('hz_per_bin').innerHTML = "Bin width: " + spanHz.toString() + " Hz";
   document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
-  document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
+  if (typeof ssrc !== 'undefined') {
+    document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
+  }
+
+  var f = spectrum.cursor_freq;
+  var bin = spectrum.hz_to_bin(f);
+  if ((bin < 0) || (bin >= 1620)) {
+    document.getElementById("cursor_data").innerHTML = "";
+    return;
+  }
+
+  var amp = -120.0;
+  if ((spectrum.averaging > 0) && (typeof spectrum.binsAverage !== 'undefined') && (spectrum.binsAverage.length > 0)) {
+    amp = spectrum.binsAverage[bin];
+  } else {
+    amp = spectrum.bin_copy[bin];
+  }
+
+  f /= 1e6;
+  var s="at bin " + bin.toString() + ", " + f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dB";
+  var max_amp = -120.0;
+  if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
+    max_amp = spectrum.binsMax[bin];
+    s += " (" + max_amp.toFixed(1) + " dB max hold)";
+  }
+
+  document.getElementById("cursor_data").innerHTML = s;
   return;
 
   // newell 12/1/2024, 19:10:56
