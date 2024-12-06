@@ -126,7 +126,7 @@ Spectrum.prototype.drawFilter = function(bins) {
 //  this.ctx.fillStyle = "black";
 }
 
-Spectrum.prototype.drawCursor = function(f, bins, color) {
+Spectrum.prototype.drawCursor = function(f, bins, color, amp) {
     var hz_per_pixel = this.spanHz/bins.length;
 
     // draw vertical line
@@ -134,6 +134,14 @@ Spectrum.prototype.drawCursor = function(f, bins, color) {
     this.ctx.beginPath();
     this.ctx.moveTo(x,0);
     this.ctx.lineTo(x,this.spectrumHeight);
+
+    if (typeof amp !== "undefined") {
+        let dbm_per_line = this.spectrumHeight / (this.max_db - this.min_db);
+        let s = this.spectrumHeight - ((amp - this.min_db) * dbm_per_line);
+        this.ctx.moveTo(x-10,s);
+        this.ctx.lineTo(x+10,s);
+    }
+
     this.ctx.strokeStyle = color;
     this.ctx.stroke();
 }
@@ -188,11 +196,11 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // newell 12/1/2024, 16:08:06
     // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
     // draw pointer
-    this.drawCursor(this.frequency, bins, "#ff0000");
+    this.drawCursor(this.frequency, bins, "#ff0000", bins[this.hz_to_bin(this.frequency)]);
 
     // draw cursor
     if (this.cursor_active)
-        this.drawCursor(this.cursor_freq, bins, "#00ffff");
+        this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
 
     // Draw maxhold
     if (this.maxHold) {
