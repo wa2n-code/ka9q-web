@@ -185,6 +185,15 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // draw filter band
     this.drawFilter(bins);
 
+    // newell 12/1/2024, 16:08:06
+    // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
+    // draw pointer
+    this.drawCursor(this.frequency, bins, "#ff0000");
+
+    // draw cursor
+    if (this.cursor_active)
+        this.drawCursor(this.cursor_freq, bins, "#00ffff");
+
     // Draw maxhold
     if (this.maxHold) {
         this.ctx.fillStyle = "none";
@@ -196,15 +205,6 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // Fill scaled path
     this.ctx.fillStyle = this.gradient;
     this.ctx.fill();
-
-    // newell 12/1/2024, 16:08:06
-    // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
-    // draw pointer
-    this.drawCursor(this.frequency, bins, "#ff0000");
-
-    // draw cursor
-    if (this.cursor_active)
-        this.drawCursor(this.cursor_freq, bins, "#00ffff");
 
     // Restore scale
     this.ctx.restore();
