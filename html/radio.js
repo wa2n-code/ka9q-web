@@ -462,6 +462,30 @@
         }
     }
 
+function level_to_string(f) {
+  let bin = spectrum.hz_to_bin(f);
+  let s = "";
+  if ((bin < 0) || (bin >= 1620)) {
+    return;
+  }
+
+  let amp = -120.0;
+  if ((spectrum.averaging > 0) && (typeof spectrum.binsAverage !== 'undefined') && (spectrum.binsAverage.length > 0)) {
+    amp = spectrum.binsAverage[bin];
+  } else {
+    amp = spectrum.bin_copy[bin];
+  }
+
+  f /= 1e6;
+  s = "bin " + bin.toString() + ", " + f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dB";
+  var max_amp = -120.0;
+  if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
+    max_amp = spectrum.binsMax[bin];
+    s += " (" + max_amp.toFixed(1) + " dB max hold)";
+  }
+  return s;
+}
+
 function update_stats() {
   if (spectrum.paused)
     return;
@@ -495,7 +519,7 @@ function update_stats() {
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
-
+  /*
   var f = spectrum.cursor_freq;
   var bin = spectrum.hz_to_bin(f);
   if ((bin < 0) || (bin >= 1620)) {
@@ -517,8 +541,8 @@ function update_stats() {
     max_amp = spectrum.binsMax[bin];
     s += " (" + max_amp.toFixed(1) + " dB max hold)";
   }
-
-  document.getElementById("cursor_data").innerHTML = s;
+  */
+  document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   return;
 
   // newell 12/1/2024, 19:10:56
