@@ -533,8 +533,8 @@ onion_connection_status home(void *data, onion_request * req,
   sp->ws=ws;
   sp->spectrum_active=true;
   sp->audio_active=false;
-  sp->frequency=16200000;
-  sp->center_frequency=16200000; // mid of 32.4MHz - assuming we are running at 64.8MHz sample rate
+  sp->frequency=10000000;
+  sp->center_frequency=10000000;
   sp->bins=MAX_BINS;
   sp->bin_width=20000; // width of a pixel in hz
   sp->next=NULL;
@@ -655,7 +655,7 @@ int init_control(struct session *sp) {
   uint8_t *bp = cmdbuffer;
   *bp++ = CMD; // Command
 
-  encode_double(&bp,RADIO_FREQUENCY,16200000);
+  encode_double(&bp,RADIO_FREQUENCY,10000000);
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag

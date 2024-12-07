@@ -639,7 +639,7 @@ function Spectrum(id, options) {
     this.decay = 1.0;
     this.cursor_active = false;
     this.cursor_step = 1000;
-    this.cursor_freq = 16.2e6;
+    this.cursor_freq = 10000000;
 
     // Trigger first render
     this.setAveraging(this.averaging);

@@ -8,8 +8,8 @@
 
       var spectrum;
       var spanHz= 20000; // 20000 Hz per bin
-      var centerHz=16200000; // center frequency
-      var frequencyHz=16200000; // tuned frequency
+      var centerHz = 10000000; // center frequency
+      var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
       var samples=1620;
@@ -88,7 +88,7 @@
         // default to 20 Mtr band
         //document.getElementById('20').click()
         spectrum.setFrequency(parseInt(document.getElementById('freq').value));
-        ws.send("M:usb");
+        ws.send("M:am");
       }
 
       function on_ws_close() {
@@ -251,10 +251,10 @@
                ( navigator.msMaxTouchPoints > 0 );
       }
       init = function(){
-        frequencyHz=16200000;
-        centerHz=16200000;
+        frequencyHz = 10000000;
+        centerHz = 10000000;
         spanHz=20000;
-        spectrum = new Spectrum("waterfall",{spectrumPercent: 20});
+        spectrum = new Spectrum("waterfall",{spectrumPercent: 50});
         spectrum.setSpectrumPercent(50);
         spectrum.setFrequency(frequencyHz);
         spectrum.setCenterHz(centerHz);
@@ -263,6 +263,13 @@
         spectrum.setLowHz(lowHz);
         highHz=centerHz+((spanHz*samples)/2);
         spectrum.setHighHz(highHz);
+        spectrum.averaging = 0;
+        spectrum.maxHold = false;
+        spectrum.paused = false;
+        spectrum.colorIndex = 0;
+        spectrum.decay = 1.0;
+        spectrum.cursor_active = false;
+
         //msg=document.getElementById('msg');
         //msg.focus();
         ws=new WebSocket(
@@ -291,8 +298,15 @@
           document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
 //        }
 
-          info = document.getElementById('info');
-
+        info = document.getElementById('info');
+        document.getElementById('freq').value = frequencyHz.toString();
+        document.getElementById('step').value = increment.toString();
+        document.getElementById('mode').value = "am";
+        document.getElementById('colormap').value = spectrum.colorindex.toString();
+        document.getElementById('decay_list').value = spectrum.decay.toString();
+        document.getElementById('cursor').checked = spectrum.cursor_active;
+        document.getElementById('pause').textContent = (spectrum.paused ? "Run" : "Pause");
+        document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
         player.volume(1.00);
       }
 

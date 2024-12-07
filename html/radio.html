@@ -31,7 +31,7 @@
 <!--
     <span id="freq" style="color:green; font-size:40px; border: solid; width: 200px">16200000</span>
 -->
-    <input type="text" id="freq" style="color:green; font-size:40px; border: solid; width: 200px" value="16200000" onchange="setFrequency()"/>
+    <input type="text" id="freq" style="color:green; font-size:40px; border: solid; width: 200px" value="" onchange="setFrequency()"/>
     </td>
     <td rowspan=2 colspan=1>
     <button style="height:50px" onclick="setFrequency()">Set Frequency</button>
@@ -50,7 +50,7 @@
         <option value="100">100Hz</option> 
         <option value="250">250Hz</option> 
         <option value="500">500Hz</option> 
-        <option value="1000" selected>1KHz</option> 
+        <option value="1000">1KHz</option>
         <option value="5000">5KHz</option> 
         <option value="9000">9KHz</option> 
         <option value="10000">10KHz</option> 
@@ -63,7 +63,7 @@
     <select name="mode" id="mode" onchange="setMode(this.value)"> 
         <option value="cwu">CWU</option> 
         <option value="cwl">CWL</option> 
-        <option value="usb" selected>USB</option> 
+        <option value="usb">USB</option>
         <option value="lsb">LSB</option> 
         <option value="am">AM</option> 
         <option value="sam">SAM</option> 
@@ -117,7 +117,7 @@
       <td rowspan=2 colspan=2>
         <label for="colormap">Colormap:</label>
         <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
-          <option value="0" selected>turbo</option>
+          <option value="0">turbo</option>
           <option value="1">fosphorz</option>
           <option value="2">viridis</option>
           <option value="3">inferno</option>
@@ -141,7 +141,7 @@
       <td rowspan=2 colspan=2>
         <label for="decay_list">Max hold decay:</label>
         <select id="decay_list" onchange="spectrum.setDecay(this.value)">
-          <option value="1.0" selected>Infinite</option>
+          <option value="1">Infinite</option>
           <option value="1.0001">1.0001</option>
           <option value="1.0005">1.0005</option>
           <option value="1.001">1.001</option>
