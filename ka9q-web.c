@@ -670,7 +670,7 @@ int init_control(struct session *sp) {
   bp = cmdbuffer;
   *bp++ = CMD; // Command
 
-  encode_double(&bp,RADIO_FREQUENCY,16200000);
+  encode_double(&bp,RADIO_FREQUENCY,10000000);
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1); // Specific SSRC
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
