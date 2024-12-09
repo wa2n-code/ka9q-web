@@ -40,6 +40,8 @@
 #include "radio.h"
 #include "config.h"
 
+const char *webserver_version = "2.18";
+
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
 
@@ -116,6 +118,8 @@ static void *audio_thread(void *arg);
 onion_connection_status home(void *data, onion_request * req,
                                           onion_response * res);
 onion_connection_status status(void *data, onion_request * req,
+                                          onion_response * res);
+onion_connection_status version(void *data, onion_request * req,
                                           onion_response * res);
 
 pthread_mutex_t session_mutex;
@@ -434,7 +438,7 @@ int main(int argc,char **argv) {
 
   pthread_mutex_init(&session_mutex,NULL);
   init_connections(mcast);
-
+  fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   onion *o = onion_new(O_THREADED);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
@@ -442,6 +446,7 @@ int main(int argc,char **argv) {
   onion_handler *pages = onion_handler_export_local_new(dirname);
   onion_handler_add(onion_url_to_handler(urls), pages);
   onion_url_add(urls, "status", status);
+  onion_url_add(urls, "version.json", version);
   onion_url_add(urls, "^$", home);
 
   onion_listen(o);
@@ -493,6 +498,14 @@ onion_connection_status status(void *data, onion_request * req,
     onion_response_write0(res,
         "</body>"
         "</html>");
+    return OCS_PROCESSED;
+}
+
+onion_connection_status version(void *data, onion_request * req,
+                                          onion_response * res) {
+    char text[1024];
+    sprintf(text, "{\"Version\":\"%s\"}", webserver_version);
+    onion_response_write0(res, text);
     return OCS_PROCESSED;
 }
 

@@ -31,7 +31,8 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-
+      const webpage_version = 2.18;
+      var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
         channels: 1,
@@ -308,6 +309,7 @@
         document.getElementById('pause').textContent = (spectrum.paused ? "Run" : "Pause");
         document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
         player.volume(1.00);
+        getVersion();
       }
 
     window.addEventListener('load', init, false);
@@ -533,29 +535,11 @@ function update_stats() {
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
-  /*
-  var f = spectrum.cursor_freq;
-  var bin = spectrum.hz_to_bin(f);
-  if ((bin < 0) || (bin >= 1620)) {
-    document.getElementById("cursor_data").innerHTML = "";
-    return;
-  }
+  document.getElementById('version').innerHTML = "Web: v" + webpage_version.toString();
+  document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
+  if (webpage_version != webserver_version)
+    document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
 
-  var amp = -120.0;
-  if ((spectrum.averaging > 0) && (typeof spectrum.binsAverage !== 'undefined') && (spectrum.binsAverage.length > 0)) {
-    amp = spectrum.binsAverage[bin];
-  } else {
-    amp = spectrum.bin_copy[bin];
-  }
-
-  f /= 1e6;
-  var s="at bin " + bin.toString() + ", " + f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dB";
-  var max_amp = -120.0;
-  if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
-    max_amp = spectrum.binsMax[bin];
-    s += " (" + max_amp.toFixed(1) + " dB max hold)";
-  }
-  */
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   return;
 
@@ -575,4 +559,20 @@ function update_stats() {
   else
     document.getElementById('heading').innerHTML = 'G0ORX Web SDR + ka9q-radio';
   last_poll = blocks_since_last_poll;
+}
+
+async function getVersion() {
+  const url = "version.json";
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Response status: ${response.status}`);
+    }
+
+    const json = await response.json();
+    console.log("Webserver version reply: ", json);
+    webserver_version = json.Version;
+  } catch (error) {
+    console.error(error.message);
+  }
 }
