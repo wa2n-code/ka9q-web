@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.22";
+const char *webserver_version = "2.23";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -62,7 +62,7 @@ struct session {
   pthread_t spectrum_task;
   pthread_mutex_t spectrum_mutex;
   uint32_t center_frequency;
-  uint32_t frequency;
+  uint32_t frequency;           // tuned frequency, in Hz
   uint32_t bin_width;
   float tc;
   int bins;
@@ -292,7 +292,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'F':
       case 'f':
-        sp->frequency=atoll(&tmp[2]);
+        sp->frequency = strtod(&tmp[2],0) * 1000;
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
         int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
         if(sp->frequency<min_f || sp->frequency>max_f) {
@@ -561,7 +561,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->spectrum_active=true;
   sp->audio_active=false;
   sp->frequency=10000000;
-  sp->center_frequency=10000000;
+  sp->center_frequency = 16200000;
   sp->bins=MAX_BINS;
   sp->bin_width=20000; // width of a pixel in hz
   sp->next=NULL;
@@ -724,6 +724,8 @@ void control_set_frequency(struct session *sp,char *str) {
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
     f = fabs(parse_frequency(str,true)); // Handles funky forms like 147m435
+    f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
+    sp->frequency = f;
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag

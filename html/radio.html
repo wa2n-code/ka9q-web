@@ -28,10 +28,10 @@
     <button id="rangeinc" onclick="spectrum.rangeIncrease()">Range +</button>
     </td>
     <td rowspan=2 colspan=2>
-    <input type="text" id="freq" style="color:green; font-size:40px; border: solid; width: 200px" value="" onchange="setFrequency()"/>
+    <input type="text" id="freq" style="color:green; font-size:30px; border: solid; width: 200px" value="" onchange="setFrequency()"/>
     </td>
     <td rowspan=2 colspan=1>
-    <button style="height:50px" onclick="setFrequency()">Set Frequency</button>
+    <button style="height:50px" onclick="setFrequency()">Set Frequency (kHz)</button>
     </td>
     <td rowspan=2 colspan=1>
     <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:80px; height:50px">  Freq -  </button>
@@ -179,7 +179,7 @@
     <ul>
     <li>Use mouse to click to a frequency.</li>
     <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
-    <li>Enter frequency in Hz and hit Return or press <b>Set Frequency</b>.</li>
+    <li>Enter frequency in kHz and hit Return or press <b>Set Frequency (kHz)</b>.</li>
     <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
     <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
     <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>

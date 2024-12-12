@@ -31,7 +31,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.22";
+      const webpage_version = "2.23";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -88,7 +88,7 @@
         ws.send("S:");
         // default to 20 Mtr band
         //document.getElementById('20').click()
-        spectrum.setFrequency(parseInt(document.getElementById('freq').value));
+        spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         ws.send("M:am");
       }
 
@@ -156,7 +156,7 @@
               if(frequencyHz!=hz) {
                 frequencyHz=hz;
                 spectrum.setFrequency(frequencyHz);
-                document.getElementById("freq").value=frequencyHz.toString();
+                document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
                 update=1;
               }
 
@@ -308,7 +308,7 @@
 //        }
 
         info = document.getElementById('info');
-        document.getElementById('freq').value = frequencyHz.toString();
+        document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
         document.getElementById('step').value = increment.toString();
         document.getElementById('mode').value = "am";
         document.getElementById('colormap').value = spectrum.colorindex.toString();
@@ -331,7 +331,7 @@
       f=Math.round((centerHz-(span/2))+(hzPerPixel*e.pageX));
       f=f-(f%increment);
       if (!spectrum.cursor_active) {
-        document.getElementById("freq").value=f.toString();
+        document.getElementById("freq").value = (f / 1000.0).toFixed(3);
         setFrequency();
       } else {
         spectrum.cursor_freq = spectrum.limitCursor(Math.round((centerHz - (span / 2)) + (hzPerPixel * e.pageX)));
@@ -352,7 +352,7 @@
         hzPerPixel=spanHz/width;
         f=Math.round((centerHz-(spanHz/2))+(hzPerPixel*e.pageX));
         f=f-(f%increment);
-        document.getElementById("freq").value=f.toString();
+        document.getElementById("freq").value = (f / 1000.0).toFixed(3);
         setFrequency();
       }
       pressed=false;
@@ -399,25 +399,23 @@
 
     function incrementFrequency()
     {
-        var value = parseInt(document.getElementById('freq').value, 10);
-        value = isNaN(value) ? 0 : value;
-        value = value + increment;
-        document.getElementById('freq').value = value;
-        ws.send("F:"+document.getElementById('freq').value);
+        var value = parseFloat(document.getElementById('freq').value,10);
+        value = isNaN(value) ? 0 : (value * 1000.0) + increment;
+        document.getElementById("freq").value = (value / 1000.0).toFixed(3);
+        ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(parseInt(document.getElementById('freq').value));
+        spectrum.setFrequency(value);
     }
     function decrementFrequency()
     {
-        var value = parseInt(document.getElementById('freq').value, 10);
-        value = isNaN(value) ? 0 : value;
-        value = value - increment;
-        document.getElementById('freq').value = value;
-        ws.send("F:"+document.getElementById('freq').value);
+        var value = parseFloat(document.getElementById('freq').value,10);
+        value = isNaN(value) ? 0 : (value * 1000.0) - increment;
+        document.getElementById("freq").value = (value / 1000.0).toFixed(3);
+        ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(parseInt(document.getElementById('freq').value));
+        spectrum.setFrequency(value);
     }
     function startIncrement() {
         incrementFrequency();
@@ -435,16 +433,17 @@
     }
     function setFrequency()
     {
-        ws.send("F:"+document.getElementById('freq').value);
+        let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
+        ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(parseInt(document.getElementById('freq').value));
+        spectrum.setFrequency(f);
     }
     function setBand(freq) {
         f=parseInt(freq);
-        document.getElementById('freq').value = freq;
+        document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         //ws.send("B:"+freq);
-        ws.send("F:"+freq);
+        ws.send("F:" + (freq / 1000).toFixed(3));
         spectrum.setFrequency(f);
     }
     function setMode(selected_mode) {
