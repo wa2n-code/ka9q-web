@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.21";
+const char *webserver_version = "2.22";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -127,6 +127,8 @@ onion_connection_status version(void *data, onion_request * req,
 pthread_mutex_t session_mutex;
 static int nsessions=0;
 static struct session *sessions=NULL;
+
+char const *description_override=0;
 
 void add_session(struct session *sp) {
   pthread_mutex_lock(&session_mutex);
@@ -421,11 +423,10 @@ int main(int argc,char **argv) {
   char const *port="8081";
   char const *dirname=xstr(RESOURCES_BASE_DIR) "/html";
   char const *mcast="hf.local";
-
   App_path=argv[0];
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:h")) != -1){
+    while((c = getopt(argc,argv,"d:p:m:hn:")) != -1){
       switch(c) {
         case 'd':
           dirname=optarg;
@@ -436,10 +437,13 @@ int main(int argc,char **argv) {
         case 'm':
           mcast=optarg;
           break;
+        case 'n':
+          description_override=optarg;
+          break;
         case 'h':
         default:
           fprintf(stderr,"Usage: %s\n",App_path);
-          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address]\n",App_path);
+          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address] [-n radio description]\n",App_path);
           exit(EX_USAGE);
           break;
       }
@@ -1052,7 +1056,10 @@ void *ctrl_thread(void *arg) {
 	  encode_float(&bp,HIGH_EDGE,Channel.filter.max_IF);
           if (!sp->once) {
             sp->once = true;
-            encode_string(&bp,DESCRIPTION,Frontend.description,strlen(Frontend.description));
+            if (description_override)
+              encode_string(&bp,DESCRIPTION,description_override,strlen(description_override));
+            else
+              encode_string(&bp,DESCRIPTION,Frontend.description,strlen(Frontend.description));
           }
 	  pthread_mutex_lock(&sp->ws_mutex);
 	  onion_websocket_set_opcode(sp->ws,OWS_BINARY);

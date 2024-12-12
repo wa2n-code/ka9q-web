@@ -31,7 +31,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = 2.21;
+      const webpage_version = "2.22";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -543,7 +543,7 @@ function update_stats() {
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
-  document.getElementById('version').innerHTML = "Web: v" + webpage_version.toString();
+  document.getElementById('version').innerHTML = "Web: v" + webpage_version;
   document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
   if (webpage_version != webserver_version)
     document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
