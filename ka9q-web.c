@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.20";
+const char *webserver_version = "2.21";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -67,8 +67,10 @@ struct session {
   float tc;
   int bins;
   char description[128];
+  char client[128];
   struct session *next;
   struct session *previous;
+  bool once;
 };
 
 #define START_SESSION_ID 1000
@@ -496,7 +498,7 @@ onion_connection_status status(void *data, onion_request * req,
       while(sp!=NULL) {
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
         int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        sprintf(text,"<tr><td>%s</td><td>%d</td><td>%d to %d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>",sp->description,sp->ssrc,min_f,max_f,sp->frequency,sp->center_frequency,sp->bins,sp->bin_width,sp->audio_active?"Enabled":"Disabled");
+        sprintf(text,"<tr><td>%s</td><td>%d</td><td>%d to %d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>",sp->client,sp->ssrc,min_f,max_f,sp->frequency,sp->center_frequency,sp->bins,sp->bin_width,sp->audio_active?"Enabled":"Disabled");
         onion_response_write0(res, text);
         sp=sp->next;
       }
@@ -560,7 +562,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->bin_width=20000; // width of a pixel in hz
   sp->next=NULL;
   sp->previous=NULL;
-  strlcpy(sp->description,onion_request_get_client_description(req),sizeof(sp->description));
+  strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
   add_session(sp);
@@ -1048,6 +1050,10 @@ void *ctrl_thread(void *arg) {
 	  encode_float(&bp,BASEBAND_POWER,Channel.sig.bb_power);
 	  encode_float(&bp,LOW_EDGE,Channel.filter.min_IF);
 	  encode_float(&bp,HIGH_EDGE,Channel.filter.max_IF);
+          if (!sp->once) {
+            sp->once = true;
+            encode_string(&bp,DESCRIPTION,Frontend.description,strlen(Frontend.description));
+          }
 	  pthread_mutex_lock(&sp->ws_mutex);
 	  onion_websocket_set_opcode(sp->ws,OWS_BINARY);
 	  int size=(uint8_t*)bp-&output_buffer[0];

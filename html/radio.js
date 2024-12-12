@@ -31,7 +31,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = 2.20;
+      const webpage_version = 2.21;
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -205,7 +205,15 @@
                 var v=view.getInt8(i++);
                 var l=view.getInt8(i++);
                 switch(v) {
-                  case 39: // LOW_EDGE
+                case 4: // DESCRIPTION
+                  dataBuffer = evt.data.slice(i,i+l);
+                  let d = new Uint8Array(dataBuffer);
+                  let enc = new TextDecoder("utf-8");
+                  document.getElementById('heading').innerHTML = enc.decode(d);
+                  document.title = enc.decode(d);
+                  i=i+l;
+                  break;
+                case 39: // LOW_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
                     arr_low = new Float32Array(dataBuffer);
                     filter_low=ntohf(arr_low[0]);
