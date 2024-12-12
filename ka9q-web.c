@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.18";
+const char *webserver_version = "2.19";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -215,10 +215,10 @@ static void check_frequency(struct session *sp) {
     min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
     max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
   }
-  if(min_f<0) {
-    sp->center_frequency=(sp->bin_width*sp->bins)/2;
-  } else if(max_f>32400000) {
-    sp->center_frequency=32400000-(sp->bin_width*sp->bins)/2;
+  if (min_f < 0) {
+    sp->center_frequency = (sp->bin_width * sp->bins) / 2;
+  } else if (max_f > (Frontend.samprate / 2)) {
+    sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
   }
 }
 
@@ -298,8 +298,8 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         }
         if(min_f<0) {
           sp->center_frequency=(sp->bin_width*sp->bins)/2;
-        } else if(max_f>32400000) {
-          sp->center_frequency=32400000-(sp->bin_width*sp->bins)/2;
+        } else if (max_f > (Frontend.samprate / 2)) {
+          sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
         }
         control_set_frequency(sp,&tmp[2]);
         break;
@@ -436,9 +436,9 @@ int main(int argc,char **argv) {
     }
   }
 
+  fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   pthread_mutex_init(&session_mutex,NULL);
   init_connections(mcast);
-  fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   onion *o = onion_new(O_THREADED);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
@@ -841,6 +841,9 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       if(l_count > npower)
         return -2; // Not enough room in caller's array
       // Note these are still in FFT order
+      int64_t N = (Frontend.L + Frontend.M - 1);
+      if (0 == N)
+         break;
       for(int i=0; i < l_count; i++){
         power[i] = decode_float(cp,sizeof(float));
 
@@ -849,7 +852,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
         // Guessing that the bins need to be scaled by 1/N
         // And maybe by 32768 to account for the RX888 16 bit ADC?
         // Open to corrections/advice on this!
-        power[i] /= (1.62e6*32768);
+        power[i] /= (32768.0 * N);
         cp += sizeof(float);
       }
       break;
