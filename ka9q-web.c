@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.19";
+const char *webserver_version = "2.20";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -314,6 +314,9 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         if(strcmp(token,"+")==0) {
           pthread_mutex_lock(&sp->spectrum_mutex);
           switch(sp->bin_width)  {
+            case 40000:
+              sp->bin_width=20000;
+              break;
             case 20000:
               sp->bin_width=16000;
               break;
@@ -351,6 +354,11 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         } else if(strcmp(token,"-")==0) {
           pthread_mutex_lock(&sp->spectrum_mutex);
           switch(sp->bin_width)  {
+            case 20000:
+              // don't zoom out unless running at full rate
+              if (Frontend.samprate > 64800000)
+                sp->bin_width=40000;
+              break;
             case 16000:
               sp->bin_width=20000;
               break;
