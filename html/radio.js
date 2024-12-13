@@ -31,7 +31,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.25";
+      const webpage_version = "2.26";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -442,11 +442,16 @@
     function setBand(freq) {
         f=parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
-        //ws.send("B:"+freq);
-        ws.send("F:" + (freq / 1000).toFixed(3));
         spectrum.setFrequency(f);
+        if (f < 10000000) {
+          setMode('lsb');
+        } else {
+          setMode('usb');
+        }
+        ws.send("F:" + (freq / 1000).toFixed(3));
     }
     function setMode(selected_mode) {
+        document.getElementById('mode').value = selected_mode;
         ws.send("M:"+selected_mode);
     }
     function selectMode(mode) {
