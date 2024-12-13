@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.24";
+const char *webserver_version = "2.25";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -399,6 +399,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           check_frequency(sp);
         } else if(strcmp(token,"c")==0) {
           sp->center_frequency=sp->frequency;
+          check_frequency(sp);
         } else {
           int width=atoi(&tmp[2]);
           if(width!=0) {
