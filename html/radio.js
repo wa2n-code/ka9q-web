@@ -31,7 +31,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.26";
+      const webpage_version = "2.27";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -227,6 +227,7 @@
                     break;
                   case 46: // BASEBAND_POWER
                     power=view.getFloat32(i);
+                    power = 10.0 * Math.log10(power);
                     i=i+l;
                     break;
                 }
@@ -544,6 +545,7 @@ function update_stats() {
   document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
+  document.getElementById('baseband_power').innerHTML = "Baseband: " + power.toFixed(1) + " dBm";
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }

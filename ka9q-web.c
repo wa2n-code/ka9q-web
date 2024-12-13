@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.26";
+const char *webserver_version = "2.27";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -71,6 +71,8 @@ struct session {
   struct session *next;
   struct session *previous;
   bool once;
+  float if_power;
+  float noise_density;
 };
 
 #define START_SESSION_ID 1000
@@ -81,7 +83,7 @@ extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
-int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length);
+int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp);
 void control_poll(struct session *sp);
 void *spectrum_thread(void *arg);
 void *ctrl_thread(void *arg);
@@ -96,7 +98,6 @@ static int const DEFAULT_IP_TOS = 48;
 static int const DEFAULT_MCAST_TTL = 1;
 
 uint64_t Metadata_packets;
-uint32_t Ssrc = 1000;
 struct channel Channel;
 uint64_t Block_drops;
 int Mcast_ttl = DEFAULT_MCAST_TTL;
@@ -104,8 +105,6 @@ int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
-float if_power;
-float noise_density;
 
 #define MAX_BINS 1620
 
@@ -797,7 +796,7 @@ void control_poll(struct session *sp) {
   pthread_mutex_unlock(&ctl_mutex);
 }
 
-int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length){
+int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp){
 #if 0  // use later
   double l_lo1 = 0,l_lo2 = 0;
 #endif
@@ -881,10 +880,10 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       // I expected decode_radio_status() to handle this and NOISE_DENSITY, but
       // the values never seemed to be live. Maybe they're part of the channel
       // instead? This seems to work for now at least.
-      if_power = decode_float(cp,optlen);
+      sp->if_power = decode_float(cp,optlen);
       break;
     case NOISE_DENSITY:
-      noise_density = decode_float(cp,optlen);
+      sp->noise_density = decode_float(cp,optlen);
       break;
     case BIN_COUNT: // Do we check that this equals the length of the BIN_DATA tlv?
       l_ccount = decode_int(cp,optlen);
@@ -921,6 +920,7 @@ void *spectrum_thread(void *arg) {
     pthread_mutex_lock(&sp->spectrum_mutex);
     control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
     pthread_mutex_unlock(&sp->spectrum_mutex);
+    control_poll(sp);
     if(usleep(100000) !=0) {
       perror("spectrum_thread: usleep(100000)");
     }
@@ -999,12 +999,12 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&Frontend.rf_atten,4); ip++;
           memcpy((void*)ip,&Frontend.rf_gain,4); ip++;
           memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
-          memcpy((void*)ip,&if_power,4); ip++;
-          memcpy((void*)ip,&noise_density,4); ip++;
+          memcpy((void*)ip,&sp->if_power,4); ip++;
+          memcpy((void*)ip,&sp->noise_density,4); ip++;
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);
-	  int npower = extract_powers(powers,length, &time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,length-1);
+	  int npower = extract_powers(powers,length, &time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,length-1,sp);
 	  if(npower < 0){
 	    pthread_mutex_unlock(&session_mutex);
 	    continue; // Invalid for some reason
