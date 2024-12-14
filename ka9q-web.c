@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.30";
+const char *webserver_version = "2.31";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -106,6 +106,7 @@ int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
+int verbose = 0;
 
 #define MAX_BINS 1620
 
@@ -401,7 +402,7 @@ int main(int argc,char **argv) {
   App_path=argv[0];
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:hn:")) != -1){
+    while((c = getopt(argc,argv,"d:p:m:hn:v")) != -1){
       switch(c) {
         case 'd':
           dirname=optarg;
@@ -414,6 +415,9 @@ int main(int argc,char **argv) {
           break;
         case 'n':
           description_override=optarg;
+          break;
+        case 'v':
+          ++verbose;
           break;
         case 'h':
         default:
@@ -778,7 +782,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
 #endif
   int l_ccount = 0;
   uint8_t const *cp = buffer;
-  int l_count;
+  int l_count=1234567;
 
 //fprintf(stderr,"%s: length=%d\n",__FUNCTION__,length);
   while(cp - buffer < length){
@@ -870,9 +874,24 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
     cp += optlen;
   }
  done:
-  ;
-//fprintf(stderr,"%s: l_ccount=%d l_count=%d\n",__FUNCTION__,l_ccount,l_count);
-  //assert(l_ccount == l_count);
+
+  if (l_count != l_ccount) {
+    // not the expected number of bins...not sure why, but avoid crashing for now
+    if (verbose) {
+      fprintf(stderr,"BIN_COUNT error on ssrc %d BIN_DATA had %d bins, but BIN_COUNT was %d, packet length %d bytes\n",ssrc,l_count,l_ccount,length);
+      fflush(stderr);
+    }
+    return 0;
+  }
+
+  if (l_count > MAX_BINS) {
+    if (verbose) {
+      // not the expected number of bins...not sure why, but avoid crashing for now
+      fprintf(stderr,"BIN_DATA on ssrc %d shows %d bins, BIN_COUNT was %d, but MAX_BINS is %d\n",ssrc,l_count,l_ccount,MAX_BINS);
+      fflush(stderr);
+    }
+    return 0;
+  }
   return l_ccount;
 }
 
