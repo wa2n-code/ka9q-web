@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.29";
+      const webpage_version = "2.30";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -570,7 +570,7 @@ function update_stats() {
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
   return;
-
+  /*
   // newell 12/1/2024, 19:10:56
   // hack to change the title when the block since last poll is changing
   // Could this be connected to the vertical 'bouncing' that is sometimes
@@ -587,6 +587,7 @@ function update_stats() {
   else
     document.getElementById('heading').innerHTML = 'G0ORX Web SDR + ka9q-radio';
   last_poll = blocks_since_last_poll;
+  */
 }
 
 async function getVersion() {
@@ -644,6 +645,7 @@ function dumpCSV() {
     ["waterfall_width", document.getElementById('waterfall').width],
     ["filter_low", filter_low],
     ["filter_high", filter_high],
+    ["notes", `"${document.getElementById('note_text').value}"`],
   ];
 
   var csvContent = "data:text/csv;charset=utf-8,"
