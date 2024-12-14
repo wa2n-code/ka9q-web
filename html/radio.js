@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.28";
+      const webpage_version = "2.29";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -603,4 +603,66 @@ async function getVersion() {
   } catch (error) {
     console.error(error.message);
   }
+}
+
+function dumpCSV() {
+  var t = Number(gps_time) / 1e9;
+  t += 315964800;
+  t -= 18;
+  var smp = Number(input_samples) / Number(input_samprate);
+  var data = [
+    ["description", `"${document.title}"`],
+    ["gps_time", (new Date(t * 1000)).toTimeString()],
+    ["adc_samples", (Number(input_samples)).toFixed(0)],
+    ["adc_samp_rate", (input_samprate).toFixed(0)],
+    ["adc_overs", ad_over.toString()],
+    ["adc_last_over", (samples_since_over / BigInt(input_samprate)).toString()],
+    ["uptime", smp.toFixed(1)],
+    ["rf_gain", rf_gain.toFixed(1)],
+    ["rf_attn", rf_atten.toFixed(1)],
+    ["rf_cal", rf_level_cal.toFixed(1)],
+    ["rf_agc", rf_agc==1],
+    ["if_power", if_power.toFixed(1)],
+    ["noise_density", noise_density.toFixed(2)],
+    ["bins", binCount],
+    ["bin_width", binWidthHz],
+    ["blocks", blocks_since_last_poll.toString()],
+    ["fft_avg", spectrum.averaging.toString()],
+    ["decay", spectrum.decay.toString()],
+    ["baseband_power", power.toFixed(1)],
+    ["ssrc", ssrc.toString()],
+    ["version", webpage_version],
+    ["webserver_version", webserver_version.toString()],
+    ["tune_hz", spectrum.frequency],
+    ["tune_level", `"${level_to_string(spectrum.frequency)}"`],
+    ["cursor_hz", spectrum.cursor_freq],
+    ["cursor_level", `"${level_to_string(spectrum.cursor_freq)}"`],
+    ["start_hz", lowHz],
+    ["stop_hz", highHz],
+    ["span_hz", spanHz],
+    ["center_hz", centerHz],
+    ["waterfall_width", document.getElementById('waterfall').width],
+    ["filter_low", filter_low],
+    ["filter_high", filter_high],
+  ];
+
+  var csvContent = "data:text/csv;charset=utf-8,"
+      + data.map(row => row.join(",")).join("\n");
+
+  csvContent += "\n\nBin, Amplitude (dB?), Average (dB?), Max hold (dB?)\n";
+  for(let i = 0; i < binCount; i++) {
+    let b = (typeof spectrum.bin_copy !== 'undefined') ? spectrum.bin_copy[i].toFixed(3) : "";
+    let a = (typeof spectrum.binsAverage !== 'undefined') ? spectrum.binsAverage[i].toFixed(3) : "";
+    let m = (typeof spectrum.binsMax !== 'undefined') ? spectrum.binsMax[i].toFixed(3) : "";
+    csvContent += `${i}, ${b}, ${a}, ${m}\n`;
+  }
+  const d = new Date();
+  const timestring = d.toISOString();
+
+  var encodedUri = encodeURI(csvContent);
+  var link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", `info_${timestring}.csv`);
+  document.body.appendChild(link);
+  link.click();
 }
