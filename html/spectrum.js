@@ -25,9 +25,7 @@ Spectrum.prototype.squeeze = function(value, out_min, out_max) {
 }
 
 Spectrum.prototype.rowToImageData = function(bins) {
-    // newell 12/1/2024, 12:02:10
-    // Why the 4? I think it's decimating the FFT by 4 for the waterfall?
-    for(var i=0;i<this.imagedata.data.length;i+=4) {
+    for(var i = 0; i < this.imagedata.data.length; i += 4) {
         try {
             //var cindex = this.squeeze(-(bins[i/4]-70), 0, 255);
 
@@ -237,7 +235,7 @@ Spectrum.prototype.updateAxes = function() {
     this.ctx_axes.textBaseline = "middle";
 
     this.ctx_axes.textAlign = "left";
-    var step = 20;
+    var step = 10;
     for (var i = this.min_db + 10; i <= this.max_db - 10; i += step) {
         var y = height - this.squeeze(i, 0, height);
         this.ctx_axes.fillText(i, 5, y);
@@ -252,7 +250,7 @@ Spectrum.prototype.updateAxes = function() {
     //this.ctx_axes.textBaseline = "bottom";
     this.ctx_axes.textBaseline = "top";
 
-    var inc;
+    let inc;
     switch(this.spanHz/this.nbins) {
         case 40:
           inc=5000;
@@ -288,15 +286,14 @@ Spectrum.prototype.updateAxes = function() {
           inc=2000000;
           break;
         default:
-          inc=2000000;
+          inc = (this.spanHz / this.nbins) * 100;
           break;
     }
-
+    inc = isNaN(inc) ? 2000000 : inc;
 
     var freq=this.start_freq-(this.start_freq%inc);
     var text;
     while(freq<=this.highHz) {
-//console.log("freq="+String(freq)+" span="+String(this.spanHz)+" s="+String(this.spanHz/1024));
         this.ctx_axes.textAlign = "center";
         var x = (freq-this.start_freq)/hz_per_pixel;
         text = freq / 1e6;
@@ -554,17 +551,17 @@ Spectrum.prototype.onKeypress = function(e) {
 }
 
 Spectrum.prototype.pixel_to_bin = function(pixel) {
-    return Math.floor((pixel / this.canvas.width) * 1620);
+    return Math.floor((pixel / this.canvas.width) * this.bins);
 }
 
 Spectrum.prototype.bin_to_hz = function(bin) {
     var start_freq = this.centerHz - (this.spanHz / 2.0);
-    return start_freq + ((this.spanHz / 1620) * bin);
+    return start_freq + ((this.spanHz / this.bins) * bin);
 }
 
 Spectrum.prototype.hz_to_bin = function(hz) {
     var start_freq = this.centerHz - (this.spanHz / 2.0);
-    return Math.floor(((hz - start_freq) / (this.spanHz)) * 1620);
+    return Math.floor(((hz - start_freq) / (this.spanHz)) * this.bins);
 }
 
 Spectrum.prototype.cursorCheck = function() {
@@ -601,6 +598,7 @@ function Spectrum(id, options) {
     this.spectrumPercentStep = (options && options.spectrumPercentStep) ? options.spectrumPercentStep : 5;
     this.averaging = (options && options.averaging) ? options.averaging : 0;
     this.maxHold = (options && options.maxHold) ? options.maxHold : false;
+    this.bins = (options && options.bins) ? options.bins : false;
 
     // Setup state
     this.paused = false;

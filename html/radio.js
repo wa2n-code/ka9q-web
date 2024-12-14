@@ -7,12 +7,13 @@
       var band;
 
       var spectrum;
-      var spanHz= 20000; // 20000 Hz per bin
+      let binWidthHz = 20000; // 20000 Hz per bin
       var centerHz = 10000000; // center frequency
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
-      var samples=1620;
+      let binCount = 1620;
+      let spanHz = binCount * binWidthHz;
 
       var filter_low = 50;
       var filter_high = 3000;
@@ -31,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.27";
+      const webpage_version = "2.28";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -82,6 +83,12 @@
 
         return result;
       }
+
+function calcFrequencies() {
+  lowHz = centerHz - ((binWidthHz * binCount) / 2);
+  highHz = centerHz + ((binWidthHz * binCount) / 2);
+  spanHz = binCount * binWidthHz;
+}
 
       function on_ws_open() {
         // get the SSRC
@@ -141,6 +148,11 @@
           var update=0;
           switch(type) {
             case 0x7F: // SPECTRUM DATA
+            const newBinCount = view.getUint32(i, false); i += 4;
+            if (binCount != newBinCount) {
+              binCount = newBinCount;
+              update = 1;
+            }
               n = view.getUint32(i);
               i=i+4;
               var hz = ntohl(n);
@@ -163,16 +175,16 @@
               n = view.getUint32(i);
               i=i+4;
               hz = ntohl(n);;
-              if(spanHz!=hz) {
-                spanHz=hz;
-                spectrum.setSpanHz(spanHz*samples);
-                update=1;
+              if(binWidthHz != hz) {
+                binWidthHz = hz;
+                spectrum.setSpanHz(binWidthHz * binCount);
+                update = 1;
               }
 
             // newell 12/1/2024, 19:18:05
             // Turns out javascript can do big endian!
             // What a pleasant and unexpected surprise!
-            // might want to refactor centerHz, frequencyHz, and spanHz, too
+            // might want to refactor centerHz, frequencyHz, and binWidthHz, too
             input_samprate = view.getUint32(i,true); i+=4;
             rf_agc = view.getUint32(i,true); i+=4;
             input_samples = view.getBigUint64(i,true); i+=8;
@@ -187,14 +199,14 @@
             noise_density = view.getFloat32(i,true); i+=4;
 
             if(update) {
-                lowHz=centerHz-((spanHz*samples)/2);
-                spectrum.setLowHz(lowHz);
-                highHz=centerHz+((spanHz*samples)/2);
-                spectrum.setHighHz(highHz);
-                info = document.getElementById('info');
-              }
-
-//console.log("center="+String(centerHz)+" freq="+String(frequencyHz)+" span="+String(spanHz)+" low="+String(lowHz)+" high="+String(highHz));
+              calcFrequencies();
+              spectrum.setLowHz(lowHz);
+              spectrum.setHighHz(highHz);
+              spectrum.setCenterHz(centerHz);
+              spectrum.setFrequency(frequencyHz);
+              spectrum.setSpanHz(binWidthHz * binCount);
+              spectrum.bins = binCount;
+            }
               var dataBuffer = evt.data.slice(i,data.byteLength);
               const arr = new Float32Array(dataBuffer);
               spectrum.addData(arr);
@@ -263,15 +275,15 @@
       init = function(){
         frequencyHz = 10000000;
         centerHz = 10000000;
-        spanHz=20000;
-        spectrum = new Spectrum("waterfall",{spectrumPercent: 50});
+        binWidthHz = 20000;
+        spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         spectrum.setSpectrumPercent(50);
         spectrum.setFrequency(frequencyHz);
         spectrum.setCenterHz(centerHz);
-        spectrum.setSpanHz(spanHz*samples);
-        lowHz=centerHz-((spanHz*samples)/2);
+        spectrum.setSpanHz(binWidthHz * binCount);
+        lowHz = centerHz - ((binWidthHz * binCount) / 2);
         spectrum.setLowHz(lowHz);
-        highHz=centerHz+((spanHz*samples)/2);
+        highHz = centerHz + ((binWidthHz * binCount) / 2);
         spectrum.setHighHz(highHz);
         spectrum.averaging = 0;
         spectrum.maxHold = false;
@@ -279,6 +291,7 @@
         spectrum.colorIndex = 0;
         spectrum.decay = 1.0;
         spectrum.cursor_active = false;
+        spectrum.bins = binCount;
 
         //msg=document.getElementById('msg');
         //msg.focus();
@@ -308,7 +321,6 @@
           document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
 //        }
 
-        info = document.getElementById('info');
         document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
         document.getElementById('step').value = increment.toString();
         document.getElementById('mode').value = "am";
@@ -326,7 +338,7 @@
     var increment=1000;
 
     function onClick(e) {
-      var span=spanHz*samples;
+      var span = binWidthHz * binCount;
       width=document.getElementById('waterfall').width;
       hzPerPixel=span/width;
       f=Math.round((centerHz-(span/2))+(hzPerPixel*e.pageX));
@@ -350,8 +362,8 @@
     function onMouseUp(e) {
       if(!moved) {
         width=document.getElementById('waterfall').width;
-        hzPerPixel=spanHz/width;
-        f=Math.round((centerHz-(spanHz/2))+(hzPerPixel*e.pageX));
+        hzPerPixel = binWidthHz / width;
+        f=Math.round((centerHz - (binWidthHz / 2)) + (hzPerPixel * e.pageX));
         f=f-(f%increment);
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
         setFrequency();
@@ -494,7 +506,7 @@
 function level_to_string(f) {
   let bin = spectrum.hz_to_bin(f);
   let s = "";
-  if ((bin < 0) || (bin >= 1620)) {
+  if ((bin < 0) || (bin >= binCount)) {
     return;
   }
 
@@ -540,8 +552,9 @@ function update_stats() {
   document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
   document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(2) + " dBmJ";
-  document.getElementById('bins').innerHTML = "Bins: " + samples.toString();
-  document.getElementById('hz_per_bin').innerHTML = "Bin width: " + spanHz.toString() + " Hz";
+  document.getElementById('bins').textContent = `Bins: ${binCount}`;
+  //document.getElementById('hz_per_bin').textContent = "Bin width: " + binWidthHz.toString() + " Hz";
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
   document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
@@ -555,6 +568,7 @@ function update_stats() {
     document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
 
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
+  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
   return;
 
   // newell 12/1/2024, 19:10:56

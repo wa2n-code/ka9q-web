@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.27";
+const char *webserver_version = "2.28";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -73,6 +73,7 @@ struct session {
   bool once;
   float if_power;
   float noise_density;
+  int zoom_index;
 };
 
 #define START_SESSION_ID 1000
@@ -225,6 +226,52 @@ static void check_frequency(struct session *sp) {
   }
 }
 
+struct zoom_table_t {
+  int bin_width;
+  int bin_count;
+};
+
+const struct zoom_table_t zoom_table[] = {
+  {40000, 1620},
+  {20000, 1620},
+  {16000, 1620},
+  {8000, 1620},
+  {4000, 1620},
+  {2000, 1620},
+  {1000, 1620},
+  {800, 1620},
+  {400, 1620},
+  {200, 1620},
+  {100, 1620},
+  {80, 1620},
+  {40, 1620},
+  {40, 1200},
+  {40, 800},
+  {40, 600},
+  {40, 400},
+  {40, 300},
+  {40, 200},
+  {40, 150},
+  {40, 100},
+  {40, 75},
+  {40, 50},
+};
+
+static void zoom(struct session *sp, int shift) {
+  const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+  sp->zoom_index += shift;
+  if (sp->zoom_index >= table_size)
+    sp->zoom_index = table_size-1;
+
+  if (sp->zoom_index < 0)
+    sp->zoom_index = 0;
+
+  if ((Frontend.samprate <= 64800000) && (sp->zoom_index <= 0))
+    sp->zoom_index=1;
+  sp->bin_width = zoom_table[sp->zoom_index].bin_width;
+  sp->bins = zoom_table[sp->zoom_index].bin_count;
+}
+
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len) {
   struct session *sp=find_session_from_websocket(ws);
@@ -316,85 +363,13 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         token=strtok(NULL,":");
         if(strcmp(token,"+")==0) {
           pthread_mutex_lock(&sp->spectrum_mutex);
-          switch(sp->bin_width)  {
-            case 40000:
-              sp->bin_width=20000;
-              break;
-            case 20000:
-              sp->bin_width=16000;
-              break;
-            case 16000:
-              sp->bin_width=8000;
-              break;
-            case 8000:
-              sp->bin_width=4000;
-              break;
-            case 4000:
-              sp->bin_width=2000;
-              break;
-            case 2000:
-              sp->bin_width=1000;
-              break;
-            case 1000:
-              sp->bin_width=800;
-              break;
-            case 800:
-              sp->bin_width=400;
-              break;
-            case 400:
-              sp->bin_width=200;
-              break;
-            case 200:
-              sp->bin_width=80;
-              break;
-            case 80:
-              sp->bin_width=40;
-              break;
-          }
+          zoom(sp,1);
           pthread_mutex_unlock(&sp->spectrum_mutex);
-//fprintf(stderr,"%s: bins=%d bin_width=%d\n",__FUNCTION__,sp->bins,sp->bin_width);
           check_frequency(sp);
         } else if(strcmp(token,"-")==0) {
           pthread_mutex_lock(&sp->spectrum_mutex);
-          switch(sp->bin_width)  {
-            case 20000:
-              // don't zoom out unless running at full rate
-              if (Frontend.samprate > 64800000)
-                sp->bin_width=40000;
-              break;
-            case 16000:
-              sp->bin_width=20000;
-              break;
-            case 8000:
-              sp->bin_width=16000;
-              break;
-            case 4000:
-              sp->bin_width=8000;
-              break;
-            case 2000:
-              sp->bin_width=4000;
-              break;
-            case 1000:
-              sp->bin_width=2000;
-              break;
-            case 800:
-              sp->bin_width=1000;
-              break;
-            case 400:
-              sp->bin_width=800;
-              break;
-            case 200:
-              sp->bin_width=400;
-              break;
-            case 80:
-              sp->bin_width=200;
-              break;
-            case 40:
-              sp->bin_width=80;
-              break;
-          }
+          zoom(sp,-1);
           pthread_mutex_unlock(&sp->spectrum_mutex);
-//fprintf(stderr,"%s: bins=%d bin_width=%d\n",__FUNCTION__,sp->bins,sp->bin_width);
           check_frequency(sp);
         } else if(strcmp(token,"c")==0) {
           sp->center_frequency=sp->frequency;
@@ -566,6 +541,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->bin_width=20000; // width of a pixel in hz
   sp->next=NULL;
   sp->previous=NULL;
+  sp->zoom_index = 1;
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
@@ -981,6 +957,7 @@ void *ctrl_thread(void *arg) {
 	  uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
 
 	  uint32_t *ip=(uint32_t*)bp;
+	  *ip++=htonl(sp->bins);
 	  *ip++=htonl(sp->center_frequency);
 	  *ip++=htonl(sp->frequency);
 	  *ip++=htonl(sp->bin_width);
@@ -1010,7 +987,6 @@ void *ctrl_thread(void *arg) {
 	    continue; // Invalid for some reason
 	  }
 
-	  int mid=npower/2;
 	  float *fp=(float*)ip;
 
 	  // below center
@@ -1018,11 +994,11 @@ void *ctrl_thread(void *arg) {
           // Now that I've hacked the scaling, I think we want to set a floor
           // of -120 dB, not +120 dB. But I'm still confused and this is
           // blind guesswork.
-	  for(int i=mid; i < npower; i++) {
+	  for(int i=npower/2; i < npower; i++) {
 	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
 	  }
 	  // above center
-	  for(int i=0; i < mid; i++) {
+	  for(int i=0; i < npower/2; i++) {
 	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
 	  }
 
