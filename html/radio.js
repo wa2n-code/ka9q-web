@@ -15,8 +15,8 @@
       let binCount = 1620;
       let spanHz = binCount * binWidthHz;
 
-      var filter_low = 50;
-      var filter_high = 3000;
+      var filter_low = -5000;
+      var filter_high = 5000;
       var power = -120;
 
       var gps_time = 0;
@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.31";
+      const webpage_version = "2.32";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',

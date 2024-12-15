@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.31";
+const char *webserver_version = "2.32";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -74,6 +74,7 @@ struct session {
   float if_power;
   float noise_density;
   int zoom_index;
+  /* uint32_t last_poll_tag; */
 };
 
 #define START_SESSION_ID 1000
@@ -107,6 +108,8 @@ const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
 int verbose = 0;
+/* static int error_count = 0; */
+/* static int ok_count = 0; */
 
 #define MAX_BINS 1620
 
@@ -765,6 +768,8 @@ void control_poll(struct session *sp) {
   uint8_t *bp = cmdbuffer;
   *bp++ = 1; // Command
 
+  /* sp->last_poll_tag = random(); */
+  /* encode_int(&bp,COMMAND_TAG,sp->last_poll_tag); */
   encode_int(&bp,COMMAND_TAG,random());
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // poll specific SSRC, or request ssrc list with ssrc = 0
   encode_eol(&bp);
@@ -877,20 +882,21 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
 
   if (l_count != l_ccount) {
     // not the expected number of bins...not sure why, but avoid crashing for now
-    if (verbose) {
-      fprintf(stderr,"BIN_COUNT error on ssrc %d BIN_DATA had %d bins, but BIN_COUNT was %d, packet length %d bytes\n",ssrc,l_count,l_ccount,length);
-      fflush(stderr);
-    }
-    return 0;
+    /* if (verbose) { */
+    /*   ++error_count; */
+    /*   fprintf(stderr,"BIN_COUNT error %d on ssrc %d BIN_DATA had %d bins, but BIN_COUNT was %d, packet length %d bytes tag %08X\n",error_count,ssrc,l_count,l_ccount,length, sp->last_poll_tag); */
+    /*   fflush(stderr); */
+    /* } */
+    return -1;
   }
 
   if (l_count > MAX_BINS) {
-    if (verbose) {
-      // not the expected number of bins...not sure why, but avoid crashing for now
-      fprintf(stderr,"BIN_DATA on ssrc %d shows %d bins, BIN_COUNT was %d, but MAX_BINS is %d\n",ssrc,l_count,l_ccount,MAX_BINS);
-      fflush(stderr);
-    }
-    return 0;
+    /* if (verbose) { */
+    /*   ++error_count; */
+    /*   fprintf(stderr,"BIN_DATA error %d on ssrc %d shows %d bins, BIN_COUNT was %d, but MAX_BINS is %d\n",error_count,ssrc,l_count,l_ccount,MAX_BINS); */
+    /*   fflush(stderr); */
+    /* } */
+    return -1;
   }
   return l_ccount;
 }
@@ -953,9 +959,9 @@ void *ctrl_thread(void *arg) {
   realtime();
 
   while(1) {
-    int length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
-    if(length > 2 && (enum pkt_type)buffer[0] == STATUS) {
-      uint32_t ssrc=get_ssrc(buffer+1,length-1);
+    int rx_length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
+    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+      uint32_t ssrc = get_ssrc(buffer+1,rx_length-1);
       //      fprintf(stderr,"%s: ssrc=%d\n",__FUNCTION__,ssrc);
       if(ssrc%2==1) { // Spectrum data
         if((sp=find_session_from_ssrc(ssrc-1)) != NULL){
@@ -964,7 +970,7 @@ void *ctrl_thread(void *arg) {
           // newell 12/1/2024, 19:07:31
           // is it kosher to call this here? It made some of the stat values
           // update more often, so I hacked it in.
-          decode_radio_status(&Frontend,&Channel,buffer+1,length-1);
+          decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
 
 	  struct rtp_header rtp;
 	  memset(&rtp,0,sizeof(rtp));
@@ -1000,14 +1006,30 @@ void *ctrl_thread(void *arg) {
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);
-	  int npower = extract_powers(powers,length, &time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,length-1,sp);
+	  int npower = extract_powers(powers,length,&time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,rx_length-1,sp);
 	  if(npower < 0){
+            /* char filename[256]; */
+            /* sprintf(filename,"%d_%d_%08X.bin",error_count,ssrc,sp->last_poll_tag); */
+            /* FILE *f = fopen(filename,"w"); */
+            /* if (f) { */
+            /*   fwrite(buffer,rx_length,1,f); */
+            /*   fclose(f); */
+            /* } */
 	    pthread_mutex_unlock(&session_mutex);
 	    continue; // Invalid for some reason
 	  }
+          /* ++ok_count; */
+          /* if (!(ok_count % 100)){ */
+          /*   char filename[256]; */
+          /*   sprintf(filename,"%d_%d.bin",ok_count,ssrc); */
+          /*   FILE *f = fopen(filename,"w"); */
+          /*   if (f) { */
+          /*     fwrite(buffer,rx_length,1,f); */
+          /*     fclose(f); */
+          /*   } */
+          /* } */
 
 	  float *fp=(float*)ip;
-
 	  // below center
           // newell 12/1/2024, 10:00:15
           // Now that I've hacked the scaling, I think we want to set a floor
@@ -1034,7 +1056,7 @@ void *ctrl_thread(void *arg) {
 	}
       } else {
         if((sp=find_session_from_ssrc(ssrc)) != NULL){
-	  decode_radio_status(&Frontend,&Channel,buffer+1,length-1);
+	  decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
 	  pthread_mutex_lock(&output_dest_socket_mutex);
 	  if(Channel.output.dest_socket.ss_family != 0)
 	    pthread_cond_broadcast(&output_dest_socket_cond);
@@ -1070,7 +1092,7 @@ void *ctrl_thread(void *arg) {
 	  pthread_mutex_unlock(&session_mutex);
 	}
       }
-    } else if(length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+    } else if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
 fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
     }
   }
