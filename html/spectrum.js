@@ -428,12 +428,12 @@ Spectrum.prototype.positionDown = function() {
 }
 
 Spectrum.prototype.rangeIncrease = function() {
-    this.setRange(this.min_db - 5, this.max_db + 5);
+    this.setRange(this.min_db, this.max_db + 5);
 }
 
 Spectrum.prototype.rangeDecrease = function() {
     if (this.max_db - this.min_db > 10)
-        this.setRange(this.min_db + 5, this.max_db - 5);
+        this.setRange(this.min_db, this.max_db - 5);
 }
 
 Spectrum.prototype.setCenterHz = function(hz) {
