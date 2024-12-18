@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.33";
+const char *webserver_version = "2.34";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -89,8 +89,6 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
 void control_poll(struct session *sp);
 void *spectrum_thread(void *arg);
 void *ctrl_thread(void *arg);
-void *poll_thread(void *arg);
-static int send_poll(int ssrc);
 
 struct frontend Frontend;
 struct sockaddr_storage Metadata_source_socket;       // Source of metadata
@@ -202,15 +200,22 @@ static struct session *find_session_from_ssrc(int ssrc) {
 }
 
 void websocket_closed(struct session *sp) {
-//fprintf(stderr,"%s: audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->audio_active,sp->spectrum_active);
-    pthread_mutex_lock(&sp->ws_mutex);
-    control_set_frequency(sp,"0");
-    sp->audio_active=false;
-    if(sp->spectrum_active) {
-      sp->spectrum_active=false;
-      pthread_join(sp->spectrum_task,NULL);
-    }
-    pthread_mutex_unlock(&sp->ws_mutex);
+  if (verbose)
+    fprintf(stderr,"%s: SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
+
+  pthread_mutex_lock(&sp->ws_mutex);
+  control_set_frequency(sp,"0");
+  sp->audio_active=false;
+  if(sp->spectrum_active) {
+    if (verbose)
+      fprintf(stderr,"%s: ssrc=%u tune spec demod to 0\n",__FUNCTION__,sp->ssrc+1);
+    pthread_mutex_lock(&sp->spectrum_mutex);
+    sp->spectrum_active=false;
+    control_get_powers(sp,0.0,1234,40);
+    pthread_mutex_unlock(&sp->spectrum_mutex);
+    pthread_join(sp->spectrum_task,NULL);
+  }
+  pthread_mutex_unlock(&sp->ws_mutex);
 }
 
 static void check_frequency(struct session *sp) {
@@ -329,6 +334,10 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         // client is ready - start spectrum thread
         if(pthread_create(&sp->spectrum_task,NULL,spectrum_thread,sp) == -1){
           perror("pthread_create: spectrum_thread");
+        } else {
+          char buff[16];
+          snprintf(buff,16,"spec_%u",sp->ssrc+1);
+          pthread_setname_np(sp->spectrum_task, buff);
         }
         break;
       case 'A':
@@ -648,10 +657,18 @@ int init_connections(const char *multicast_group) {
   if(pthread_create(&ctrl_task,NULL,ctrl_thread,NULL) == -1){
     perror("pthread_create: ctrl_thread");
     //free(sp);
+  } else {
+    char buff[16];
+    snprintf(buff,16,"ctrl");
+    pthread_setname_np(ctrl_task,buff);
   }
 
   if(pthread_create(&audio_task,NULL,audio_thread,NULL) == -1){
     perror("pthread_create");
+  } else {
+    char buff[16];
+    snprintf(buff,16,"audio");
+    pthread_setname_np(audio_task,buff);
   }
   return(EX_OK);
 }
@@ -930,21 +947,6 @@ void *spectrum_thread(void *arg) {
   return NULL;
 }
 
-void *poll_thread(void *arg) {
-  struct session *sp = (struct session *)arg;
-  //fprintf(stderr,"%s\n",__FUNCTION__);
-  while(1) {
-    pthread_mutex_lock(&ctl_mutex);
-    send_poll(sp->ssrc);
-    pthread_mutex_unlock(&ctl_mutex);
-    if(usleep(250000) !=0) {
-      perror("poll_thread: usleep(50000)");
-    }
-  }
-  //fprintf(stderr,"%s: EXIT\n",__FUNCTION__);
-  return NULL;
-}
-
 void *ctrl_thread(void *arg) {
   struct session *sp;
   socklen_t ssize = sizeof(Metadata_source_socket);
@@ -1097,21 +1099,4 @@ fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
     }
   }
 //fprintf(stderr,"%s: EXIT\n",__FUNCTION__);
-}
-
-// Send empty poll command on specified descriptor
-static int send_poll(int ssrc){
-  uint8_t cmdbuffer[PKTSIZE];
-  uint8_t *bp = cmdbuffer;
-  *bp++ = 1; // Command
-
-  uint32_t tag = random();
-  encode_int(&bp,COMMAND_TAG,tag);
-  encode_int(&bp,OUTPUT_SSRC,ssrc); // poll specific SSRC, or request ssrc list with ssrc = 0
-  encode_eol(&bp);
-  int const command_len = bp - cmdbuffer;
-  if(sendto(Input_fd, cmdbuffer, command_len, 0, (struct sockaddr *)&Metadata_dest_socket,sizeof(struct sockaddr)) != command_len)
-    return -1;
-
-  return 0;
 }
