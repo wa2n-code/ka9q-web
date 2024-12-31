@@ -595,7 +595,7 @@ static void *audio_thread(void *arg) {
     if(size == -1){
       if(errno != EINTR){ // Happens routinely, e.g., when window resized
         perror("recvfrom");
-        fprintf(stderr,"address=%s\n",formatsock(&Channel.output.dest_socket));
+        fprintf(stderr,"address=%s\n",formatsock(&Channel.output.dest_socket,false));
         usleep(1000);
       }
       continue;  // Reuse current buffer
