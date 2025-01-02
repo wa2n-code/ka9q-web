@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.37";
+const char *webserver_version = "2.38";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -74,6 +74,7 @@ struct session {
   float if_power;
   float noise_density;
   int zoom_index;
+  char requested_preset[32];
   /* uint32_t last_poll_tag; */
 };
 
@@ -557,6 +558,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->next=NULL;
   sp->previous=NULL;
   sp->zoom_index = 1;
+  strlcpy(sp->requested_preset,"am",sizeof(sp->requested_preset));
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
@@ -751,6 +753,7 @@ void control_set_mode(struct session *sp,char *str) {
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
+    strlcpy(sp->requested_preset,str,sizeof(sp->requested_preset));
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
     }
@@ -1080,6 +1083,12 @@ void *ctrl_thread(void *arg) {
       } else {
         if((sp=find_session_from_ssrc(ssrc)) != NULL){
 	  decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
+          // check to see if the preset matches our request
+          if (strncmp(Channel.preset,sp->requested_preset,sizeof(sp->requested_preset))) {
+            if (verbose)
+              fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
+            control_set_mode(sp,sp->requested_preset);
+          }
 	  pthread_mutex_lock(&output_dest_socket_mutex);
 	  if(Channel.output.dest_socket.ss_family != 0)
 	    pthread_cond_broadcast(&output_dest_socket_cond);
