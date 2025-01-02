@@ -22,10 +22,10 @@
     <table style="border: solid">
     <tr>
     <td rowspan=1 colspan=1>
-    <button id="rangedown" onclick="spectrum.positionUp()">Position +</button>
+    <button id="postion_up" onclick="positionUp()">Position +</button>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="rangeinc" onclick="spectrum.rangeIncrease()">Range +</button>
+    <button id="rangeinc" onclick="rangeIncrease()">Range +</button>
     </td>
     <td rowspan=2 colspan=2>
     <input type="text" id="freq" style="color:green; font-size:30px; border: solid; width: 200px" value="" onchange="setFrequency()"/>
@@ -79,10 +79,10 @@
     </tr>
     <tr>
     <td rowspan=1 colspan=1>
-    <button id="rangeup" onclick="spectrum.positionDown()">Position -</button>
+    <button id="position_down" onclick="positionDown()">Position -</button>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="rangedec" onclick="spectrum.rangeDecrease()">Range -</button>
+    <button id="rangedec" onclick="rangeDecrease()">Range -</button>
     </td>
     <td rowspan=1 colspan=2>
     <label for="band">Band:</label> 
@@ -127,7 +127,7 @@
       </td>
       <td></td>
       <td rowspan=2 colspan=1>
-        <button id="autoscale" style="height:50px" onclick="spectrum.forceAutoscale()">Autoscale</button>
+        <button id="autoscale" style="height:50px" onclick="autoscale()">Autoscale</button>
       </td>
       <td rowspan=2 colspan=1>
         <button id="max_hold" style="width:80px; height:50px" onclick="spectrum.toggleMaxHold()">Max hold</button>
@@ -161,6 +161,16 @@
       <td rowspan=1 colspan=1>
         <button id="csv_out" onclick="dumpCSV()">Write info file</button>
       </td>
+    </tr>
+    <tr>
+      <td>WF range:</td>
+      <td><input type="text" id="waterfall_min" style="font-size:15px; width: 70px" value="" onchange="setWaterfallMin()"/></td>
+      <td><input type="text" id="waterfall_max" style="font-size:15px; width: 70px" value="" onchange="setWaterfallMax()"/></td>
+    </tr>
+    <tr>
+      <td>Spectrum range:</td>
+      <td><input type="text" id="spectrum_min" style="font-size:15px; width: 70px" value="" onchange="setSpectrumMin()"/></td>
+      <td><input type="text" id="spectrum_max" style="font-size:15px; width: 70px" value="" onchange="setSpectrumMax()"/></td>
     </tr>
     </table>
 

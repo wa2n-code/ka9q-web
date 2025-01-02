@@ -35,7 +35,7 @@ Spectrum.prototype.rowToImageData = function(bins) {
             // of the colormap array, and stronger ones use colors from the end
             // I also noticed the default colormaps are not all the same length!
             // perhaps that's what the catch(err) was all about?
-            var scaled=((bins[i / 4] - this.min_db) / (this.max_db - this.min_db));
+            var scaled=((bins[i / 4] - this.wf_min_db) / (this.wf_max_db - this.wf_min_db));
             if (scaled > 1.0) scaled = 1.0;
             if (scaled < 0) scaled = 0;
             var cindex = Math.round((this.colormap.length - 1) * scaled);
@@ -416,6 +416,8 @@ Spectrum.prototype.toggleColor = function() {
 Spectrum.prototype.setRange = function(min_db, max_db) {
     this.min_db = min_db;
     this.max_db = max_db;
+    this.wf_min_db=min_db;
+    this.wf_max_db=max_db;
     this.updateAxes();
 }
 
@@ -607,6 +609,8 @@ function Spectrum(id, options) {
     // set default spectrum ranges to match the scaled bin amplitudes
     this.min_db = -120;
     this.max_db = 0;
+    this.wf_min_db = -120;
+    this.wf_max_db = 0;
     this.spectrumHeight = 0;
 
     // Colors

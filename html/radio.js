@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.38";
+      const webpage_version = "2.39";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -40,7 +40,7 @@
         sampleRate: 12000,
         flushingTime: 250
         });
-
+      var pending_range_update = false;
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -209,7 +209,12 @@ function calcFrequencies() {
             }
               var dataBuffer = evt.data.slice(i,data.byteLength);
               const arr = new Float32Array(dataBuffer);
-              spectrum.addData(arr);
+            spectrum.addData(arr);
+            if (pending_range_update) {
+              pending_range_update = false;
+              updateRangeValues();
+            }
+
             update_stats();
             break;
             case 0x7E: // Channel Data
@@ -329,6 +334,7 @@ function calcFrequencies() {
         document.getElementById('cursor').checked = spectrum.cursor_active;
         document.getElementById('pause').textContent = (spectrum.paused ? "Run" : "Pause");
         document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
+        updateRangeValues();
         player.volume(1.00);
         getVersion();
       }
@@ -502,6 +508,56 @@ function calcFrequencies() {
           ws.send("A:STOP:"+ssrc.toString());
         }
     }
+
+function updateRangeValues(){
+  document.getElementById("waterfall_min").value = spectrum.min_db;
+  document.getElementById("waterfall_max").value = spectrum.max_db;
+  document.getElementById("spectrum_min").value = spectrum.min_db;
+  document.getElementById("spectrum_max").value = spectrum.max_db;
+}
+
+function autoscale() {
+  spectrum.forceAutoscale();
+  pending_range_update = true;
+}
+
+function positionUp() {
+  spectrum.positionUp();
+  updateRangeValues();
+}
+
+function positionDown() {
+  spectrum.positionDown();
+  updateRangeValues();
+}
+
+function rangeIncrease() {
+  spectrum.rangeIncrease();
+  updateRangeValues();
+}
+
+function rangeDecrease() {
+  spectrum.rangeDecrease();
+  updateRangeValues();
+}
+
+function setWaterfallMin() {
+  spectrum.wf_min_db = parseFloat(document.getElementById("waterfall_min").value);
+}
+
+function setWaterfallMax() {
+  spectrum.wf_max_db = parseFloat(document.getElementById("waterfall_max").value);
+}
+
+function setSpectrumMin() {
+  spectrum.min_db = parseFloat(document.getElementById("spectrum_min").value);
+  spectrum.setRange(spectrum.min_db, spectrum.max_db);
+}
+
+function setSpectrumMax() {
+  spectrum.max_db = parseFloat(document.getElementById("spectrum_max").value);
+  spectrum.setRange(spectrum.min_db, spectrum.max_db);
+}
 
 function level_to_string(f) {
   let bin = spectrum.hz_to_bin(f);
