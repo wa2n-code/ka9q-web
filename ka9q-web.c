@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.34";
+const char *webserver_version = "2.35";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -85,6 +85,7 @@ extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
+void stop_spectrum_stream(struct session *sp);
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp);
 void control_poll(struct session *sp);
 void *spectrum_thread(void *arg);
@@ -201,17 +202,15 @@ static struct session *find_session_from_ssrc(int ssrc) {
 
 void websocket_closed(struct session *sp) {
   if (verbose)
-    fprintf(stderr,"%s: SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
+    fprintf(stderr,"%s(): SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
 
   pthread_mutex_lock(&sp->ws_mutex);
   control_set_frequency(sp,"0");
   sp->audio_active=false;
   if(sp->spectrum_active) {
-    if (verbose)
-      fprintf(stderr,"%s: ssrc=%u tune spec demod to 0\n",__FUNCTION__,sp->ssrc+1);
     pthread_mutex_lock(&sp->spectrum_mutex);
     sp->spectrum_active=false;
-    control_get_powers(sp,0.0,1234,40);
+    stop_spectrum_stream(sp);
     pthread_mutex_unlock(&sp->spectrum_mutex);
     pthread_join(sp->spectrum_task,NULL);
   }
@@ -758,6 +757,29 @@ void control_set_mode(struct session *sp,char *str) {
   }
 }
 
+void stop_spectrum_stream(struct session *sp) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  *bp++ = CMD; // Command
+  encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1);
+  uint32_t tag = random();
+  encode_int(&bp,COMMAND_TAG,tag);
+  encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
+  encode_float(&bp,RADIO_FREQUENCY,0);
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  for(int i = 0; i < 3; ++i) {
+    if (verbose)
+      fprintf(stderr,"%s(): Tune 0 Hz with tag 0x%08x to close spec demod thread on SSRC %u\n",__FUNCTION__,tag,sp->ssrc+1);
+    pthread_mutex_lock(&ctl_mutex);
+    if(send(Ctl_fd,cmdbuffer,command_len,0) != command_len) {
+      perror("command send: Spectrum");
+    }
+    pthread_mutex_unlock(&ctl_mutex);
+    usleep(100000);
+  }
+}
+
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
@@ -770,8 +792,6 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   encode_int(&bp,BIN_COUNT,bins);
   encode_float(&bp,NONCOHERENT_BIN_BW,bin_bw);
   encode_eol(&bp);
-
-
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
