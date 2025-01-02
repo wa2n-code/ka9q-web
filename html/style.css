@@ -5,7 +5,7 @@ html, body {
 }
 
 body {
-  background-color: lightgrey;
+    background-color: lightgrey;
 }
 
 #waterfall {
@@ -13,3 +13,18 @@ body {
     width: 100%;
     height: 50%;
 }
+
+#stat_table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+#stat_table td {
+    width: 33.33%;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#stat_table td:first-child { width: 40%; }
+#stat_table td:nth-child(2) { width: 20%; }
+#stat_table td:last-child { width: 40%; }

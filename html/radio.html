@@ -164,16 +164,18 @@
     </tr>
     </table>
 
-    <table>
-      <tr><td><span id="rf_gain"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="gps_time"></span></td></tr>
-      <tr><td><span id="rf_attn"></span></td> <td><span id="hz_per_bin"></span></td><td><span id="uptime"></span></td></tr>
-      <tr><td><span id="rf_cal"></span></td><td><span id="bins"></span></td> <td><span id="adc_overs"></span></td></tr>
-      <tr><td><span id="rf_agc"></span></td><td><span id="ssrc"></span></td><td><span id="adc_last_over"></span></td></tr>
-      <tr><td><span id="if_power"></span></td><td><span id="fft_avg"></span></td><td><span id="blocks"></span></td></tr>
-      <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
-      <tr><td><span id="baseband_power"></span></td><td><span id="spare1"></span></td><td><span id="spare2"></span></td></tr>
-      <tr><td><span id="version"></span></td><td><span id="webserver_version"></span></td><td></td></tr>
-    </table>
+    <div style="width: 100%;">
+      <table id="stat_table">
+        <tr><td><span id="rf_gain"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="gps_time"></span></td></tr>
+        <tr><td><span id="rf_attn"></span></td> <td><span id="hz_per_bin"></span></td><td><span id="uptime"></span></td></tr>
+        <tr><td><span id="rf_cal"></span></td><td><span id="bins"></span></td> <td><span id="adc_overs"></span></td></tr>
+        <tr><td><span id="rf_agc"></span></td><td><span id="ssrc"></span></td><td><span id="adc_last_over"></span></td></tr>
+        <tr><td><span id="if_power"></span></td><td><span id="fft_avg"></span></td><td><span id="blocks"></span></td></tr>
+        <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
+        <tr><td><span id="baseband_power"></span></td><td><span id="spare1"></span></td><td><span id="spare2"></span></td></tr>
+        <tr><td><span id="version"></span></td><td><span id="webserver_version"></span></td><td></td></tr>
+      </table>
+    </div>
 
     <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor"/>  <label for="cursor">Activate cursor</label>
     <span id="cursor_data"></span>

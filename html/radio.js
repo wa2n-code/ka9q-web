@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.36";
+      const webpage_version = "2.37";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -553,12 +553,11 @@ function update_stats() {
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
   document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(2) + " dBmJ";
   document.getElementById('bins').textContent = `Bins: ${binCount}`;
-  //document.getElementById('hz_per_bin').textContent = "Bin width: " + binWidthHz.toString() + " Hz";
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
-  document.getElementById('blocks').innerHTML = "Blocks: " + blocks_since_last_poll.toString();
+  document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
-  document.getElementById('baseband_power').innerHTML = "Baseband: " + power.toFixed(1) + " dBm";
+  document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW`;
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
