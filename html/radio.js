@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.35";
+      const webpage_version = "2.36";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',

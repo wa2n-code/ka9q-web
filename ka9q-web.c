@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.35";
+const char *webserver_version = "2.36";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -685,6 +685,7 @@ int init_control(struct session *sp) {
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
+  encode_string(&bp,PRESET,"am",strlen("am"));
   encode_eol(&bp);
   int command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
