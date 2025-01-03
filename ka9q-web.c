@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.41";
+const char *webserver_version = "2.42";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -251,7 +251,7 @@ const struct zoom_table_t zoom_table[] = {
   {800, 1620},
   {400, 1620},
   {200, 1620},
-  {100, 1620},
+  {120, 1620},
   {80, 1620},
   {40, 1620},
   {40, 1200},
@@ -774,7 +774,7 @@ void stop_spectrum_stream(struct session *sp) {
   uint32_t tag = random();
   encode_int(&bp,COMMAND_TAG,tag);
   encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
-  encode_float(&bp,RADIO_FREQUENCY,0);
+  encode_double(&bp,RADIO_FREQUENCY,0);
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
   for(int i = 0; i < 3; ++i) {
@@ -797,7 +797,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   uint32_t tag = random();
   encode_int(&bp,COMMAND_TAG,tag);
   encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
-  encode_float(&bp,RADIO_FREQUENCY,frequency);
+  encode_double(&bp,RADIO_FREQUENCY,frequency);
   encode_int(&bp,BIN_COUNT,bins);
   encode_float(&bp,NONCOHERENT_BIN_BW,bin_bw);
   encode_eol(&bp);
