@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.39";
+      const webpage_version = "2.40";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -197,6 +197,7 @@ function calcFrequencies() {
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density = view.getFloat32(i,true); i+=4;
+            const z_level = view.getUint32(i,true); i+=4;
 
             if(update) {
               calcFrequencies();
@@ -206,6 +207,7 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
+              document.getElementById("zoom_level").value = z_level;
             }
               var dataBuffer = evt.data.slice(i,data.byteLength);
               const arr = new Float32Array(dataBuffer);
@@ -488,12 +490,12 @@ function calcFrequencies() {
     function zoomcenter() {
       ws.send("Z:c");
     }
-    function zoomTo(w) {
-      ws.send("Z:"+w.toString());
-    }
     function audioReporter(stats) {
     }
-
+function setZoom() {
+  const v = document.getElementById("zoom_level").valueAsNumber;
+  ws.send(`Z:${v}`);
+}
     async function audio_start_stop()
     {
         var btn = document.getElementById("audio_button");

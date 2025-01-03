@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.39";
+const char *webserver_version = "2.40";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -266,9 +266,9 @@ const struct zoom_table_t zoom_table[] = {
   {40, 50},
 };
 
-static void zoom(struct session *sp, int shift) {
+static void zoom_to(struct session *sp, int level) {
   const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
-  sp->zoom_index += shift;
+  sp->zoom_index = level;
   if (sp->zoom_index >= table_size)
     sp->zoom_index = table_size-1;
 
@@ -276,9 +276,13 @@ static void zoom(struct session *sp, int shift) {
     sp->zoom_index = 0;
 
   if ((Frontend.samprate <= 64800000) && (sp->zoom_index <= 0))
-    sp->zoom_index=1;
+    sp->zoom_index = 1;
   sp->bin_width = zoom_table[sp->zoom_index].bin_width;
   sp->bins = zoom_table[sp->zoom_index].bin_count;
+}
+
+static void zoom(struct session *sp, int shift) {
+  zoom_to(sp,sp->zoom_index+shift);
 }
 
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
@@ -388,10 +392,11 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           sp->center_frequency=sp->frequency;
           check_frequency(sp);
         } else {
-          int width=atoi(&tmp[2]);
-          if(width!=0) {
+          char *end_ptr;
+          long int zoom_level = strtol(&tmp[2],&end_ptr,10);
+          if (&tmp[2] != end_ptr) {
             pthread_mutex_lock(&sp->spectrum_mutex);
-            sp->bin_width=width;
+            zoom_to(sp,zoom_level);
             pthread_mutex_unlock(&sp->spectrum_mutex);
             check_frequency(sp);
           }
@@ -1029,6 +1034,7 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
           memcpy((void*)ip,&sp->if_power,4); ip++;
           memcpy((void*)ip,&sp->noise_density,4); ip++;
+          memcpy((void*)ip,&sp->zoom_index,4); ip++;
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);
