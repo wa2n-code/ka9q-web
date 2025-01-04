@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.44";
+const char *webserver_version = "2.45";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -368,6 +368,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         } else if (max_f > (Frontend.samprate / 2)) {
           sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
         }
+        check_frequency(sp);
         control_set_frequency(sp,&tmp[2]);
         break;
       case 'M':
@@ -390,7 +391,16 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           check_frequency(sp);
         } else if(strcmp(token,"c")==0) {
           sp->center_frequency=sp->frequency;
-          check_frequency(sp);
+          token = strtok(NULL,":");
+          if (token)
+          {
+            char *endptr;
+            double f = strtod(token,&endptr) * 1000.0;
+            if (token != endptr) {
+              sp->center_frequency = f;
+            }
+          }
+          //check_frequency(sp);
         } else {
           char *end_ptr;
           long int zoom_level = strtol(&tmp[2],&end_ptr,10);
@@ -730,7 +740,6 @@ void control_set_frequency(struct session *sp,char *str) {
 
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
-    f = fabs(parse_frequency(str,true)); // Handles funky forms like 147m435
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
     sp->frequency = f;
     encode_double(&bp,RADIO_FREQUENCY,f);

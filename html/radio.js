@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.44";
+      const webpage_version = "2.45";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -43,6 +43,7 @@
 
       var pending_range_update = false;
       var target_frequency = frequencyHz;
+      var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 21;
       function ntohs(value) {
@@ -102,8 +103,9 @@ function calcFrequencies() {
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         // can we load the saved frequency/zoom/preset here?
         ws.send("M:" + target_preset);
-        ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         ws.send("Z:" + (22 - target_zoom_level).toString());
+        ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
+        ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
       }
 
       function on_ws_close() {
@@ -802,6 +804,8 @@ function loadSettings() {
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   spectrum.spectrumPercent = parseFloat(localStorage.getItem("spectrum_percent"));
   spectrum.centerHz = parseFloat(localStorage.getItem("spectrum_center_hz"));
+  centerHz = spectrum.centerHz;
+  target_center = centerHz;
   spectrum.averaging = parseFloat(localStorage.getItem("averaging"));
   spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
   spectrum.paused = (localStorage.getItem("paused") == "true");
