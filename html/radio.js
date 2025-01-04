@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.43";
+      const webpage_version = "2.44";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -40,7 +40,11 @@
         sampleRate: 12000,
         flushingTime: 250
         });
+
       var pending_range_update = false;
+      var target_frequency = frequencyHz;
+      var target_preset = "am";
+      var target_zoom_level = 21;
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -96,7 +100,10 @@ function calcFrequencies() {
         // default to 20 Mtr band
         //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
-        ws.send("M:am");
+        // can we load the saved frequency/zoom/preset here?
+        ws.send("M:" + target_preset);
+        ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
+        ws.send("Z:" + (22 - target_zoom_level).toString());
       }
 
       function on_ws_close() {
@@ -206,13 +213,16 @@ function calcFrequencies() {
               document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 21 : 22;
               document.getElementById("zoom_level").value = z_level;
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
+              saveSettings();
             }
               var dataBuffer = evt.data.slice(i,data.byteLength);
               const arr = new Float32Array(dataBuffer);
             spectrum.addData(arr);
+
             if (pending_range_update) {
               pending_range_update = false;
               updateRangeValues();
+              saveSettings();
             }
 
             update_stats();
@@ -282,21 +292,25 @@ function calcFrequencies() {
         centerHz = 10000000;
         binWidthHz = 20000;
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
-        spectrum.setSpectrumPercent(50);
-        spectrum.setFrequency(frequencyHz);
-        spectrum.setCenterHz(centerHz);
-        spectrum.setSpanHz(binWidthHz * binCount);
-        lowHz = centerHz - ((binWidthHz * binCount) / 2);
-        spectrum.setLowHz(lowHz);
-        highHz = centerHz + ((binWidthHz * binCount) / 2);
-        spectrum.setHighHz(highHz);
-        spectrum.averaging = 0;
-        spectrum.maxHold = false;
-        spectrum.paused = false;
-        spectrum.colorIndex = 0;
-        spectrum.decay = 1.0;
-        spectrum.cursor_active = false;
-        spectrum.bins = binCount;
+        if (!loadSettings()) {
+          spectrum.setSpectrumPercent(50);
+          spectrum.setFrequency(frequencyHz);
+          spectrum.setCenterHz(centerHz);
+          spectrum.setSpanHz(binWidthHz * binCount);
+          lowHz = centerHz - ((binWidthHz * binCount) / 2);
+          spectrum.setLowHz(lowHz);
+          highHz = centerHz + ((binWidthHz * binCount) / 2);
+          spectrum.setHighHz(highHz);
+          spectrum.averaging = 0;
+          spectrum.maxHold = false;
+          spectrum.paused = false;
+          spectrum.colorIndex = 0;
+          spectrum.decay = 1.0;
+          spectrum.cursor_active = false;
+          spectrum.bins = binCount;
+          document.getElementById('mode').value = "am";
+        }
+        spectrum.radio_pointer = this;
 
         //msg=document.getElementById('msg');
         //msg.focus();
@@ -328,12 +342,15 @@ function calcFrequencies() {
 
         document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
         document.getElementById('step').value = increment.toString();
-        document.getElementById('mode').value = "am";
-        document.getElementById('colormap').value = spectrum.colorindex.toString();
+        document.getElementById('colormap').value = spectrum.colorIndex;
         document.getElementById('decay_list').value = spectrum.decay.toString();
         document.getElementById('cursor').checked = spectrum.cursor_active;
         document.getElementById('pause').textContent = (spectrum.paused ? "Run" : "Pause");
         document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
+
+        // set zoom, preset, spectrum percentage?
+        spectrum.setAveraging(spectrum.averaging);
+        spectrum.setColormap(spectrum.colorIndex);
         updateRangeValues();
         player.volume(1.00);
         getVersion();
@@ -355,6 +372,7 @@ function calcFrequencies() {
       } else {
         spectrum.cursor_freq = spectrum.limitCursor(Math.round((centerHz - (span / 2)) + (hzPerPixel * e.pageX)));
       }
+      saveSettings();
     }
 
     var pressed=false;
@@ -374,6 +392,7 @@ function calcFrequencies() {
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
         setFrequency();
       }
+      saveSettings();
       pressed=false;
     }
     function onMouseMove(e) {
@@ -386,9 +405,8 @@ function calcFrequencies() {
         }
         startX=e.pageX;
       }
+      saveSettings();
     }
-
-
 
     function onWheel(e) {
       event.preventDefault();
@@ -407,13 +425,14 @@ function calcFrequencies() {
           spectrum.cursorDown();
         }
       }
+      saveSettings();
     }
-
     
     var counter;
 
     function step_changed(value) {
       increment = parseInt(value);
+      saveSettings();
     }
 
     function incrementFrequency()
@@ -425,6 +444,7 @@ function calcFrequencies() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+      saveSettings();
     }
     function decrementFrequency()
     {
@@ -435,10 +455,12 @@ function calcFrequencies() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+      saveSettings();
     }
     function startIncrement() {
         incrementFrequency();
         counter=setInterval(incrementFrequency,200);
+      saveSettings();
     }
     function stopIncrement() {
         clearInterval(counter);
@@ -446,6 +468,7 @@ function calcFrequencies() {
     function startDecrement() {
         decrementFrequency();
         counter=setInterval(decrementFrequency,200);
+      saveSettings();
     }
     function stopDecrement() {
         clearInterval(counter);
@@ -456,7 +479,8 @@ function calcFrequencies() {
         ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(f);
+      spectrum.setFrequency(f);
+      saveSettings();
     }
     function setBand(freq) {
         f=parseInt(freq);
@@ -468,31 +492,38 @@ function calcFrequencies() {
           setMode('usb');
         }
         ws.send("F:" + (freq / 1000).toFixed(3));
+      saveSettings();
     }
     function setMode(selected_mode) {
         document.getElementById('mode').value = selected_mode;
         ws.send("M:"+selected_mode);
+      saveSettings();
     }
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
         ws.send("M:"+mode);
+      saveSettings();
     }
 
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
+      saveSettings();
     }
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
+      saveSettings();
     }
     function zoomcenter() {
       ws.send("Z:c");
+      saveSettings();
     }
     function audioReporter(stats) {
     }
 function setZoom() {
   const v = 22 - document.getElementById("zoom_level").valueAsNumber;
   ws.send(`Z:${v}`);
+  saveSettings();
 }
     async function audio_start_stop()
     {
@@ -510,10 +541,11 @@ function setZoom() {
     }
 
 function updateRangeValues(){
-  document.getElementById("waterfall_min").value = spectrum.min_db;
-  document.getElementById("waterfall_max").value = spectrum.max_db;
+  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
+  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   document.getElementById("spectrum_min").value = spectrum.min_db;
   document.getElementById("spectrum_max").value = spectrum.max_db;
+  saveSettings();
 }
 
 function autoscale() {
@@ -524,39 +556,47 @@ function autoscale() {
 function positionUp() {
   spectrum.positionUp();
   updateRangeValues();
+  saveSettings();
 }
 
 function positionDown() {
   spectrum.positionDown();
   updateRangeValues();
+  saveSettings();
 }
 
 function rangeIncrease() {
   spectrum.rangeIncrease();
   updateRangeValues();
+  saveSettings();
 }
 
 function rangeDecrease() {
   spectrum.rangeDecrease();
   updateRangeValues();
+  saveSettings();
 }
 
 function setWaterfallMin() {
   spectrum.wf_min_db = parseFloat(document.getElementById("waterfall_min").value);
+  saveSettings();
 }
 
 function setWaterfallMax() {
   spectrum.wf_max_db = parseFloat(document.getElementById("waterfall_max").value);
+  saveSettings();
 }
 
 function setSpectrumMin() {
   spectrum.min_db = parseFloat(document.getElementById("spectrum_min").value);
   spectrum.setRange(spectrum.min_db, spectrum.max_db);
+  saveSettings();
 }
 
 function setSpectrumMax() {
   spectrum.max_db = parseFloat(document.getElementById("spectrum_max").value);
   spectrum.setRange(spectrum.min_db, spectrum.max_db);
+  saveSettings();
 }
 
 function level_to_string(f) {
@@ -722,4 +762,60 @@ function dumpCSV() {
   link.setAttribute("download", `info_${timestring}.csv`);
   document.body.appendChild(link);
   link.click();
+}
+
+function saveSettings() {
+  localStorage.setItem("tune_hz", spectrum.frequency.toString());
+  localStorage.setItem("zoom_level", document.getElementById("zoom_level").valueAsNumber);
+  localStorage.setItem("min_db", spectrum.min_db.toString())
+  localStorage.setItem("max_db", spectrum.max_db.toString())
+  localStorage.setItem("wf_min_db", spectrum.wf_min_db.toString())
+  localStorage.setItem("wf_max_db", spectrum.wf_max_db.toString())
+  localStorage.setItem("spectrum_percent", spectrum.spectrumPercent.toString());
+  localStorage.setItem("spectrum_center_hz", spectrum.centerHz.toString());
+  localStorage.setItem("averaging", spectrum.averaging.toString());
+  localStorage.setItem("maxHold", spectrum.maxHold.toString());
+  localStorage.setItem("paused", spectrum.paused.toString());
+  localStorage.setItem("decay", spectrum.decay.toString());
+  localStorage.setItem("cursor_active", spectrum.cursor_active.toString());
+  localStorage.setItem("preset", document.getElementById("mode").value);
+  localStorage.setItem("step", document.getElementById("step").value.toString());
+  localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString());
+  localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
+}
+
+function loadSettings() {
+  console.log(`localStorage.length = ${localStorage.length}`);
+  if (localStorage.length == 0) {
+    return false;
+  }
+  spectrum.frequency = parseFloat(localStorage.getItem("tune_hz"));
+  frequencyHz = parseFloat(localStorage.getItem("tune_hz"));
+  target_frequency = frequencyHz;
+  spectrum.min_db = parseFloat(localStorage.getItem("min_db"));
+  document.getElementById("spectrum_min").value = spectrum.min_db;
+  spectrum.max_db = parseFloat(localStorage.getItem("max_db"));
+  document.getElementById("spectrum_max").value = spectrum.max_db;
+  spectrum.wf_min_db = parseFloat(localStorage.getItem("wf_min_db"));
+  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
+  spectrum.wf_max_db = parseFloat(localStorage.getItem("wf_max_db"));
+  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
+  spectrum.spectrumPercent = parseFloat(localStorage.getItem("spectrum_percent"));
+  spectrum.centerHz = parseFloat(localStorage.getItem("spectrum_center_hz"));
+  spectrum.averaging = parseFloat(localStorage.getItem("averaging"));
+  spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
+  spectrum.paused = (localStorage.getItem("paused") == "true");
+  spectrum.decay = parseFloat(localStorage.getItem("decay"));
+  spectrum.cursor_active = (localStorage.getItem("cursor_active") == "true");
+  document.getElementById("mode").value = localStorage.getItem("preset");
+  target_preset = localStorage.getItem("preset");
+  increment = parseFloat(localStorage.getItem("step"));
+  document.getElementById("colormap").value = parseInt(localStorage.getItem("colorIndex"));
+  const c = parseInt(localStorage.getItem("colorIndex"));
+  document.getElementById("colormap").value = c;
+  spectrum.colorIndex = c;
+  document.getElementById("zoom_level").value = parseInt(localStorage.getItem("zoom_level"));
+  target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
+  spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
+  return true;
 }

@@ -337,7 +337,7 @@ Spectrum.prototype.addData = function(data) {
                 data_max = Math.max(...this.binsMax, data_max);
                 data_min = Math.min(...this.binsMax, data_min);
             }
-            this.setRange(increment * Math.floor(data_min / increment),increment * Math.ceil(data_max / increment));
+            this.setRange(increment * Math.floor(data_min / increment),increment * Math.ceil(data_max / increment), true);
         }
         this.drawSpectrum(data);
         this.addWaterfallRow(data);
@@ -354,6 +354,7 @@ Spectrum.prototype.updateSpectrumRatio = function() {
         this.gradient.addColorStop(i / this.colormap.length,
             "rgba(" + c[0] + "," + c[1] + "," + c[2] + ", 1.0)");
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.resize = function() {
@@ -373,7 +374,7 @@ Spectrum.prototype.resize = function() {
         this.axes.height = this.spectrumHeight;
         this.updateAxes();
     }
-
+    this.saveSettings();
 }
 
 Spectrum.prototype.setSpectrumPercent = function(percent) {
@@ -381,18 +382,21 @@ Spectrum.prototype.setSpectrumPercent = function(percent) {
         this.spectrumPercent = percent;
         this.updateSpectrumRatio();
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.incrementSpectrumPercent = function() {
     if (this.spectrumPercent + this.spectrumPercentStep <= 100) {
         this.setSpectrumPercent(this.spectrumPercent + this.spectrumPercentStep);
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.decrementSpectrumPercent = function() {
     if (this.spectrumPercent - this.spectrumPercentStep >= 0) {
         this.setSpectrumPercent(this.spectrumPercent - this.spectrumPercentStep);
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.setColormap = function(value) {
@@ -402,6 +406,7 @@ Spectrum.prototype.setColormap = function(value) {
     this.colormap = colormaps[this.colorindex];
     this.updateSpectrumRatio();
     //console.info("New colormap index=", this.colorindex, ", map has ", this.colormap.length, " entries");
+    this.saveSettings();
 }
 
 Spectrum.prototype.toggleColor = function() {
@@ -411,51 +416,63 @@ Spectrum.prototype.toggleColor = function() {
     this.colormap = colormaps[this.colorindex];
     this.updateSpectrumRatio();
     document.getElementById("colormap").value = this.colorindex;
+    this.saveSettings();
 }
 
-Spectrum.prototype.setRange = function(min_db, max_db) {
+Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall) {
     this.min_db = min_db;
     this.max_db = max_db;
-    this.wf_min_db=min_db;
-    this.wf_max_db=max_db;
+    if (adjust_waterfall) {
+        this.wf_min_db = min_db;
+        this.wf_max_db = max_db;
+    }
     this.updateAxes();
+    this.saveSettings();
 }
 
 Spectrum.prototype.positionUp = function() {
-    this.setRange(this.min_db - 5, this.max_db - 5);
+    this.setRange(this.min_db - 5, this.max_db - 5, false);
+    this.saveSettings();
 }
 
 Spectrum.prototype.positionDown = function() {
-    this.setRange(this.min_db + 5, this.max_db + 5);
+    this.setRange(this.min_db + 5, this.max_db + 5, false);
+    this.saveSettings();
 }
 
 Spectrum.prototype.rangeIncrease = function() {
-    this.setRange(this.min_db, this.max_db + 5);
+    this.setRange(this.min_db, this.max_db + 5, true);
+    this.saveSettings();
 }
 
 Spectrum.prototype.rangeDecrease = function() {
     if (this.max_db - this.min_db > 10)
-        this.setRange(this.min_db, this.max_db - 5);
+        this.setRange(this.min_db, this.max_db - 5, true);
+    this.saveSettings();
 }
 
 Spectrum.prototype.setCenterHz = function(hz) {
     this.centerHz = hz;
     this.updateAxes();
+    this.saveSettings();
 }
 
 Spectrum.prototype.setSpanHz = function(hz) {
     this.spanHz = hz;
     this.updateAxes();
+    this.saveSettings();
 }
 
 Spectrum.prototype.setLowHz = function(hz) {
     this.lowHz = hz;
     this.updateAxes();
+    this.saveSettings();
 }
 
 Spectrum.prototype.setHighHz = function(hz) {
     this.highHz = hz;
     this.updateAxes();
+    this.saveSettings();
 }
 
 Spectrum.prototype.setAveraging = function(num) {
@@ -463,35 +480,48 @@ Spectrum.prototype.setAveraging = function(num) {
         this.averaging = num;
         this.alpha = 2 / (this.averaging + 1)
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.setDecay = function(num) {
     this.decay = num;
+    this.saveSettings();
 }
 
 Spectrum.prototype.incrementAveraging = function() {
     this.setAveraging(this.averaging + 1);
+    this.saveSettings();
 }
 
 Spectrum.prototype.decrementAveraging = function() {
     if (this.averaging > 0) {
         this.setAveraging(this.averaging - 1);
     }
+    this.saveSettings();
 }
 
 Spectrum.prototype.togglePaused = function() {
     this.paused = !this.paused;
     document.getElementById("pause").textContent = (this.paused ? "Run" : "Pause");
+    this.saveSettings();
 }
 
 Spectrum.prototype.setMaxHold = function(maxhold) {
     this.maxHold = maxhold;
     this.binsMax = undefined;
+    this.saveSettings();
 }
 
 Spectrum.prototype.toggleMaxHold = function() {
     this.setMaxHold(!this.maxHold);
     document.getElementById("max_hold").textContent = (this.maxHold ? "Norm" : "Max hold");
+    this.saveSettings();
+}
+
+Spectrum.prototype.saveSettings = function() {
+    if (typeof this.radio_pointer !== "undefined") {
+        this.radio_pointer.saveSettings();
+    }
 }
 
 Spectrum.prototype.toggleFullscreen = function() {
@@ -642,6 +672,8 @@ function Spectrum(id, options) {
     this.cursor_active = false;
     this.cursor_step = 1000;
     this.cursor_freq = 10000000;
+
+    this.radio_pointer = undefined;
 
     // Trigger first render
     this.setAveraging(this.averaging);
