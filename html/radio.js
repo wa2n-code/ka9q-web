@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.42";
+      const webpage_version = "2.43";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -193,7 +193,7 @@ function calcFrequencies() {
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density = view.getFloat32(i,true); i+=4;
-            const z_level = view.getUint32(i,true); i+=4;
+            const z_level = 22 - view.getUint32(i,true); i+=4;
 
             if(update) {
               calcFrequencies();
@@ -203,6 +203,7 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
+              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 21 : 22;
               document.getElementById("zoom_level").value = z_level;
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
             }
@@ -490,7 +491,7 @@ function calcFrequencies() {
     function audioReporter(stats) {
     }
 function setZoom() {
-  const v = document.getElementById("zoom_level").valueAsNumber;
+  const v = 22 - document.getElementById("zoom_level").valueAsNumber;
   ws.send(`Z:${v}`);
 }
     async function audio_start_stop()
