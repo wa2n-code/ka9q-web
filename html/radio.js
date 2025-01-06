@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.45";
+      const webpage_version = "2.46";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -238,8 +238,9 @@ function calcFrequencies() {
                   dataBuffer = evt.data.slice(i,i+l);
                   let d = new Uint8Array(dataBuffer);
                   let enc = new TextDecoder("utf-8");
-                  document.getElementById('heading').innerHTML = enc.decode(d);
-                  document.title = enc.decode(d);
+                  page_title = enc.decode(d);
+                  document.getElementById('heading').textContent = page_title;
+                  document.title = page_title;
                   i=i+l;
                   break;
                 case 39: // LOW_EDGE
@@ -313,6 +314,7 @@ function calcFrequencies() {
           document.getElementById('mode').value = "am";
         }
         spectrum.radio_pointer = this;
+        page_title = "";
 
         //msg=document.getElementById('msg');
         //msg.focus();
@@ -666,6 +668,7 @@ function update_stats() {
 
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
+  document.getElementById("ge_data").textContent = `Baseband/: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, ${(new Date(t * 1000)).toTimeString()}`;
   return;
   /*
   // newell 12/1/2024, 19:10:56
