@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.46";
+      const webpage_version = "2.47";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -651,7 +651,7 @@ function update_stats() {
   document.getElementById('rf_cal').innerHTML = "RF lev cal: " + rf_level_cal.toFixed(1) + " dB";
   document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
-  document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(2) + " dBmJ";
+  document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(1) + " dBmJ";
   document.getElementById('bins').textContent = `Bins: ${binCount}`;
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
@@ -668,7 +668,7 @@ function update_stats() {
 
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
-  document.getElementById("ge_data").textContent = `Baseband/: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, ${(new Date(t * 1000)).toTimeString()}`;
+  document.getElementById("ge_data").textContent = `Baseband/: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, ${(new Date(t * 1000)).toUTCString()}`;
   return;
   /*
   // newell 12/1/2024, 19:10:56
