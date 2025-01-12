@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.48";
+const char *webserver_version = "2.49";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -900,15 +900,14 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       int64_t N = (Frontend.L + Frontend.M - 1);
       if (0 == N)
          break;
+      double gain_cal = (2.0 / (double) N);
+      gain_cal *= gain_cal;
       for(int i=0; i < l_count; i++){
         power[i] = decode_float(cp,sizeof(float));
 
-        // newell 12/1/2024, 09:59:56
-        // I don't understand the spectrum bin amplitude scaling at all
-        // Guessing that the bins need to be scaled by 1/N
-        // And maybe by 32768 to account for the RX888 16 bit ADC?
-        // Open to corrections/advice on this!
-        power[i] /= (32768.0 * N);
+        // gain_cal is temporary--once ka9q-radio incorporates the gain scaling,
+        // this will go away
+        power[i] *= gain_cal;
         cp += sizeof(float);
       }
       break;
