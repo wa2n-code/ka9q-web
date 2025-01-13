@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.49";
+      const webpage_version = "2.50";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -46,6 +46,7 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 21;
+      var bin_precision_bytes = 4;
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -122,6 +123,7 @@ function calcFrequencies() {
           }
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
+          rx(data.byteLength);
           //console.log("data.byteLength=",data.byteLength);
           // RTP header
           const view = new DataView(evt.data);
@@ -203,6 +205,7 @@ function calcFrequencies() {
             if_power = view.getFloat32(i,true); i+=4;
             noise_density = view.getFloat32(i,true); i+=4;
             const z_level = 22 - view.getUint32(i,true); i+=4;
+            bin_precision_bytes = view.getUint32(i,true); i+=4;
 
             if(update) {
               calcFrequencies();
@@ -217,9 +220,27 @@ function calcFrequencies() {
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
             }
-              var dataBuffer = evt.data.slice(i,data.byteLength);
+            var dataBuffer = evt.data.slice(i,data.byteLength);
+            if (4 == bin_precision_bytes) {
               const arr = new Float32Array(dataBuffer);
-            spectrum.addData(arr);
+              spectrum.addData(arr);
+            }
+            else if (2 == bin_precision_bytes) {
+              const i16 = new Int16Array(dataBuffer);
+              const arr = new Float32Array(binCount);
+              for (i = 0; i < binCount; i++) {
+                arr[i] = 0.01 * i16[i];
+              }
+              spectrum.addData(arr);
+            }
+            else if (1 == bin_precision_bytes) {
+              const i8 = new Uint8Array(dataBuffer);
+              const arr = new Float32Array(binCount);
+              for (i = 0; i < binCount; i++) {
+                arr[i] = 0.5 * (i8[i] - 255);
+              }
+              spectrum.addData(arr);
+            }
 
             if (pending_range_update) {
               pending_range_update = false;
@@ -658,6 +679,7 @@ function update_stats() {
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW`;
+  document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
@@ -825,4 +847,17 @@ function loadSettings() {
   target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
   spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
   return true;
+}
+
+var rx_bytes = 0;
+var last_rx_interval = Date.now();
+var rx_rate = 0;
+function rx(x) {
+  rx_bytes += x;
+  const t = Date.now();
+  if ((t - last_rx_interval) > (2 * 1000)) {
+    rx_rate = (rx_bytes / (t - last_rx_interval)) * 1000.0;
+    rx_bytes = 0;
+    last_rx_interval = t;
+  }
 }

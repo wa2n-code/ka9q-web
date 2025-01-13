@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.49";
+const char *webserver_version = "2.50";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -108,6 +108,7 @@ const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
 int verbose = 0;
+int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
 
@@ -429,7 +430,7 @@ int main(int argc,char **argv) {
   App_path=argv[0];
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:hn:v")) != -1){
+    while((c = getopt(argc,argv,"d:p:m:hn:vb:")) != -1){
       switch(c) {
         case 'd':
           dirname=optarg;
@@ -443,6 +444,12 @@ int main(int argc,char **argv) {
         case 'n':
           description_override=optarg;
           break;
+      case 'b':
+        bin_precision_bytes = atoi(optarg);
+        if ((bin_precision_bytes != 1) && (bin_precision_bytes != 2) && (bin_precision_bytes != 4)){
+          bin_precision_bytes = 4;      //default to float
+        }
+        break;
         case 'v':
           ++verbose;
           break;
@@ -1043,6 +1050,7 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&sp->if_power,4); ip++;
           memcpy((void*)ip,&sp->noise_density,4); ip++;
           memcpy((void*)ip,&sp->zoom_index,4); ip++;
+          memcpy((void*)ip,&bin_precision_bytes,4); ip++;
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1068,25 +1076,71 @@ void *ctrl_thread(void *arg) {
           /*     fclose(f); */
           /*   } */
           /* } */
+          int size;
+          switch(bin_precision_bytes) {
+            default:
+            case 4:
+            {
+              float *fp=(float*)ip;
+              // below center
+              for(int i=npower/2; i < npower; i++) {
+                *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
+              }
+              // above center
+              for(int i=0; i < npower/2; i++) {
+                *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
+              }
+              size=(uint8_t*)fp-&output_buffer[0];
+            }
+            break;
 
-	  float *fp=(float*)ip;
-	  // below center
-          // newell 12/1/2024, 10:00:15
-          // Now that I've hacked the scaling, I think we want to set a floor
-          // of -120 dB, not +120 dB. But I'm still confused and this is
-          // blind guesswork.
-	  for(int i=npower/2; i < npower; i++) {
-	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
-	  }
-	  // above center
-	  for(int i=0; i < npower/2; i++) {
-	    *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
-	  }
+            case 2:
+            {
+              int16_t *fp=(int16_t*)ip;
+              // below center
+              for(int i=npower/2; i < npower; i++) {
+                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
+                powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
+                *fp++=powers[i] * 100.0;
+              }
+              // above center
+              for(int i=0; i < npower/2; i++) {
+                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
+                powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
+                *fp++=powers[i] * 100.0;
+              }
+              size=(uint8_t*)fp-&output_buffer[0];
+            }
+            break;
+
+            case 1:
+            {
+              uint8_t *fp=(uint8_t*)ip;
+              // need to saturate if >0 dBm?
+              // below center
+              for(int i=npower/2; i < npower; i++) {
+                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] > 0.0) ? 0.0 : powers[i];
+                powers[i] = (powers[i] < -127.0) ? -127.0 : powers[i];
+                *fp++=(255 + (powers[i] * 2.0));
+              }
+              // above center
+              for(int i=0; i < npower/2; i++) {
+                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] > 0.0) ? 0.0 : powers[i];
+                powers[i] = (powers[i] < -127.0) ? -127.0 : powers[i];
+                *fp++=(255 + (powers[i] * 2.0));
+              }
+              size=(uint8_t*)fp-&output_buffer[0];
+            }
+            break;
+          }
 
 	  // send the spectrum data to the client
 	  pthread_mutex_lock(&sp->ws_mutex);
 	  onion_websocket_set_opcode(sp->ws,OWS_BINARY);
-	  int size=(uint8_t*)fp-&output_buffer[0];
 	  int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
 	  if(r<=0) {
 	    fprintf(stderr,"%s: write failed: %d(size=%d)\n",__FUNCTION__,r,size);
