@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.51";
+const char *webserver_version = "2.52";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -72,7 +72,8 @@ struct session {
   struct session *previous;
   bool once;
   float if_power;
-  float noise_density;
+  float noise_density_spectrum;
+  float noise_density_audio;
   int zoom_index;
   char requested_preset[32];
   /* uint32_t last_poll_tag; */
@@ -929,7 +930,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       sp->if_power = decode_float(cp,optlen);
       break;
     case NOISE_DENSITY:
-      sp->noise_density = decode_float(cp,optlen);
+      sp->noise_density_spectrum = decode_float(cp,optlen);
       break;
     case BIN_COUNT: // Do we check that this equals the length of the BIN_DATA tlv?
       l_ccount = decode_int(cp,optlen);
@@ -960,6 +961,44 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
     return -1;
   }
   return l_ccount;
+}
+
+int extract_noise(float *n0,uint8_t const * const buffer,int length,struct session *sp){
+  uint8_t const *cp = buffer;
+
+  while(cp - buffer < length){
+    enum status_type const type = *cp++; // increment cp to length field
+
+    if(type == EOL)
+      break; // End of list
+
+    unsigned int optlen = *cp++;
+    if(optlen & 0x80){
+      // length is >= 128 bytes; fetch actual length from next N bytes, where N is low 7 bits of optlen
+      int length_of_length = optlen & 0x7f;
+      optlen = 0;
+      while(length_of_length > 0){
+        optlen <<= 8;
+        optlen |= *cp++;
+        length_of_length--;
+      }
+    }
+    if(cp - buffer + optlen >= length)
+      break; // Invalid length
+    switch(type){
+    case EOL: // Shouldn't get here
+      goto done;
+    case NOISE_DENSITY:
+      *n0 = decode_float(cp,optlen);
+      break;
+    default:
+      break;
+    }
+    cp += optlen;
+  }
+  done:
+
+  return 0;
 }
 
 int init_demod(struct channel *channel){
@@ -1048,7 +1087,8 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&Frontend.rf_gain,4); ip++;
           memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
           memcpy((void*)ip,&sp->if_power,4); ip++;
-          memcpy((void*)ip,&sp->noise_density,4); ip++;
+          memcpy((void*)ip,&sp->noise_density_spectrum,4); ip++;
+          memcpy((void*)ip,&sp->noise_density_audio,4); ip++;
           memcpy((void*)ip,&sp->zoom_index,4); ip++;
           memcpy((void*)ip,&bin_precision_bytes,4); ip++;
 
@@ -1151,6 +1191,10 @@ void *ctrl_thread(void *arg) {
       } else {
         if((sp=find_session_from_ssrc(ssrc)) != NULL){
 	  decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
+          float n0;
+          if (0==extract_noise(&sp->noise_density_audio,buffer+1,rx_length-1,sp)){
+            sp->noise_density_audio = n0;
+          }
           // check to see if the preset matches our request
           if (strncmp(Channel.preset,sp->requested_preset,sizeof(sp->requested_preset))) {
             if (verbose)

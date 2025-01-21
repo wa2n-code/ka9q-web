@@ -29,10 +29,11 @@
       var if_power = 0;
       var ad_over = 0;
       var samples_since_over = 0;
-      var noise_density = 0;
+      var noise_density_spectrum = 0;
+      var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.51";
+      const webpage_version = "2.52";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -203,7 +204,8 @@ function calcFrequencies() {
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
-            noise_density = view.getFloat32(i,true); i+=4;
+            noise_density_spectrum = view.getFloat32(i,true); i+=4;
+            noise_density_audio = view.getFloat32(i,true); i+=4;
             const z_level = 22 - view.getUint32(i,true); i+=4;
             bin_precision_bytes = view.getUint32(i,true); i+=4;
 
@@ -672,7 +674,7 @@ function update_stats() {
   document.getElementById('rf_cal').innerHTML = "RF lev cal: " + rf_level_cal.toFixed(1) + " dB";
   document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
-  document.getElementById('noise_density').innerHTML = "N<sub>0</sub>: " + noise_density.toFixed(1) + " dBmJ";
+  document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_spectrum.toFixed(1)} dBmJ (spectrum), ${noise_density_audio.toFixed(1)} dBmJ (audio)`;
   document.getElementById('bins').textContent = `Bins: ${binCount}`;
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
@@ -746,7 +748,8 @@ function dumpCSV() {
     ["rf_cal", rf_level_cal.toFixed(1)],
     ["rf_agc", rf_agc==1],
     ["if_power", if_power.toFixed(1)],
-    ["noise_density", noise_density.toFixed(2)],
+    ["noise_density spectrum", noise_density_spectrum.toFixed(1)],
+    ["noise_density audio", noise_density_audio.toFixed(1)],
     ["bins", binCount],
     ["bin_width", binWidthHz],
     ["blocks", blocks_since_last_poll.toString()],
