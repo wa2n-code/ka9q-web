@@ -180,6 +180,22 @@ Spectrum.prototype.drawSpectrum = function(bins) {
         }
     }
 
+    // Min hold
+    if (this.maxHold) {
+        if (!this.binsMin || this.binsMin.length != bins.length) {
+            this.binsMin = Array.from(bins);
+        } else {
+            for (var i = 0; i < bins.length; i++) {
+                if (bins[i] < this.binsMin[i]) {
+                    this.binsMin[i] = bins[i];
+                } else {
+                    // Decay
+                    this.binsMin[i] = this.binsMin[i];
+                }
+            }
+        }
+    }
+
     // Do not draw anything if spectrum is not visible
     if (this.ctx_axes.canvas.height < 1) {
         return;
@@ -205,12 +221,19 @@ Spectrum.prototype.drawSpectrum = function(bins) {
         this.ctx.fillStyle = "none";
         this.drawFFT(this.binsMax,"#ffff00");
     }
+
     // Draw FFT bins
     this.drawFFT(bins,"#ffffff");
 
     // Fill scaled path
     this.ctx.fillStyle = this.gradient;
     this.ctx.fill();
+
+    // Draw minhold
+    if (this.maxHold) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMin,"#ff0000");
+    }
 
     // Restore scale
     this.ctx.restore();
@@ -509,6 +532,7 @@ Spectrum.prototype.togglePaused = function() {
 Spectrum.prototype.setMaxHold = function(maxhold) {
     this.maxHold = maxhold;
     this.binsMax = undefined;
+    this.binsMin = undefined;
     this.saveSettings();
 }
 

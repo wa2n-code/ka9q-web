@@ -32,7 +32,7 @@
       var noise_density = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.50";
+      const webpage_version = "2.51";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -773,12 +773,13 @@ function dumpCSV() {
   var csvContent = "data:text/csv;charset=utf-8,"
       + data.map(row => row.join(",")).join("\n");
 
-  csvContent += "\n\nBin, Amplitude (dB?), Average (dB?), Max hold (dB?)\n";
+  csvContent += "\n\nBin, Amplitude (dB?), Average (dB?), Max hold (dB?), Min hold (dB?)\n";
   for(let i = 0; i < binCount; i++) {
     let b = (typeof spectrum.bin_copy !== 'undefined') ? spectrum.bin_copy[i].toFixed(3) : "";
     let a = (typeof spectrum.binsAverage !== 'undefined') ? spectrum.binsAverage[i].toFixed(3) : "";
     let m = (typeof spectrum.binsMax !== 'undefined') ? spectrum.binsMax[i].toFixed(3) : "";
-    csvContent += `${i}, ${b}, ${a}, ${m}\n`;
+    let n = (typeof spectrum.binsMin !== 'undefined') ? spectrum.binsMin[i].toFixed(3) : "";
+    csvContent += `${i}, ${b}, ${a}, ${m}, ${n}\n`;
   }
   const d = new Date();
   const timestring = d.toISOString();
