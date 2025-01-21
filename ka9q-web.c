@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.52";
+const char *webserver_version = "2.53";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -1191,8 +1191,8 @@ void *ctrl_thread(void *arg) {
       } else {
         if((sp=find_session_from_ssrc(ssrc)) != NULL){
 	  decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
-          float n0;
-          if (0==extract_noise(&sp->noise_density_audio,buffer+1,rx_length-1,sp)){
+          float n0 = 0.0;
+          if (0 == extract_noise(&n0,buffer+1,rx_length-1,sp)){
             sp->noise_density_audio = n0;
           }
           // check to see if the preset matches our request
