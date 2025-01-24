@@ -16,7 +16,7 @@ RESOURCES_BASE_DIR=$(PREFIX)/share/ka9q-web
 CFLAGS=$(DOPTS) $(COPTS)
 CPPFLAGS=$(INCLUDES) -DRESOURCES_BASE_DIR=$(RESOURCES_BASE_DIR)
 
-KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_RADIO_DIR)/misc.o $(KA9Q_RADIO_DIR)/decode_status.o
+KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_RADIO_DIR)/misc.o $(KA9Q_RADIO_DIR)/decode_status.o $(KA9Q_RADIO_DIR)/rtp.o
 
 ka9q-web: ka9q-web.o $(KA9Q_RADIO_OBJS)
 	$(CC) -o $@ $^ -lonion -lbsd -lm
