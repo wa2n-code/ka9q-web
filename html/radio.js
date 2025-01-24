@@ -33,7 +33,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.56";
+      const webpage_version = "2.57";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -47,7 +47,6 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 21;
-      var bin_precision_bytes = 4;
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -207,7 +206,9 @@ function calcFrequencies() {
             noise_density_spectrum = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
             const z_level = 22 - view.getUint32(i,true); i+=4;
-            bin_precision_bytes = view.getUint32(i,true); i+=4;
+            const bin_precision_bytes = view.getUint32(i,true); i+=4;
+            const bins_autorange_offset =  view.getFloat32(i,true); i+=4;
+            const bins_autorange_gain =  view.getFloat32(i,true); i+=4;
 
             if(update) {
               calcFrequencies();
@@ -238,8 +239,9 @@ function calcFrequencies() {
             else if (1 == bin_precision_bytes) {
               const i8 = new Uint8Array(dataBuffer);
               const arr = new Float32Array(binCount);
+              // dynamic autorange of 8 bit bin levels, using offset/gain from webserver
               for (i = 0; i < binCount; i++) {
-                arr[i] = 0.5 * (i8[i] - 255);
+                arr[i] = bins_autorange_offset + (bins_autorange_gain * i8[i]);
               }
               spectrum.addData(arr);
             }

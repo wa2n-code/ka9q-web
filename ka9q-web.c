@@ -40,7 +40,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.56";
+const char *webserver_version = "2.57";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -76,6 +76,10 @@ struct session {
   float noise_density_audio;
   int zoom_index;
   char requested_preset[32];
+  float bins_min_db;
+  float bins_max_db;
+  float bins_autorange_gain;
+  float bins_autorange_offset;
   /* uint32_t last_poll_tag; */
 };
 
@@ -581,6 +585,10 @@ onion_connection_status home(void *data, onion_request * req,
   sp->next=NULL;
   sp->previous=NULL;
   sp->zoom_index = 1;
+  sp->bins_min_db = -120;
+  sp->bins_max_db = 0;
+  sp->bins_autorange_offset = -130;
+  sp->bins_autorange_gain = 0.1;
   strlcpy(sp->requested_preset,"am",sizeof(sp->requested_preset));
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
@@ -908,10 +916,18 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       int64_t N = (Frontend.L + Frontend.M - 1);
       if (0 == N)
          break;
+      sp->bins_max_db = -9e99;
+      sp->bins_min_db = 9e99;
       for(int i=0; i < l_count; i++){
         power[i] = decode_float(cp,sizeof(float));
+        if (power[i] > sp->bins_max_db)
+          sp->bins_max_db = power[i];
+        if (power[i] < sp->bins_min_db)
+          sp->bins_min_db = power[i];
         cp += sizeof(float);
       }
+      sp->bins_min_db = (sp->bins_min_db == 0) ? -120 : 10.0 * log10(sp->bins_min_db);
+      sp->bins_max_db = (sp->bins_max_db == 0) ? -120 : 10.0 * log10(sp->bins_max_db);
       break;
     case NONCOHERENT_BIN_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -1085,6 +1101,8 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&sp->noise_density_audio,4); ip++;
           memcpy((void*)ip,&sp->zoom_index,4); ip++;
           memcpy((void*)ip,&bin_precision_bytes,4); ip++;
+          memcpy((void*)ip,&sp->bins_autorange_offset,4); ip++;
+          memcpy((void*)ip,&sp->bins_autorange_gain,4); ip++;
 
 	  int header_size=(uint8_t*)ip-&output_buffer[0];
 	  int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1151,21 +1169,45 @@ void *ctrl_thread(void *arg) {
 
             case 1:
             {
+              // 8 bit mode, so scale bin levels to fit 0-255
+              bool rescale = false;
+              if (sp->bins_min_db < sp->bins_autorange_offset){
+                // at least one bin would be under range, so rescale
+                rescale = true;
+              }
+              if (sp->bins_max_db > (sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain))){
+                // at least one bin would be over range, so rescale
+                rescale = true;
+              }
+              if ((sp->bins_max_db - sp->bins_min_db) < (0.5 * (255.0 * sp->bins_autorange_gain))){
+                // all bins are using less than 50% of the current range
+                if ((255.0 * sp->bins_autorange_gain) > 41){
+                  // and the current range is >41 dB, so rescale to fit
+                  rescale = true;
+                }
+              }
+
+              if (rescale){
+                // pick a floor that's below the weakest bin, rounded to a 10 dB increment
+                sp->bins_autorange_offset = 10.0 * (int)((sp->bins_min_db / 10.0) - 1);
+
+                // pick a scale factor above the hottest bin, also rounded to a 10 dB increment
+                sp->bins_autorange_gain = ((10.0 * (int)((sp->bins_max_db / 10.0) + 1)) - sp->bins_autorange_offset) / 255.0;
+                if (sp->bins_autorange_gain == 0)
+                  sp->bins_autorange_gain = 1;
+
+                fprintf(stderr,"offset: %.2f dB, gain: %.2f db/increment min: %.2f dBm, max: %.2f dBm, range: %.2f db fs: %.2f dBm\n", sp->bins_autorange_offset, sp->bins_autorange_gain, sp->bins_min_db, sp->bins_max_db, sp->bins_max_db - sp->bins_min_db, sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain));
+              }
               uint8_t *fp=(uint8_t*)ip;
-              // need to saturate if >0 dBm?
               // below center
               for(int i=npower/2; i < npower; i++) {
                 powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
-                powers[i] = (powers[i] > 0.0) ? 0.0 : powers[i];
-                powers[i] = (powers[i] < -127.0) ? -127.0 : powers[i];
-                *fp++=(255 + (powers[i] * 2.0));
+                *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
               }
               // above center
               for(int i=0; i < npower/2; i++) {
                 powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
-                powers[i] = (powers[i] > 0.0) ? 0.0 : powers[i];
-                powers[i] = (powers[i] < -127.0) ? -127.0 : powers[i];
-                *fp++=(255 + (powers[i] * 2.0));
+                *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
               }
               size=(uint8_t*)fp-&output_buffer[0];
             }
