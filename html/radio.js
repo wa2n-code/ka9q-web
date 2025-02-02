@@ -795,6 +795,59 @@ function dumpCSV() {
   link.setAttribute("download", `info_${timestring}.csv`);
   document.body.appendChild(link);
   link.click();
+  dumpHTML();
+}
+
+function dumpHTML() {
+  const c = document.getElementById("waterfall");
+  const i = c.toDataURL();
+  const stat = document.getElementById("stat_div").innerHTML.replace(/(\r\n|\n|\r)/gm, "");
+  const note = `${document.getElementById('note_text').value}`;
+  var htmlContent = "data:text/html;charset=utf-8,";
+  htmlContent +=
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${document.title}</title>
+</head>
+<body>
+  <h1 id="heading">${document.title}</h1>
+  <canvas id="waterfall" tabindex="1"></canvas>
+  <div id="stat_div"></div>
+  <div id="note_div"><textarea id="note_text" class="no-scrollbars"></textarea></div>
+  <script>
+  window.addEventListener("load", function(){
+  const screenshot = "${i.toString()}";
+  const canvas = document.getElementById('waterfall');
+  canvas.width = ${c.width};
+  canvas.height = ${c.height};
+  const ctx = canvas.getContext('2d');
+  const myImage = new Image();
+  myImage.src = screenshot;
+
+  document.getElementById("stat_div").innerHTML = '${stat.toString()}';
+  document.getElementById("note_text").value = \`${note}\`;
+
+  myImage.onload = function() {
+    ctx.drawImage(myImage, 0, 0);
+    }
+});
+
+  </script>
+  </body>
+</html>
+`;
+
+  const d = new Date();
+  const timestring = d.toISOString();
+  const encodedUri = encodeURI(htmlContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", `info_${timestring}.html`);
+  document.body.appendChild(link);
+  link.click();
 }
 
 function saveSettings() {
