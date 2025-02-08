@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/resource.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -40,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.58";
+const char *webserver_version = "2.59";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -139,6 +140,7 @@ static int nsessions=0;
 static struct session *sessions=NULL;
 
 char const *description_override=0;
+bool run_with_realtime = false;
 
 void add_session(struct session *sp) {
   pthread_mutex_lock(&session_mutex);
@@ -435,7 +437,7 @@ int main(int argc,char **argv) {
   App_path=argv[0];
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:hn:vb:")) != -1){
+    while((c = getopt(argc,argv,"d:p:m:hn:vb:r")) != -1){
       switch(c) {
         case 'd':
           dirname=optarg;
@@ -458,10 +460,13 @@ int main(int argc,char **argv) {
         case 'v':
           ++verbose;
           break;
+        case 'r':
+          run_with_realtime = true;
+          break;
         case 'h':
         default:
           fprintf(stderr,"Usage: %s\n",App_path);
-          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address] [-n radio description]\n",App_path);
+          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address] [-n radio description] [-r]\n",App_path);
           exit(EX_USAGE);
           break;
       }
@@ -1040,6 +1045,52 @@ void *spectrum_thread(void *arg) {
   return NULL;
 }
 
+/* Borrowed from ka9q-radio misc.c, commit
+   920b0921e0db3a2ca0cbb4a38707fb62ae02cd63
+
+   Change warning message to clarify ka9q-web needs to be run as root (!) or
+   maybe with CAP_SYS_NICE capability? to switch to a realtime priority. Whether
+   you want to do that is another question. WD doesn't appear to run it as root
+   or with CAP_SYS_NICE, and the warnings weren't emitted before, so now the
+   call to realtim() is gated behind a CLI flag.
+ */
+
+// Set realtime priority (if possible)
+void set_realtime(void){
+#ifdef __linux__
+  static int minprio = -1; // Save the extra system calls
+  static int maxprio = -1;
+  if(minprio == -1 || maxprio == -1){
+    minprio = sched_get_priority_min(SCHED_FIFO);
+    maxprio = sched_get_priority_max(SCHED_FIFO);
+  }
+  struct sched_param param = {0};
+  param.sched_priority = (minprio + maxprio) / 2; // midway?
+  if(sched_setscheduler(0,SCHED_FIFO|SCHED_RESET_ON_FORK,&param) == 0)
+    return; // Successfully set realtime
+  {
+    char name[25];
+    int err = errno;
+    if(pthread_getname_np(pthread_self(),name,sizeof(name)) == 0){
+      fprintf(stdout,"%s: sched_setscheduler failed, %s (%d) -- you need to be root or have CAP_SYS_NICE to set realtime priority!\n",name,strerror(err),err);
+    }
+  }
+#endif
+  // As backup, decrease our niceness by 10
+  int Base_prio = getpriority(PRIO_PROCESS,0);
+  errno = 0; // setpriority can return -1
+  int prio = setpriority(PRIO_PROCESS,0,Base_prio - 10);
+  if(prio != 0){
+    int err = errno;
+    char name[25];
+    memset(name,0,sizeof(name));
+    if(pthread_getname_np(pthread_self(),name,sizeof(name)-1) == 0){
+      fprintf(stdout,"%s: setpriority failed, %s (%d) -- you need to be root or have CAP_SYS_NICE to set realtime priority!\n",name,strerror(err),err);
+    }
+  }
+}
+
+
 void *ctrl_thread(void *arg) {
   struct session *sp;
   socklen_t ssize = sizeof(Metadata_source_socket);
@@ -1051,7 +1102,8 @@ void *ctrl_thread(void *arg) {
   double r_bin_bw;
 //fprintf(stderr,"%s\n",__FUNCTION__);
 
-  realtime();
+  if (run_with_realtime)
+    set_realtime();
 
   while(1) {
     int rx_length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
