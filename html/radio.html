@@ -160,8 +160,11 @@
       </td>
       <td></td>
       <td></td>
-      <td rowspan=1 colspan=1>
+      <td rowspan=1 colspan=2>
         <button id="csv_out" onclick="dumpCSV()">Write info file</button>
+      </td>
+      <td rowspan=1 colspan=2>
+        <button id="bug_upload" onclick="uploadBug()">Upload bug</button>
       </td>
     </tr>
     <tr>
@@ -197,7 +200,7 @@
     <span id="info"> </span>
     <span id="audiospan"> </span>
     <br>
-    <div id="note_div"><textarea id="note_text" class="no-scrollbars"></textarea></div>
+    <div id="note_div">Notes:<textarea id="note_text" class="no-scrollbars"></textarea></div>
     <ul>
     <li>Use mouse to click to a frequency.</li>
     <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
@@ -219,6 +222,7 @@
     </ul>
     <ul>
       Recent changes:
+      <li>Added "Upload bug" button to send info and screenshot for examination.</li>
       <li>Fixed cryptic realtime priority warning; use "-r" on the server
         command line to (attempt) to run with realtime or elevated priority</li>
       <li>"Write info file" button now saves both CSV file and an HTML screenshot. Try it!</li>

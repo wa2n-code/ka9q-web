@@ -33,7 +33,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.59";
+      const webpage_version = "2.60";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -70,12 +70,12 @@
         b1=byteArray[1];
         b2=byteArray[2];
         b3=byteArray[3];
- 
+
         byteArray[0]=b3;
         byteArray[1]=b2;
         byteArray[2]=b1;
         byteArray[3]=b0;
-        
+
         return view.getFloat32(0);
       }
 
@@ -139,7 +139,7 @@ function calcFrequencies() {
           var cc = (w>>24)&0x0f;
           var type = (w>>16)&0x7f;
           var seq =  w&0xffff;
-          
+
           n = view.getUint32(i);
           i=i+4;
           var timestamp=ntohl(n);
@@ -311,7 +311,7 @@ function calcFrequencies() {
       function on_ws_error() {
       }
       function is_touch_enabled() {
-        return ( 'ontouchstart' in window ) || 
+        return ( 'ontouchstart' in window ) ||
                ( navigator.maxTouchPoints > 0 ) ||
                ( navigator.msMaxTouchPoints > 0 );
       }
@@ -456,7 +456,7 @@ function calcFrequencies() {
       }
       saveSettings();
     }
-    
+
     var counter;
 
     function step_changed(value) {
@@ -732,12 +732,12 @@ async function getVersion() {
   }
 }
 
-function dumpCSV() {
+function buildCSV() {
   var t = Number(gps_time) / 1e9;
   t += 315964800;
   t -= 18;
-  var smp = Number(input_samples) / Number(input_samprate);
-  var data = [
+  const smp = Number(input_samples) / Number(input_samprate);
+  const data = [
     ["description", `"${document.title}"`],
     ["gps_time", (new Date(t * 1000)).toTimeString()],
     ["adc_samples", (Number(input_samples)).toFixed(0)],
@@ -775,8 +775,7 @@ function dumpCSV() {
     ["notes", `"${document.getElementById('note_text').value}"`],
   ];
 
-  var csvContent = "data:text/csv;charset=utf-8,"
-      + data.map(row => row.join(",")).join("\n");
+  var csvContent = data.map(row => row.join(",")).join("\n");
 
   csvContent += "\n\nBin, Amplitude (dB?), Average (dB?), Max hold (dB?), Min hold (dB?)\n";
   for(let i = 0; i < binCount; i++) {
@@ -786,10 +785,16 @@ function dumpCSV() {
     let n = (typeof spectrum.binsMin !== 'undefined') ? spectrum.binsMin[i].toFixed(3) : "";
     csvContent += `${i}, ${b}, ${a}, ${m}, ${n}\n`;
   }
+  return csvContent
+}
+
+function dumpCSV() {
+  var csvFile = "data:text/csv;charset=utf-8," + buildCSV();
+
   const d = new Date();
   const timestring = d.toISOString();
 
-  var encodedUri = encodeURI(csvContent);
+  var encodedUri = encodeURI(csvFile);
   var link = document.createElement("a");
   link.setAttribute("href", encodedUri);
   link.setAttribute("download", `info_${timestring}.csv`);
@@ -798,13 +803,12 @@ function dumpCSV() {
   dumpHTML();
 }
 
-function dumpHTML() {
+function buildScreenshot() {
   const c = document.getElementById("waterfall");
   const i = c.toDataURL();
   const stat = document.getElementById("stat_div").innerHTML.replace(/(\r\n|\n|\r)/gm, "");
   const note = `${document.getElementById('note_text').value}`;
-  var htmlContent = "data:text/html;charset=utf-8,";
-  htmlContent +=
+  var htmlContent =
     `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -839,15 +843,32 @@ function dumpHTML() {
   </body>
 </html>
 `;
+  return htmlContent;
+}
 
+function dumpHTML() {
+  const htmlFile = "data:text/html;charset=utf-8," + buildScreenshot();
   const d = new Date();
   const timestring = d.toISOString();
-  const encodedUri = encodeURI(htmlContent);
+  const encodedUri = encodeURI(htmlFile);
   const link = document.createElement("a");
   link.setAttribute("href", encodedUri);
   link.setAttribute("download", `info_${timestring}.html`);
   document.body.appendChild(link);
   link.click();
+}
+
+async function uploadBug() {
+  if (0 == document.getElementById("note_text").value.length) {
+    if (false == window.confirm("Are you sure you want to upload without any notes in the text box?")) {
+      return;
+    }
+  }
+  // create a json object and push it to my server
+  const response = await fetch("https://www.n5tnl.com/ka9q-web/up/bug", {
+    method: "POST",
+    body: JSON.stringify({csv: buildCSV(), screenshot: buildScreenshot()}),
+  });
 }
 
 function saveSettings() {

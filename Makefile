@@ -5,8 +5,8 @@ PREFIX=/usr/local
 DOPTS=-DNDEBUG=1 -O3
 
 # for debugging
-DOPTS=-g
-        
+#DOPTS=-g
+
 COPTS=-march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations -D_GNU_SOURCE=1
 
 INCLUDES=-I$(KA9Q_RADIO_DIR)
