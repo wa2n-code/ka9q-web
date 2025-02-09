@@ -196,6 +196,9 @@
     </div>
 
     <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor"/>  <label for="cursor">Activate cursor</label>
+    <input type="checkbox" id="check_live" checked />  <label for="check_live">Show live</label>
+    <input type="checkbox" id="check_max" checked />  <label for="check_max">Show max</label>
+    <input type="checkbox" id="check_min" checked />  <label for="check_min">Show min</label>
     <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
@@ -222,6 +225,7 @@
     </ul>
     <ul>
       Recent changes:
+      <li>Experimental/WIP: Added checkboxes for live, min, max spectrum traces.</li>
       <li>Added "Upload bug" button to send info and screenshot for examination.</li>
       <li>Fixed cryptic realtime priority warning; use "-r" on the server
         command line to (attempt) to run with realtime or elevated priority</li>

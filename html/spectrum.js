@@ -217,23 +217,25 @@ Spectrum.prototype.drawSpectrum = function(bins) {
         this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
 
     // Draw maxhold
-    if (this.maxHold) {
-        this.ctx.fillStyle = "none";
-        this.drawFFT(this.binsMax,"#ffff00");
-    }
+  if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
+    this.ctx.fillStyle = "none";
+    this.drawFFT(this.binsMax,"#ffff00");
+  }
 
+  if (true == document.getElementById("check_live").checked){
     // Draw FFT bins
     this.drawFFT(bins,"#ffffff");
-
     // Fill scaled path
     this.ctx.fillStyle = this.gradient;
     this.ctx.fill();
+  }
 
-    // Draw minhold
-    if (this.maxHold) {
-        this.ctx.fillStyle = "none";
-        this.drawFFT(this.binsMin,"#ff0000");
-    }
+
+  // Draw minhold
+  if ((this.maxHold) && (true == document.getElementById("check_min").checked)) {
+    this.ctx.fillStyle = "none";
+    this.drawFFT(this.binsMin,"#ff0000");
+  }
 
     // Restore scale
     this.ctx.restore();
