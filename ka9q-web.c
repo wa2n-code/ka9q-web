@@ -304,7 +304,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
   if ((int) data_ready_len < 0) {
     // The browser is closing the connection
     websocket_closed(sp);
-    delete_session(sp);			// Note that this releases the lock
+    delete_session(sp);                         // Note that this releases the lock
     return OCS_CLOSE_CONNECTION;
   }
 
@@ -320,7 +320,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
     ONION_ERROR("Error reading data: %d: %s (%d) ws=%p", errno, strerror(errno),
                 data_ready_len,ws);
     websocket_closed(sp);
-    delete_session(sp);			// Note that this releases the lock
+    delete_session(sp);                         // Note that this releases the lock
     return OCS_CLOSE_CONNECTION;
   }
   tmp[len] = 0;
@@ -1112,27 +1112,27 @@ void *ctrl_thread(void *arg) {
       //      fprintf(stderr,"%s: ssrc=%d\n",__FUNCTION__,ssrc);
       if(ssrc%2==1) { // Spectrum data
         if((sp=find_session_from_ssrc(ssrc-1)) != NULL){
-	  //	  fprintf(stderr,"forward spectrum: ws=%p\n",sp->ws);
+          //      fprintf(stderr,"forward spectrum: ws=%p\n",sp->ws);
 
           // newell 12/1/2024, 19:07:31
           // is it kosher to call this here? It made some of the stat values
           // update more often, so I hacked it in.
           decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
 
-	  struct rtp_header rtp;
-	  memset(&rtp,0,sizeof(rtp));
-	  rtp.type = 0x7F; // spectrum data
-	  rtp.version = RTP_VERS;
-	  rtp.ssrc = sp->ssrc;
-	  rtp.marker = true; // Start with marker bit on to reset playout buffer
-	  rtp.seq = rtp_seq++;
-	  uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
+          struct rtp_header rtp;
+          memset(&rtp,0,sizeof(rtp));
+          rtp.type = 0x7F; // spectrum data
+          rtp.version = RTP_VERS;
+          rtp.ssrc = sp->ssrc;
+          rtp.marker = true; // Start with marker bit on to reset playout buffer
+          rtp.seq = rtp_seq++;
+          uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
 
-	  uint32_t *ip=(uint32_t*)bp;
-	  *ip++=htonl(sp->bins);
-	  *ip++=htonl(sp->center_frequency);
-	  *ip++=htonl(sp->frequency);
-	  *ip++=htonl(sp->bin_width);
+          uint32_t *ip=(uint32_t*)bp;
+          *ip++=htonl(sp->bins);
+          *ip++=htonl(sp->center_frequency);
+          *ip++=htonl(sp->frequency);
+          *ip++=htonl(sp->bin_width);
 
           // newell 12/1/2024, 19:04:37
           // Should this be TLV encoding like the radiod RTP streams?
@@ -1156,10 +1156,10 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&sp->bins_autorange_offset,4); ip++;
           memcpy((void*)ip,&sp->bins_autorange_gain,4); ip++;
 
-	  int header_size=(uint8_t*)ip-&output_buffer[0];
-	  int length=(PKTSIZE-header_size)/sizeof(float);
-	  int npower = extract_powers(powers,length,&time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,rx_length-1,sp);
-	  if(npower < 0){
+          int header_size=(uint8_t*)ip-&output_buffer[0];
+          int length=(PKTSIZE-header_size)/sizeof(float);
+          int npower = extract_powers(powers,length,&time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,rx_length-1,sp);
+          if(npower < 0){
             /* char filename[256]; */
             /* sprintf(filename,"%d_%d_%08X.bin",error_count,ssrc,sp->last_poll_tag); */
             /* FILE *f = fopen(filename,"w"); */
@@ -1167,9 +1167,9 @@ void *ctrl_thread(void *arg) {
             /*   fwrite(buffer,rx_length,1,f); */
             /*   fclose(f); */
             /* } */
-	    pthread_mutex_unlock(&session_mutex);
-	    continue; // Invalid for some reason
-	  }
+            pthread_mutex_unlock(&session_mutex);
+            continue; // Invalid for some reason
+          }
           /* ++ok_count; */
           /* if (!(ok_count % 100)){ */
           /*   char filename[256]; */
@@ -1266,19 +1266,19 @@ void *ctrl_thread(void *arg) {
             break;
           }
 
-	  // send the spectrum data to the client
-	  pthread_mutex_lock(&sp->ws_mutex);
-	  onion_websocket_set_opcode(sp->ws,OWS_BINARY);
-	  int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
-	  if(r<=0) {
-	    fprintf(stderr,"%s: write failed: %d(size=%d)\n",__FUNCTION__,r,size);
-	  }
-	  pthread_mutex_unlock(&sp->ws_mutex);
-	  pthread_mutex_unlock(&session_mutex);
-	}
+          // send the spectrum data to the client
+          pthread_mutex_lock(&sp->ws_mutex);
+          onion_websocket_set_opcode(sp->ws,OWS_BINARY);
+          int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
+          if(r<=0) {
+            fprintf(stderr,"%s: write failed: %d(size=%d)\n",__FUNCTION__,r,size);
+          }
+          pthread_mutex_unlock(&sp->ws_mutex);
+          pthread_mutex_unlock(&session_mutex);
+        }
       } else {
         if((sp=find_session_from_ssrc(ssrc)) != NULL){
-	  decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
+          decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
           float n0 = 0.0;
           if (0 == extract_noise(&n0,buffer+1,rx_length-1,sp)){
             sp->noise_density_audio = n0;
@@ -1289,23 +1289,23 @@ void *ctrl_thread(void *arg) {
               fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
             control_set_mode(sp,sp->requested_preset);
           }
-	  pthread_mutex_lock(&output_dest_socket_mutex);
-	  if(Channel.output.dest_socket.sa_family != 0)
-	    pthread_cond_broadcast(&output_dest_socket_cond);
-	  pthread_mutex_unlock(&output_dest_socket_mutex);
-	  struct rtp_header rtp;
-	  memset(&rtp,0,sizeof(rtp));
-	  rtp.type = 0x7E; // radio data
-	  rtp.version = RTP_VERS;
-	  rtp.ssrc = sp->ssrc;
-	  rtp.marker = true; // Start with marker bit on to reset playout buffer
-	  rtp.seq = rtp_seq++; // ??????
-	  uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
-	  //int header_size=bp-&output_buffer[0];
-	  //int length=(PKTSIZE-header_size)/sizeof(float);
-	  encode_float(&bp,BASEBAND_POWER,Channel.sig.bb_power);
-	  encode_float(&bp,LOW_EDGE,Channel.filter.min_IF);
-	  encode_float(&bp,HIGH_EDGE,Channel.filter.max_IF);
+          pthread_mutex_lock(&output_dest_socket_mutex);
+          if(Channel.output.dest_socket.sa_family != 0)
+            pthread_cond_broadcast(&output_dest_socket_cond);
+          pthread_mutex_unlock(&output_dest_socket_mutex);
+          struct rtp_header rtp;
+          memset(&rtp,0,sizeof(rtp));
+          rtp.type = 0x7E; // radio data
+          rtp.version = RTP_VERS;
+          rtp.ssrc = sp->ssrc;
+          rtp.marker = true; // Start with marker bit on to reset playout buffer
+          rtp.seq = rtp_seq++; // ??????
+          uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
+          //int header_size=bp-&output_buffer[0];
+          //int length=(PKTSIZE-header_size)/sizeof(float);
+          encode_float(&bp,BASEBAND_POWER,Channel.sig.bb_power);
+          encode_float(&bp,LOW_EDGE,Channel.filter.min_IF);
+          encode_float(&bp,HIGH_EDGE,Channel.filter.max_IF);
           if (!sp->once) {
             sp->once = true;
             if (description_override)
@@ -1313,16 +1313,16 @@ void *ctrl_thread(void *arg) {
             else
               encode_string(&bp,DESCRIPTION,Frontend.description,strlen(Frontend.description));
           }
-	  pthread_mutex_lock(&sp->ws_mutex);
-	  onion_websocket_set_opcode(sp->ws,OWS_BINARY);
-	  int size=(uint8_t*)bp-&output_buffer[0];
-	  int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
-	  if(r<=0) {
-	    fprintf(stderr,"%s: write failed: %d\n",__FUNCTION__,r);
-	  }
-	  pthread_mutex_unlock(&sp->ws_mutex);
-	  pthread_mutex_unlock(&session_mutex);
-	}
+          pthread_mutex_lock(&sp->ws_mutex);
+          onion_websocket_set_opcode(sp->ws,OWS_BINARY);
+          int size=(uint8_t*)bp-&output_buffer[0];
+          int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
+          if(r<=0) {
+            fprintf(stderr,"%s: write failed: %d\n",__FUNCTION__,r);
+          }
+          pthread_mutex_unlock(&sp->ws_mutex);
+          pthread_mutex_unlock(&session_mutex);
+        }
       }
     } else if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
 fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);

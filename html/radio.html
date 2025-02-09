@@ -8,11 +8,11 @@
     <script src="colormap.js"></script>
     <script src="spectrum.js"></script>
     <script src="pcm-player.js"></script>
-    <script src="radio.js"></script> 
+    <script src="radio.js"></script>
 </head>
 <body>
     <h1 id="heading">G0ORX Web SDR + ka9q-radio</h1>
-    <audio id="audio"> 
+    <audio id="audio">
     </audio>
     <!-- canvas needs 'tabindex' to be focusable
          https://stackoverflow.com/questions/12886286/addeventlistener-for-keydown-on-canvas
@@ -41,30 +41,30 @@
     <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:80px; height:50px">  Freq +  </button>
     </td>
     <td rowspan=2 colspan=2>
-    <label for="step">Step:</label> 
-    <select name="step" id="step" onchange="step_changed(this.value)"> 
+    <label for="step">Step:</label>
+    <select name="step" id="step" onchange="step_changed(this.value)">
         <option value="1">1Hz</option>
-        <option value="10">10Hz</option> 
-        <option value="100">100Hz</option> 
-        <option value="250">250Hz</option> 
-        <option value="500">500Hz</option> 
+        <option value="10">10Hz</option>
+        <option value="100">100Hz</option>
+        <option value="250">250Hz</option>
+        <option value="500">500Hz</option>
         <option value="1000">1KHz</option>
-        <option value="5000">5KHz</option> 
-        <option value="9000">9KHz</option> 
-        <option value="10000">10KHz</option> 
-        <option value="100000">100KHz</option> 
-        <option value="1000000">1MHz</option> 
+        <option value="5000">5KHz</option>
+        <option value="9000">9KHz</option>
+        <option value="10000">10KHz</option>
+        <option value="100000">100KHz</option>
+        <option value="1000000">1MHz</option>
     </select>
     </td>
     <td rowspan=1 colspan=2>
-    <label for="mode">Mode:</label> 
-    <select name="mode" id="mode" onchange="setMode(this.value)"> 
-        <option value="cwu">CWU</option> 
-        <option value="cwl">CWL</option> 
+    <label for="mode">Mode:</label>
+    <select name="mode" id="mode" onchange="setMode(this.value)">
+        <option value="cwu">CWU</option>
+        <option value="cwl">CWL</option>
         <option value="usb">USB</option>
-        <option value="lsb">LSB</option> 
-        <option value="am">AM</option> 
-        <option value="sam">SAM</option> 
+        <option value="lsb">LSB</option>
+        <option value="am">AM</option>
+        <option value="sam">SAM</option>
         <option value="fm">FM</option>
     </select>
     </td>
@@ -86,19 +86,19 @@
     <button id="rangedec" onclick="rangeDecrease()">Range -</button>
     </td>
     <td rowspan=1 colspan=2>
-    <label for="band">Band:</label> 
+    <label for="band">Band:</label>
     <select name="band" id="band" onchange="setBand(this.value)">
         <option value="" disabled selected hidden>Select Band</option>
-        <option value="1900000">160M</option> 
-        <option value="3600000">80M</option> 
-        <option value="5406500">60M</option> 
-        <option value="7150000">40M</option> 
-        <option value="10130000">30M</option> 
-        <option value="14175000">20M</option> 
-        <option value="18111000">17M</option> 
-        <option value="21300000">15M</option> 
-        <option value="24931000">12M</option> 
-        <option value="29000000">10M</option> 
+        <option value="1900000">160M</option>
+        <option value="3600000">80M</option>
+        <option value="5406500">60M</option>
+        <option value="7150000">40M</option>
+        <option value="10130000">30M</option>
+        <option value="14175000">20M</option>
+        <option value="18111000">17M</option>
+        <option value="21300000">15M</option>
+        <option value="24931000">12M</option>
+        <option value="29000000">10M</option>
     </select>
     </td>
     <td rowspan=1 colspan=2 align='center'>
@@ -240,4 +240,3 @@
     <i>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)</i>
   </body>
 </html>
-
