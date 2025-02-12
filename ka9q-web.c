@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.62";
+const char *webserver_version = "2.63";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -476,7 +476,7 @@ int main(int argc,char **argv) {
   fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   pthread_mutex_init(&session_mutex,NULL);
   init_connections(mcast);
-  onion *o = onion_new(O_THREADED);
+  onion *o = onion_new(O_THREADED | O_NO_SIGTERM);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
   onion_set_hostname(o, "::");

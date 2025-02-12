@@ -33,7 +33,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.62";
+      const webpage_version = "2.63";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -666,7 +666,7 @@ function update_stats() {
   // ugly hack to get the stats on the webpage. Formatting is terrible, but
   // perfect is the enemy of good, right?
   document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
-  document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " M";
+  document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();
   document.getElementById('adc_last_over').innerHTML = "Last overrange: " + (samples_since_over / BigInt(input_samprate)).toString() + " s";
