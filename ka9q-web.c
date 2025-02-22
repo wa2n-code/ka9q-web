@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.63";
+const char *webserver_version = "2.64";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -81,6 +81,7 @@ struct session {
   float bins_max_db;
   float bins_autorange_gain;
   float bins_autorange_offset;
+  time_t last_diag_time;
   /* uint32_t last_poll_tag; */
 };
 
@@ -655,6 +656,18 @@ static void *audio_thread(void *arg) {
     sp=find_session_from_ssrc(pkt->rtp.ssrc);
 //fprintf(stderr,"%s: sp=%p ssrc=%d\n",__FUNCTION__,sp,pkt->rtp.ssrc);
     if(sp!=NULL) {
+      time_t now = time(0);
+      if ((now - sp->last_diag_time) > 0){
+        fprintf(stderr,"SSRC: %d audio: %s size: %u pt: %d seq: %d ts: %u\n",
+                sp->ssrc,
+                sp->audio_active?"active":"off",
+                size,
+                pkt->rtp.type,
+                pkt->rtp.seq,
+                pkt->rtp.timestamp);
+        sp->last_diag_time = now;
+      }
+
       if(sp->audio_active) {
         //fprintf(stderr,"forward RTP: ws=%p ssrc=%d\n",sp->ws,pkt->rtp.ssrc);
         pthread_mutex_lock(&sp->ws_mutex);
@@ -1248,7 +1261,7 @@ void *ctrl_thread(void *arg) {
                 if (sp->bins_autorange_gain == 0)
                   sp->bins_autorange_gain = 1;
 
-                fprintf(stderr,"offset: %.2f dB, gain: %.2f db/increment min: %.2f dBm, max: %.2f dBm, range: %.2f db fs: %.2f dBm\n", sp->bins_autorange_offset, sp->bins_autorange_gain, sp->bins_min_db, sp->bins_max_db, sp->bins_max_db - sp->bins_min_db, sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain));
+                //fprintf(stderr,"offset: %.2f dB, gain: %.2f db/increment min: %.2f dBm, max: %.2f dBm, range: %.2f db fs: %.2f dBm\n", sp->bins_autorange_offset, sp->bins_autorange_gain, sp->bins_min_db, sp->bins_max_db, sp->bins_max_db - sp->bins_min_db, sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain));
               }
               uint8_t *fp=(uint8_t*)ip;
               // below center
