@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.64";
+const char *webserver_version = "2.65";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -81,7 +81,6 @@ struct session {
   float bins_max_db;
   float bins_autorange_gain;
   float bins_autorange_offset;
-  time_t last_diag_time;
   /* uint32_t last_poll_tag; */
 };
 
@@ -656,18 +655,6 @@ static void *audio_thread(void *arg) {
     sp=find_session_from_ssrc(pkt->rtp.ssrc);
 //fprintf(stderr,"%s: sp=%p ssrc=%d\n",__FUNCTION__,sp,pkt->rtp.ssrc);
     if(sp!=NULL) {
-      time_t now = time(0);
-      if ((now - sp->last_diag_time) > 0){
-        fprintf(stderr,"SSRC: %d audio: %s size: %u pt: %d seq: %d ts: %u\n",
-                sp->ssrc,
-                sp->audio_active?"active":"off",
-                size,
-                pkt->rtp.type,
-                pkt->rtp.seq,
-                pkt->rtp.timestamp);
-        sp->last_diag_time = now;
-      }
-
       if(sp->audio_active) {
         //fprintf(stderr,"forward RTP: ws=%p ssrc=%d\n",sp->ws,pkt->rtp.ssrc);
         pthread_mutex_lock(&sp->ws_mutex);

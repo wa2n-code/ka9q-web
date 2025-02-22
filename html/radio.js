@@ -33,7 +33,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.64";
+      const webpage_version = "2.65";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -750,7 +750,6 @@ function buildCSV() {
     ["rf_cal", rf_level_cal.toFixed(1)],
     ["rf_agc", rf_agc==1],
     ["if_power", if_power.toFixed(1)],
-    ["noise_density spectrum", noise_density_spectrum.toFixed(1)],
     ["noise_density audio", noise_density_audio.toFixed(1)],
     ["bins", binCount],
     ["bin_width", binWidthHz],
