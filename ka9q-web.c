@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.66";
+const char *webserver_version = "2.67";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -73,7 +73,6 @@ struct session {
   struct session *previous;
   bool once;
   float if_power;
-  float noise_density_spectrum;
   float noise_density_audio;
   int zoom_index;
   char requested_preset[32];
@@ -944,9 +943,6 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       // instead? This seems to work for now at least.
       sp->if_power = decode_float(cp,optlen);
       break;
-    case NOISE_DENSITY:
-      sp->noise_density_spectrum = decode_float(cp,optlen);
-      break;
     case BIN_COUNT: // Do we check that this equals the length of the BIN_DATA tlv?
       l_ccount = decode_int(cp,optlen);
       break;
@@ -1149,7 +1145,6 @@ void *ctrl_thread(void *arg) {
           memcpy((void*)ip,&Frontend.rf_gain,4); ip++;
           memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
           memcpy((void*)ip,&sp->if_power,4); ip++;
-          memcpy((void*)ip,&sp->noise_density_spectrum,4); ip++;
           memcpy((void*)ip,&sp->noise_density_audio,4); ip++;
           memcpy((void*)ip,&sp->zoom_index,4); ip++;
           memcpy((void*)ip,&bin_precision_bytes,4); ip++;
@@ -1288,6 +1283,17 @@ void *ctrl_thread(void *arg) {
             if (verbose)
               fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
             control_set_mode(sp,sp->requested_preset);
+          }
+          // verify tuned frequency is correct, too
+          if (Channel.tune.freq != sp->frequency){
+            if (verbose)
+              fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, retrying...\n",
+                      sp->ssrc,
+                      0.001 * sp->frequency,
+                      Channel.tune.freq * 0.001);
+            char f[128];
+            sprintf(f,"%.3f",0.001 * sp->frequency);
+            control_set_frequency(sp,f);
           }
           pthread_mutex_lock(&output_dest_socket_mutex);
           if(Channel.output.dest_socket.sa_family != 0)

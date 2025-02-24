@@ -33,7 +33,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.66";
+      const webpage_version = "2.67";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -203,7 +203,6 @@ function calcFrequencies() {
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
-            noise_density_spectrum = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
             const z_level = 22 - view.getUint32(i,true); i+=4;
             const bin_precision_bytes = view.getUint32(i,true); i+=4;
