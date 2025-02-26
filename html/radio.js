@@ -693,7 +693,15 @@ function update_stats() {
 
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
+
+  // This line does not work with scott's new code
+  //  document.getElementById("ge_data").textContent = `Channel: ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, Power: ${power.toFixed(0)} dBm, `;
+
   document.getElementById("ge_data").textContent = `Baseband/: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, ${(new Date(t * 1000)).toUTCString()}`;
+  // Show S Units
+  var ss = Sunits(power);
+  document.getElementById("s_data").textContent = ss;
+
   return;
   /*
   // newell 12/1/2024, 19:10:56
@@ -939,3 +947,20 @@ function rx(x) {
     last_rx_interval = t;
   }
 }
+
+function Sunits(value) {
+  let p = Math.round(value);
+
+  let s = p;
+  if (p < -67) 
+  {
+    s = 'S' + Math.floor((p + 127) / 6);
+  } 
+  else 
+  {
+    s = 'S9+' + (Math.floor((p + 78) / 10) * 10);
+  }
+  return s;
+}
+
+
