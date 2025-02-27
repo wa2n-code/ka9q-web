@@ -710,7 +710,7 @@ function update_stats() {
   }
   else 
   {
-    document.getElementById("s_data").style.color = "white  ";
+    document.getElementById("s_data").style.color = "black";
   }
   document.getElementById("s_data").textContent = `${ss}`;
 
