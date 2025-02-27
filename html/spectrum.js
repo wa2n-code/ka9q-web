@@ -605,6 +605,10 @@ Spectrum.prototype.onKeypress = function(e) {
         this.decrementAveraging();
     } else if (e.key == "m") {
         this.toggleMaxHold();
+    } else if (e.key == "z") {
+        //this.zoomcenter();
+        ws.send("Z:c");
+        saveSettings();
     }
 }
 
