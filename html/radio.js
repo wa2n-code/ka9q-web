@@ -694,13 +694,25 @@ function update_stats() {
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
-  // This line does not work with scott's new code
-  //  document.getElementById("ge_data").textContent = `Channel: ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, Power: ${power.toFixed(0)} dBm, `;
-
-  document.getElementById("ge_data").textContent = `Baseband/: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW, ${(new Date(t * 1000)).toUTCString()}`;
-  // Show S Units
+  // Show reordered info into ge_data left table column
+  document.getElementById("ge_data").textContent = `${(new Date(t * 1000)).toUTCString()}, Freq: ${(spectrum.frequency / 1e3).toFixed(0)} kHz, BW ${(filter_high - filter_low).toFixed(0)} Hz,`;
+  // Show power in 2nd column
+  document.getElementById("pwr_data").textContent = ` Pwr: ${power.toFixed(0)} `;
+  // print units in 3rd column
+  document.getElementById("pwr_units").textContent = "dBm, Signal:";
+  // Show S Units in 4th column
   var ss = Sunits(power);
-  document.getElementById("s_data").textContent = ss;
+
+  var len = ss.length;
+  if (len > 3)
+  {
+    document.getElementById("s_data").style.color = "red";
+  }
+  else 
+  {
+    document.getElementById("s_data").style.color = "white  ";
+  }
+  document.getElementById("s_data").textContent = `${ss}`;
 
   return;
   /*
