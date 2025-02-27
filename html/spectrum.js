@@ -606,8 +606,13 @@ Spectrum.prototype.onKeypress = function(e) {
     } else if (e.key == "m") {
         this.toggleMaxHold();
     } else if (e.key == "z") {
-        //this.zoomcenter();
         ws.send("Z:c");
+        saveSettings();
+    } else if (e.key == "i") {
+      	ws.send("Z:+:"+document.getElementById('freq').value);
+	saveSettings();
+    } else if (e.key == "o") {
+        ws.send("Z:-:"+document.getElementById('freq').value);
         saveSettings();
     }
 }
