@@ -701,7 +701,7 @@ function update_stats() {
   // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm, Signal:";
   // Show S Units in 4th column
-  var ss = Sunits(power);
+  var ss = computeSUnits(power);
 
   var len = ss.length;
   if (len > 3)
@@ -960,19 +960,14 @@ function rx(x) {
   }
 }
 
-function Sunits(value) {
+function computeSUnits(value) {
   let p = Math.round(value);
-
-  let s = p;
-  if (p < -67) 
-  {
+  var s;
+  if (p < -67) {     
     s = 'S' + Math.floor((p + 127) / 6);
   } 
-  else 
-  {
+  else {
     s = 'S9+' + (Math.floor((p + 78) / 10) * 10);
   }
   return s;
 }
-
-

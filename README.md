@@ -80,6 +80,12 @@ sudo ldconfig
 
 ### 4 - Build and install ka9q-web
 
+ - cd ~
+
+- `git clone https://github.com/scottnewell/ka9q-web.git`
+
+- cd ka9q-web
+
 - edit the first line of `Makefile` to point to the directory where you built ka9q-radio
 - run:
 ```
@@ -118,4 +124,4 @@ ka9q-web -m hf.local
 
 ## Copyright
 
-(C) 2023-2024 John Melton G0ORX - Licensed under the GNU GPL V3 (see [LICENSE](LICENSE))
+(C) 2023-2025 John Melton G0ORX - Licensed under the GNU GPL V3 (see [LICENSE](LICENSE))
