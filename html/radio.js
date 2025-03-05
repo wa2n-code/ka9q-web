@@ -1,5 +1,5 @@
 //
-// G0ORX WebSDR using ka9q-radio
+// G0ORX WebSDR using ka9q-radio uddated March 5, 2025 WA2N WA2ZKD
 //
 //
       var ssrc;
@@ -695,11 +695,11 @@ function update_stats() {
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column
-  document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz, BW ${(filter_high - filter_low).toFixed(0)} Hz,`;
+  document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${(filter_high - filter_low).toFixed(0)} Hz |`;
   // Show power in 2nd column
-  document.getElementById("pwr_data").textContent = ` Power: ${power.toFixed(0)} `;
+  document.getElementById("pwr_data").textContent = ` Power: ${power.toFixed(0)}`;
   // print units in 3rd column
-  document.getElementById("pwr_units").textContent = "dBm, Signal:";
+  document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show S Units in 4th column
   var ss = computeSUnits(power);
 
