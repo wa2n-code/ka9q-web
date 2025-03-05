@@ -10,6 +10,7 @@
     <script src="spectrum.js"></script>
     <script src="pcm-player.js"></script>
     <script src="radio.js"></script>
+    <script src="smeter.js" defer></script>
 </head>
 <body>
     <font face="Arial">
@@ -31,11 +32,11 @@
     <td width=55px><span id="s_data"></span></td>
     </tr>
     </table>
-
     <br>
     <table style="border: solid;  border-color: dimgray">
 
-    <tr>
+      <canvas id="smeter" width="100" height="20"></canvas>
+      <tr>
     <td rowspan=1 colspan=1>
     <button id="postion_up" onclick="positionUp()">Position +</button>
     </td>
@@ -123,7 +124,9 @@
         <option value="cwu">CWU</option>
         <option value="cwl">CWL</option>
         <option value="usb">USB</option>
+        <option value="wusb">WUSB</option>
         <option value="lsb">LSB</option>
+        <option value="wlsb">WLSB</option>
         <option value="am">AM</option>
         <option value="sam">SAM</option>
         <option value="fm">FM</option>

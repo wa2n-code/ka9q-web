@@ -713,7 +713,10 @@ function update_stats() {
     document.getElementById("s_data").style.color = "green";
   }
   document.getElementById("s_data").textContent = `${ss}`;
-
+  
+  // Update the signal bar meter
+  updateSMeter(power);
+  
   return;
   /*
   // newell 12/1/2024, 19:10:56
@@ -963,11 +966,13 @@ function rx(x) {
 function computeSUnits(value) {
   let p = Math.round(value);
   var s;
-  if (p < -67) {     
+  //if (p < -67) {     
+  if (p <= -73) {     
     s = 'S' + Math.floor((p + 127) / 6);
   } 
   else {
-    s = 'S9+' + (Math.floor((p + 78) / 10) * 10);
+    //s = 'S9+' + ((p + 78) / 10) * 10;
+    s = 'S9+' + ((p + 73) / 10) * 10;
   }
   return s;
 }
