@@ -38,32 +38,56 @@ gradient.addColorStop(0,'green');
 gradient.addColorStop
 ctx.fillStyle = gradient;
 
-function updateSMeter(SignalLevel){
-    // clear Canvas 
-    ctx.clearRect(0,0, cWidth, cHeight);
-    
-    var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
-    
-    // An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
-    var normSig;
-    if(SignalLevel <= s9SignalLevel)
-    {
-        normSig = adjustedSignal / belowS9Span * s9pfs;
-    }
-    else
-    {        
-        normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) /aboveS9Span * s9Plus60pfs;
-    }
+function createUpdateSMeter() {
+    let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
+    let executionCount = 0; // Static variable that counts the number of times the updateSMeter function is called
 
-    // Protect over under range
-    if (normSig > 1) {
-        normSig = 1;
-    }
-    if (normSig < 0) {
-        normSig = 0;
-    }
-    ctx.fillRect(0, 0, cWidth*normSig, cHeight);
-    ctx.strokeRect(0,0, cWidth, cHeight); 
+    return function updateSMeter(SignalLevel, maxHold) {
+        const maxBarHeight = 0.3;  // 30% of the canvas height
+        
+        // clear Canvas 
+        ctx.clearRect(0, 0, cWidth, cHeight);
+        var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
+
+        // An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
+        var normSig;
+        if (SignalLevel <= s9SignalLevel) {
+            normSig = adjustedSignal / belowS9Span * s9pfs;
+        } else {
+            normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) / aboveS9Span * s9Plus60pfs;
+        }
+
+        // Protect over under range
+        if (normSig > 1) {
+            normSig = 1;
+        }
+        if (normSig < 0) {
+            normSig = 0;
+        }
+        if (maxHold == true) {
+            executionCount++;
+            if(executionCount > 30) {
+                executionCount = 0;
+                lastMax = normSig;
+            }
+            if (normSig > lastMax) 
+            {
+                lastMax = normSig;
+            }
+            // fILL the top 1/3 with the max hold bar graph
+            ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
+            // fill bottom 2/3 with the real time bar graph
+            ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
+        }
+        else 
+        {
+            ctx.fillRect(0, 0, cWidth * normSig, cHeight);
+        }   
+        // Draw the border
+        ctx.strokeRect(0, 0, cWidth, cHeight);
+    };
 }
+
+const updateSMeter = createUpdateSMeter();
 
 

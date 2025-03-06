@@ -28,3 +28,9 @@ body {
 #stat_table td:first-child { width: 40%; }
 #stat_table td:nth-child(2) { width: 20%; }
 #stat_table td:last-child { width: 40%; }
+
+h4#heading {
+    margin: 0;
+    padding: 0;
+    line-height: 1.2; /* Adjust this value as needed */
+}

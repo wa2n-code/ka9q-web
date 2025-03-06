@@ -715,7 +715,7 @@ function update_stats() {
   document.getElementById("s_data").textContent = `${ss}`;
   
   // Update the signal bar meter
-  updateSMeter(power);
+  updateSMeter(power,spectrum.maxHold);
   
   return;
   /*
