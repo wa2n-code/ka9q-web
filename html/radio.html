@@ -50,8 +50,8 @@
     <input type="text" id="freq" style="color:green; font-size:30px; height:40px;
     width:150px; border:solid" value="" onchange="setFrequency()"/>
     </td>
-    <td rowspan=2 colspan=>
-    <label for="step">&nbsp;&nbsp;&nbsp;&nbsp;Step:</label>
+    <td rowspan=2 align="center">
+    <label for="step">Step:</label>
     <select name="step" id="step" onchange="step_changed(this.value)">
         <option value="1">1Hz</option>
         <option value="10">10Hz</option>
@@ -122,8 +122,8 @@
         <option value="25000000">WWV25MHz</option>
     </select>
     </td>
-    <td colspan=2>
-    <label for="mode" style="font-size:15px">&nbsp;&nbsp;&nbsp;&nbsp;Mode:</label>
+    <td colspan=2 align="center">
+    <label for="mode" style="font-size:15px">Mode:</label>
     <select name="mode" id="mode" onchange="setMode(this.value)">
         <option value="cwu">CWU</option>
         <option value="cwl">CWL</option>
@@ -153,9 +153,8 @@
         <td>
     <button style="width:182px" onclick="setFrequency()">Set Frequency (kHz)</button>
     </td>
-    <td>
-    <label for="max_hold"
-    style="font-size:15px">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Hold:</label>
+    <td align="center">
+    <label for="max_hold" style="font-size:15px">Hold:</label>
     <button id="max_hold" onclick="spectrum.toggleMaxHold()">Max hold</button>
     </td>
       <td colspan=4>
@@ -192,7 +191,7 @@
           <option value="1.1">1.1</option>
         </select>
       </td>
-    <td rowspan=2>&nbsp;&nbsp;Spectrum:
+    <td rowspan=2 align="center">Spectrum:
     <button id="pause" style="height:40px; width:60px" onclick="spectrum.togglePaused()">Pause</button>
     </td>
 
@@ -201,8 +200,8 @@
       <td><font size="-1">Spectrum range:</td>
       <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()"/>
       <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()"/></td>
-      <td rowspan=2 colspan=1>
-        <label for="colormap" style="font-size:15px">&nbsp;&nbsp;Colormap:</label>
+      <td rowspan=2 colspan=1 align="center">
+        <label for="colormap" style="font-size:15px">Colormap:</label>
         <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
           <option value="0">turbo</option>
           <option value="1">fosphorz</option>
