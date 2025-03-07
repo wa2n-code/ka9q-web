@@ -695,7 +695,7 @@ function update_stats() {
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
-  document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${Math.abs(Math.abs(filter_high) - Math.abs(filter_low)).toFixed(0)} Hz |`;
+  document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${Math.abs(filter_high - filter_low).toFixed(0)} Hz |`;
   // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
