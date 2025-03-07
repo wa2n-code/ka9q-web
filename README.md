@@ -125,7 +125,6 @@ ka9q-web has five additional modes that can be employed via the drop-down mode s
 The easiest way to create a new mode configuration is to edit the presets.conf file and copy / paste an existing mode, then change the ID tag and whatever parameter you want changed below the new ID tag. As an example, here is a preset that matches the "WUSB" mode that widens the high-side filter edge to 3,500 Hz:
 
 [wusb]
-# Wide upper sideband, with good low frequency response
 demod = linear
 samprate = 12k
 low =  +50.0
