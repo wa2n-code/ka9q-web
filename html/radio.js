@@ -694,26 +694,12 @@ function update_stats() {
   document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
-  // Show reordered info into ge_data left table column
+  // Show reordered info into ge_data left table column 1
   document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${(filter_high - filter_low).toFixed(0)} Hz |`;
-  // Show power in 2nd column
-  document.getElementById("pwr_data").textContent = ` Power: ${power.toFixed(0)}`;
   // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
-  // Show S Units in 4th column
-  var ss = computeSUnits(power);
-
-  var len = ss.length;
-  if (len > 3)
-  {
-    document.getElementById("s_data").style.color = "red";
-  }
-  else 
-  {
-    document.getElementById("s_data").style.color = "green";
-  }
-  document.getElementById("s_data").textContent = `${ss}`;
-  
+  // Show power in 2nd column and S Units in 4th column from computeSUnits function
+  computeSUnits(power,spectrum.maxHold);
   // Update the signal bar meter
   updateSMeter(power,spectrum.maxHold);
   
@@ -963,16 +949,3 @@ function rx(x) {
   }
 }
 
-function computeSUnits(value) {
-  let p = Math.round(value);
-  var s;
-  //if (p < -67) {     
-  if (p <= -73) {     
-    s = 'S' + Math.floor((p + 127) / 6);
-  } 
-  else {
-    //s = 'S9+' + ((p + 78) / 10) * 10;
-    s = 'S9+' + ((p + 73) / 10) * 10;
-  }
-  return s;
-}

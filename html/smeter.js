@@ -4,6 +4,9 @@ const cWidth = canvas.width;
 const cHeight = canvas.height;
 ctx.fillStyle = "#000000";
 ctx.fillRect(0,0, cWidth, cHeight); 
+const updateSMeter = createUpdateSMeter();
+const computeSUnits = createComputeSUnits();
+
 
     // Create and paint a bargraph which represents the S meter signal level
     // The S meter is a logarithmic scale that is not linear.  The S meter is defined as S0 to S9+60dBm
@@ -44,7 +47,7 @@ function createUpdateSMeter() {
 
     return function updateSMeter(SignalLevel, maxHold) {
         const maxBarHeight = 0.3;  // 30% of the canvas height
-        
+        const executionCountHit = 30; // Number of times (seconds*10?) the updateSMeter function is called before the max hold bar graph is updated
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
         var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
@@ -66,7 +69,7 @@ function createUpdateSMeter() {
         }
         if (maxHold == true) {
             executionCount++;
-            if(executionCount > 30) {
+            if(executionCount > executionCountHit) {
                 executionCount = 0;
                 lastMax = normSig;
             }
@@ -88,6 +91,52 @@ function createUpdateSMeter() {
     };
 }
 
-const updateSMeter = createUpdateSMeter();
+function createComputeSUnits() {
+    let lastMax1 = 0;
+    let executionCount1 = 0; 
+
+    return function computeSUnits(SignalLevel, maxHold) {
+        const executionCountHit1 = 20; // Number of times (seconds*10?) the updateSMeter function is called before the max hold bar graph is updated
+        var p;
+
+        // Display the power level (dBm) realtime, or max hold level
+        if (maxHold == true) {
+            executionCount1++;
+            if(executionCount1 > executionCountHit1) {
+                executionCount1 = 0;
+                lastMax1 = SignalLevel;
+            }
+            if (SignalLevel > lastMax1) {
+                lastMax1 = SignalLevel;
+            }
+            p = Math.round(lastMax1);       // Use the max hold value
+            document.getElementById("pwr_data").textContent = ` Power: ${lastMax1.toFixed(0)}`;
+        }
+        else {
+            p = Math.round(SignalLevel);    // Use the real time value
+            document.getElementById("pwr_data").textContent = ` Power: ${SignalLevel.toFixed(0)}`;
+        }
+    
+        // Compute the S units based on the power level p from above, being real time or max hold
+        var s;
+        if (p <= -73) {     
+            s = 'S' + Math.floor((p + 127) / 6);    // S0 to S9
+        } 
+        else {
+            s = 'S9+' + ((p + 73) / 10) * 10;       // S9+1 to S9+60
+        }
+
+        // Set the color to red if over S9, green if S9 or below
+        var len = s.length;
+        if (len > 2) {
+            document.getElementById("s_data").style.color = "red";
+        }
+        else {
+            document.getElementById("s_data").style.color = "green";
+        }
+        // Display the S units
+        document.getElementById("s_data").textContent = s; 
+    }
+};
 
 
