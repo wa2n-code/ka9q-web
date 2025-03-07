@@ -126,16 +126,27 @@ The easiest way to create a new mode configuration is to edit the presets.conf f
 
 [wusb]
 demod = linear
+
 samprate = 12k
+
 low =  +50.0
+
 high = +3.5k
+
 pll = no
+
 square = no
+
 mono = yes
+
 shift = 0
+
 envelope = no
+
 conj = no
+
 hang-time = 1.1
+
 recovery-rate = 20
 
 The line that is different from the original [usb] mode here is high = +3.5k, which has been changed from high = +3k.  Note that the new mode's ID tag must be in lower case, and must also match the letters from the upper case letters that show the ka9q-web mode drop down selector button list.
