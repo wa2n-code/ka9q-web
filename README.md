@@ -79,13 +79,11 @@ sudo ldconfig
 ```
 
 ### 4 - Build and install ka9q-web
-
+```
  - cd ~
-
 - `git clone https://github.com/scottnewell/ka9q-web.git`
-
 - cd ka9q-web
-
+```
 - edit the first line of `Makefile` to point to the directory where you built ka9q-radio
 - run:
 ```
@@ -93,7 +91,6 @@ make
 sudo make install
 sudo make install-config    (it will install rx888-web.conf in /etc/radio)
 ```
-
 
 ## How to run ka9q-web
 
@@ -118,39 +115,27 @@ ka9q-web -m hf.local
 
 3. Optional feature - new Modes
 
-ka9q-web now includes the ability to change parameters for a demodulation mode including high and low filter settings among several others. New "modes" can be created via editble text in the file presets.conf located in the /usr/local/share/ka9q-radio directory. This presets.conf file is originally created when installing ka9q-radio and it includes several predefined presets that are identified by a heading tag in square brackets such as [usb], [lsb], [am], [fm] etc. 
+ka9q-web now includes the ability to change parameters for a demodulation mode including different high and low filter settings, among several others. New "modes" can be created via editble text in the file presets.conf located in the /usr/local/share/ka9q-radio directory. This presets.conf file is originally created when installing ka9q-radio and it includes several predefined presets that are identified by a heading tag in square brackets such as [usb], [lsb], [am], [fm] etc. 
 
 ka9q-web has five additional modes that can be employed via the drop-down mode selector. Each mode must have a matching tag in the presets.conf file. The new modes are [wusb], [wlsb], [user1], [user2], and [user3]. None of these modes will work if the matching preset tag is not defined in presets.conf, but no harm will come if you select them.
 
 The easiest way to create a new mode configuration is to edit the presets.conf file and copy / paste an existing mode, then change the ID tag and whatever parameter you want changed below the new ID tag. As an example, here is a preset that matches the "WUSB" mode that widens the high-side filter edge to 3,500 Hz:
-
+```
 [wusb]
 demod = linear
-
 samprate = 12k
-
 low =  +50.0
-
 high = +3.5k
-
 pll = no
-
 square = no
-
 mono = yes
-
 shift = 0
-
 envelope = no
-
 conj = no
-
 hang-time = 1.1
-
 recovery-rate = 20
-
-The line that is different from the original [usb] mode here is high = +3.5k, which has been changed from high = +3k.  Note that the new mode's ID tag must be in lower case, and must also match the letters from the upper case letters that show the ka9q-web mode drop down selector button list.
-
+```
+The line above that is different from the original [usb] mode is high = +3.5k, which has been changed from high = +3k.  Note that the new mode's ID tag in presets.conf must be written in lower case, but match the upper case characters from shown in the ka9q-web mode drop down selector button list.
 
 ## References
 
