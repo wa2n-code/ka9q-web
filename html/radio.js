@@ -1,5 +1,5 @@
 //
-// G0ORX WebSDR using ka9q-radio uddated March 5, 2025 WA2N WA2ZKD
+// G0ORX WebSDR using ka9q-radio uddated March 7, 2025 WA2N WA2ZKD
 //
 //
       var ssrc;
