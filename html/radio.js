@@ -701,7 +701,7 @@ function update_stats() {
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
   computeSUnits(power,spectrum.maxHold);
   // Update the signal bar meter
-  updateSMeter(power,spectrum.maxHold);
+  updateSMeter(power,noise_density_audio,Math.abs(filter_high - filter_low),spectrum.maxHold);
   
   return;
   /*

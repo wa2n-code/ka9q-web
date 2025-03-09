@@ -41,13 +41,32 @@ gradient.addColorStop(0,'green');
 gradient.addColorStop
 ctx.fillStyle = gradient;
 
+function dB2power(dB) { 
+    return Math.pow(10, dB / 10); 
+}
+
+function power2dB(power) {
+    return 10 * Math.log10(power);
+}   
+
 function createUpdateSMeter() {
     let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
     let executionCount = 0; // Static variable that counts the number of times the updateSMeter function is called
 
-    return function updateSMeter(SignalLevel, maxHold) {
+    return function updateSMeter(SignalLevel, noiseDensity, Bandwidth, maxHold) {
         const maxBarHeight = 0.3;  // 30% of the canvas height
         const executionCountHit = 30; // Number of times (seconds*10?) the updateSMeter function is called before the max hold bar graph is updated
+
+
+
+        // Experimental SNR calculation and display
+        var noise_power = dB2power(noiseDensity) * Bandwidth;
+        var signal_plus_noise_power = dB2power(SignalLevel);
+        var SignalToNoiseRatio = power2dB(signal_plus_noise_power / noise_power - 1)
+  
+        document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
+  
+
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
         var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
