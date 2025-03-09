@@ -178,9 +178,9 @@
     <button id="audio_button" style="color:DarkViolet; border: solid;
       font-size:20px; height:40px; width:160px"  onclick="audio_start_stop()" value="START">Start Audio</button>
       </td>
-     <td rowspan=2>
-        <button id="csv_out" style="height:40px; width:85x"  onclick="dumpCSV()">Write info file</button>
-        <button id="bug_upload" style="height:40px; width:85px" onclick="uploadBug()">Upload bug</button>
+     <td rowspan=1>
+        <button id="csv_out" style="height:20px; width:85x"  onclick="dumpCSV()">Write info file</button>
+        <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()">Upload bug</button>
       </td>
 
        <td rowspan=1 colspan=2>
@@ -205,7 +205,8 @@
       <td><font size="-1">Spectrum range:</td>
       <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()"/>
       <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()"/></td>
-      <td rowspan=2 colspan=1 align="center">
+
+      <td rowspan=1 colspan=1 align="center">
         <label for="colormap" style="font-size:15px">Colormap:</label>
         <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
           <option value="0">turbo</option>
@@ -220,19 +221,27 @@
           <option value="9">kiwi</option>
         </select>
       </td>
+      <td rowspan=1 colspan=1 align="center">
+        <label for="meter" style="font-size:15px">Meter:</label>
+        <select name="meter" id="meter" onchange="meterType = this.value">
+          <option value="0">RSSI</option>
+          <option value="1">SNR</option>
+        </select>
+      </td>
+
     </tr>
     </table>
     </center>
     <br>
     <div style="width: 100%;" id="stat_div">
       <table id="stat_table">
-        <tr><td><span id="rf_gain"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="gps_time"></span></td></tr>
+        <tr><td><span id="rf_gain"></span></td><td><span id="snr"></span></td><td><span id="gps_time"></span></td></tr>
         <tr><td><span id="rf_attn"></span></td> <td><span id="hz_per_bin"></span></td><td><span id="uptime"></span></td></tr>
         <tr><td><span id="rf_cal"></span></td><td><span id="bins"></span></td> <td><span id="adc_overs"></span></td></tr>
         <tr><td><span id="rf_agc"></span></td><td><span id="ssrc"></span></td><td><span id="adc_last_over"></span></td></tr>
         <tr><td><span id="if_power"></span></td><td><span id="fft_avg"></span></td><td><span id="blocks"></span></td></tr>
         <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
-        <tr><td><span id="baseband_power"></span></td><td><span id="snr"></span></td><td><span id="spare2"></span></td></tr>
+        <tr><td><span id="baseband_power"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="spare2"></span></td></tr>
         <tr><td><span id="version"></span></td><td><span id="webserver_version"></span></td><td><span id="rx_rate"></span></td></tr>
       </table>
     </div>

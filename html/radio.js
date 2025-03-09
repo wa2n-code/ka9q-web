@@ -895,6 +895,7 @@ function saveSettings() {
   localStorage.setItem("preset", document.getElementById("mode").value);
   localStorage.setItem("step", document.getElementById("step").value.toString());
   localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString());
+  localStorage.setItem("meterIndex", document.getElementById("meter").value.toString());
   localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
 }
 
@@ -930,6 +931,10 @@ function loadSettings() {
   const c = parseInt(localStorage.getItem("colorIndex"));
   document.getElementById("colormap").value = c;
   spectrum.colorIndex = c;
+  document.getElementById("meter").value = parseInt(localStorage.getItem("meterIndex"));
+  const d = parseInt(localStorage.getItem("meterIndex"));
+  document.getElementById("meter").value = d;
+  meterType = d;
   document.getElementById("zoom_level").value = parseInt(localStorage.getItem("zoom_level"));
   target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
   spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));

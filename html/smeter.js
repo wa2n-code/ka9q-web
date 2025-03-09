@@ -41,6 +41,7 @@ gradient.addColorStop(0,'green');
 gradient.addColorStop
 ctx.fillStyle = gradient;
 
+var meterType = 0;  // 0 = RSSI, 1 = SNR
 function dB2power(dB) { 
     return Math.pow(10, dB / 10); 
 }
@@ -48,6 +49,7 @@ function dB2power(dB) {
 function power2dB(power) {
     return 10 * Math.log10(power);
 }   
+
 
 function createUpdateSMeter() {
     let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
@@ -64,19 +66,26 @@ function createUpdateSMeter() {
         var signal_plus_noise_power = dB2power(SignalLevel);
         var SignalToNoiseRatio = power2dB(signal_plus_noise_power / noise_power - 1)
   
-        document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
+//        if(meterType == 0)  // 0 is RSSI, 1 is SNR
+//            document.getElementById('snr').textContent = "I wanna be sedated!";
+//        else
+            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
   
 
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
         var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
-
-        // An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
         var normSig;
-        if (SignalLevel <= s9SignalLevel) {
-            normSig = adjustedSignal / belowS9Span * s9pfs;
-        } else {
-            normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) / aboveS9Span * s9Plus60pfs;
+
+        if(meterType == 0) {  // RSSI
+            // An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
+            if (SignalLevel <= s9SignalLevel) {
+                normSig = adjustedSignal / belowS9Span * s9pfs;
+            } else {
+                normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) / aboveS9Span * s9Plus60pfs;
+            }
+        } else {  // SNR
+            normSig = SignalToNoiseRatio / 60;
         }
 
         // Protect over under range
