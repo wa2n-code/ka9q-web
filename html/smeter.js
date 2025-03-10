@@ -31,17 +31,8 @@ const computeSUnits = createComputeSUnits();
     const s9pfs = 0.62;                                 // Set to the percentage of full scale in the bargraph that corresponds to S9 (62% on TenTec Orion)
     const s9Plus60pfs = 1 - s9pfs;                      // Remaining span scaler for drawing bar above S9 (1-62% = 38%)
 
-// Set the meter rectangle to a gradient with colors that approach or turn red as the signal level increases beyond S9
-var gradient;
-gradient = ctx.createLinearGradient(0,0,cWidth,0);
-gradient.addColorStop(1, "rgb(255,0,0)");
-gradient.addColorStop(s9pfs,"rgb(255,0, 0)");         // Abrupt transition from green to red at S9
-gradient.addColorStop(.6,"green");  // S9+30            // stay green to S9 (almost) then turn red
-gradient.addColorStop(0,'green');
-gradient.addColorStop
-ctx.fillStyle = gradient;
+var meterType = 0;  // 0 = RSSI, 1 = SNR, updated in radio.js when the RSSI/SNR button is clicked or loaded from storage
 
-var meterType = 0;  // 0 = RSSI, 1 = SNR
 function dB2power(dB) { 
     return Math.pow(10, dB / 10); 
 }
@@ -49,7 +40,6 @@ function dB2power(dB) {
 function power2dB(power) {
     return 10 * Math.log10(power);
 }   
-
 
 function createUpdateSMeter() {
     let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
@@ -61,7 +51,21 @@ function createUpdateSMeter() {
         const maxBarHeight = 0.3;  // 30% of the canvas height
         const executionCountHit = 30; // Number of times (seconds*10?) the updateSMeter function is called before the max hold bar graph is updated
 
-
+        if(meterType == 0) {
+            // Set the meter rectangle to a gradient with colors that approach or turn red as the signal level increases beyond S9
+            var gradient;
+            gradient = ctx.createLinearGradient(0,0,cWidth,0);
+            gradient.addColorStop(1, "rgb(128,82,0)");
+            gradient.addColorStop(s9pfs,"rgb(255,0, 0)");         // Abrupt transition from green to red at S9
+            gradient.addColorStop(.6,"green");  // S9+30            // stay green to S9 (almost) then turn red
+            gradient.addColorStop(0,'green');
+            gradient.addColorStop
+            ctx.fillStyle = gradient;
+        }
+        else {  // SNR meter    
+            ctx.fillStyle = "rgb(1, 136, 199)";  // Set the meter rectangle to blue for the SNR meter
+            //ctx.fillStyle = "orange";  // Set the meter rectangle to blue for the SNR meter
+        }
 
         // Experimental SNR calculation and display
         var noise_power = dB2power(noiseDensity) * Bandwidth;
