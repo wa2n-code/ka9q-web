@@ -126,6 +126,7 @@ function createUpdateSMeter() {
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
             // Display the held SNR value
             document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dB`;
+            document.getElementById('snr_data').textContent = ` SNR: ${lastSNR.toFixed(1)} dB`;
         }
         else 
         {
@@ -133,6 +134,7 @@ function createUpdateSMeter() {
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             // Display the real-time SNR value
             document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
+            document.getElementById('snr_data').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
         }   
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
