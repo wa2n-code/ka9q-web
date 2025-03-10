@@ -114,11 +114,11 @@ function createUpdateSMeter() {
             if (normSig > lastMax) 
             {
                 lastMax = normSig;
-                executionCount = executionCountHit/2;   // Reset the upper bargraph hold counter so it is held for 15 counts
+                executionCount = executionCountHit/2;   // Reset the RSSI hold counter so RSSI is held for 15 counts
             }
             if(SignalToNoiseRatio > lastSNR) {
                 lastSNR = SignalToNoiseRatio;
-                executionCountSNR = executionCountHit/2; // Reset the SNR hold counter so SNR text display is held for 15 counts
+                executionCountSNR = executionCountHit/2; // Reset the SNR hold counter so SNR is held for 15 counts
             }   
             // fILL the top 1/3 with the max hold bar graph
             ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
