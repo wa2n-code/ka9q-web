@@ -54,7 +54,8 @@ function power2dB(power) {
 function createUpdateSMeter() {
     let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
     let lastSNR =0;
-    let executionCount = 0; // Static variable that counts the number of times the updateSMeter function is called
+    let executionCount = 0;     // Static variable that counts the number of times the updateSMeter function is called
+    let executionCountSNR = 0;  // Static variable that counts the number of times the updateSMeter function is called
 
     return function updateSMeter(SignalLevel, noiseDensity, Bandwidth, maxHold) {
         const maxBarHeight = 0.3;  // 30% of the canvas height
@@ -99,18 +100,25 @@ function createUpdateSMeter() {
         }
         if (maxHold == true) {
             executionCount++;
+            executionCountSNR++;
             if(executionCount > executionCountHit) {
-                // Done holding the last value, get the latest one
+                // Done holding the last RSI value, get the latest one
                 executionCount = 0;
                 lastMax = normSig;
+            }
+            if(executionCountSNR > executionCountHit) {
+                // Done holding the last SNR value, get the latest one
+                executionCountSNR = 0;
                 lastSNR = SignalToNoiseRatio;
             }
             if (normSig > lastMax) 
             {
                 lastMax = normSig;
+                executionCount = executionCountHit/2;   // Reset the RSSI hold counter so RSSI is held for 15 counts
             }
             if(SignalToNoiseRatio > lastSNR) {
                 lastSNR = SignalToNoiseRatio;
+                executionCountSNR = executionCountHit/2; // Reset the SNR hold counter so SNR is held for 15 counts
             }   
             // fILL the top 1/3 with the max hold bar graph
             ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
