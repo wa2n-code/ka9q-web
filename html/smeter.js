@@ -53,6 +53,7 @@ function power2dB(power) {
 
 function createUpdateSMeter() {
     let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
+    let lastSNR =0;
     let executionCount = 0; // Static variable that counts the number of times the updateSMeter function is called
 
     return function updateSMeter(SignalLevel, noiseDensity, Bandwidth, maxHold) {
@@ -65,27 +66,23 @@ function createUpdateSMeter() {
         var noise_power = dB2power(noiseDensity) * Bandwidth;
         var signal_plus_noise_power = dB2power(SignalLevel);
         var SignalToNoiseRatio = power2dB(signal_plus_noise_power / noise_power - 1)
-  
-//        if(meterType == 0)  // 0 is RSSI, 1 is SNR
-//            document.getElementById('snr').textContent = "I wanna be sedated!";
-//        else
-            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
-  
+        
 
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
         var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
         var normSig;
 
-        if(meterType == 0) {  // RSSI
-            // An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
+        if(meterType == 0) {  
+            //The RSSI Meter: An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
             if (SignalLevel <= s9SignalLevel) {
                 normSig = adjustedSignal / belowS9Span * s9pfs;
             } else {
                 normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) / aboveS9Span * s9Plus60pfs;
             }
-        } else {  // SNR
-            normSig = SignalToNoiseRatio / 60;
+        } else 
+        {  // SNR meter
+            normSig = SignalToNoiseRatio / 50 + 0.1; // 50dB SNR is full scale, -10db is the minimum value 
         }
 
         // Protect over under range
@@ -98,24 +95,36 @@ function createUpdateSMeter() {
         if (maxHold == true) {
             executionCount++;
             if(executionCount > executionCountHit) {
+                // Done holding the last value, get the latest one
                 executionCount = 0;
                 lastMax = normSig;
+                lastSNR = SignalToNoiseRatio;
             }
             if (normSig > lastMax) 
             {
                 lastMax = normSig;
             }
+            if(SignalToNoiseRatio > lastSNR) {
+                lastSNR = SignalToNoiseRatio;
+            }   
             // fILL the top 1/3 with the max hold bar graph
             ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
             // fill bottom 2/3 with the real time bar graph
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
+            // Display the held SNR value
+            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dBm `;
         }
         else 
         {
+            // Not max hold, fill the entire canvas with the real time bar graph
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
+            // Display the real-time SNR value
+            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
         }   
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
+
+        return power2dB(noise_power);
     };
 }
 

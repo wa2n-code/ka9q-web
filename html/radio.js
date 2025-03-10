@@ -661,6 +661,14 @@ function update_stats() {
   t-=18;
   var smp = Number(input_samples) / Number(input_samprate);
 
+  // Compute filter bandwidth
+  const bw = Math.abs(filter_high - filter_low);
+ 
+  computeSUnits(power,spectrum.maxHold);
+  // Update the signal bar meter and get the noise power, since it computes it
+var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
+
+
   // newell 12/1/2024, 19:16:35
   // ugly hack to get the stats on the webpage. Formatting is terrible, but
   // perfect is the enemy of good, right?
@@ -675,13 +683,18 @@ function update_stats() {
   document.getElementById('rf_cal').innerHTML = "RF lev cal: " + rf_level_cal.toFixed(1) + " dB";
   document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
-  document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_audio.toFixed(1)} dBmJ (audio)`;
+
+
+  document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_audio.toFixed(1)} dBmJ (audio), noise level at BW ${bw}: ${noisePower.toFixed(1)} dBm`;
+
+
   document.getElementById('bins').textContent = `Bins: ${binCount}`;
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
-  document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${(filter_high - filter_low).toFixed(0)} Hz BW`;
+ 
+   document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${bw.toFixed(0)} Hz BW`;
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
@@ -699,9 +712,7 @@ function update_stats() {
   // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
-  computeSUnits(power,spectrum.maxHold);
-  // Update the signal bar meter
-  updateSMeter(power,noise_density_audio,Math.abs(filter_high - filter_low),spectrum.maxHold);
+
   
   return;
   /*
