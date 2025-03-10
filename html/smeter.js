@@ -65,8 +65,13 @@ function createUpdateSMeter() {
         // Experimental SNR calculation and display
         var noise_power = dB2power(noiseDensity) * Bandwidth;
         var signal_plus_noise_power = dB2power(SignalLevel);
-        var SignalToNoiseRatio = power2dB(signal_plus_noise_power / noise_power - 1)
-        
+        var SignalToNoiseRatio;
+
+        var spnovernp = signal_plus_noise_power / noise_power;
+        if((spnovernp -1) > 0) 
+            SignalToNoiseRatio = power2dB(spnovernp - 1);
+        else
+            SignalToNoiseRatio = -100;  // Avoid calling power2dB with a negative number
 
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
