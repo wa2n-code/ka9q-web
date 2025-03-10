@@ -112,14 +112,14 @@ function createUpdateSMeter() {
             // fill bottom 2/3 with the real time bar graph
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
             // Display the held SNR value
-            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dBm `;
+            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dB`;
         }
         else 
         {
             // Not max hold, fill the entire canvas with the real time bar graph
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             // Display the real-time SNR value
-            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dBm `;
+            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
         }   
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
