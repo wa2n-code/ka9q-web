@@ -130,7 +130,13 @@ function createUpdateSMeter() {
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
             // Display the held SNR value
             document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dB`;
-            document.getElementById('snr_data').textContent = ` SNR: ${lastSNR.toFixed(1)} dB`;
+            document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(1)}`;
+            if(meterType == 1) { // SNR meter
+                document.getElementById('snr_units').textContent = "dB | SNR: ";
+            }
+            else {
+                document.getElementById('snr_units').textContent = "dB | RSSI: "; 
+            }
         }
         else 
         {
@@ -138,7 +144,13 @@ function createUpdateSMeter() {
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             // Display the real-time SNR value
             document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
-            document.getElementById('snr_data').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
+            document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(1)}`;
+            if(meterType == 1) { // SNR meter
+                document.getElementById('snr_units').textContent = "dB | SNR: ";
+            }
+            else {
+                document.getElementById('snr_units').textContent = "dB | RSSI: "; 
+            }
         }   
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
