@@ -129,13 +129,13 @@ function createUpdateSMeter() {
             // fill bottom 2/3 with the real time bar graph
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
             // Display the held SNR value
-            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(1)} dB`;
-            document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(1)}`;
+            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(0)} dB`;
+            document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(0)}`;
             if(meterType == 1) { // SNR meter
                 document.getElementById('snr_units').textContent = "dB | SNR: ";
             }
             else {
-                document.getElementById('snr_units').textContent = "dB | RSSI: "; 
+                document.getElementById('snr_units').textContent = "dB | Signal: "; 
             }
         }
         else 
@@ -143,13 +143,13 @@ function createUpdateSMeter() {
             // Not max hold, fill the entire canvas with the real time bar graph
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             // Display the real-time SNR value
-            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(1)} dB`;
-            document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(1)}`;
+            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(0)} dB`;
+            document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(0)}`;
             if(meterType == 1) { // SNR meter
                 document.getElementById('snr_units').textContent = "dB | SNR: ";
             }
             else {
-                document.getElementById('snr_units').textContent = "dB | RSSI: "; 
+                document.getElementById('snr_units').textContent = "dB | Signal: "; 
             }
         }   
         // Draw the border
