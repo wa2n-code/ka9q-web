@@ -373,7 +373,7 @@ function calcFrequencies() {
         document.getElementById('colormap').value = spectrum.colorIndex;
         document.getElementById('decay_list').value = spectrum.decay.toString();
         document.getElementById('cursor').checked = spectrum.cursor_active;
-        document.getElementById('pause').textContent = (spectrum.paused ? "Run" : "Pause");
+        document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause");
         document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
 
         // set zoom, preset, spectrum percentage?
@@ -904,6 +904,12 @@ function saveSettings() {
   localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString());
   localStorage.setItem("meterIndex", document.getElementById("meter").value.toString());
   localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
+  localStorage.setItem("check_max", document.getElementById("check_max").checked.toString()); 
+  localStorage.setItem("check_min", document.getElementById("check_min").checked.toString()); 
+}
+
+function checkcheckMaxMinChanged(){  // Save the check boxes for show max and min
+  saveSettings();
 }
 
 function loadSettings() {
@@ -945,6 +951,8 @@ function loadSettings() {
   document.getElementById("zoom_level").value = parseInt(localStorage.getItem("zoom_level"));
   target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
   spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
+  spectrum.check_max = check_max.checked = (localStorage.getItem("check_max") == "true");
+  spectrum.check_min = check_min.checked = (localStorage.getItem("check_min") == "true");
   return true;
 }
 

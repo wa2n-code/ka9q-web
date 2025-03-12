@@ -527,7 +527,7 @@ Spectrum.prototype.decrementAveraging = function() {
 
 Spectrum.prototype.togglePaused = function() {
     this.paused = !this.paused;
-    document.getElementById("pause").textContent = (this.paused ? "Run" : "Pause");
+    document.getElementById("pause").textContent = (this.paused ? "Spectrum Run" : "Spectrum Pause");
     this.saveSettings();
 }
 

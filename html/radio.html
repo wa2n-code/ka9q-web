@@ -199,7 +199,7 @@
         </select>
       </td>
     <td rowspan=2 align="center">Spectrum:
-    <button id="pause" style="height:40px; width:60px" onclick="spectrum.togglePaused()">Pause</button>
+    <button id="pause" style="height:40px; width:70px" onclick="spectrum.togglePaused()">Pause</button>
     </td>
 
     </tr>
@@ -251,8 +251,8 @@
 
     <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor"/>  <label for="cursor">Activate cursor</label>
     <input type="checkbox" id="check_live" checked />  <label for="check_live">Show live</label>
-    <input type="checkbox" id="check_max" checked />  <label for="check_max">Show max</label>
-    <input type="checkbox" id="check_min" checked />  <label for="check_min">Show min</label>
+    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" />  <label for="check_max">Show max</label>
+    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" />  <label for="check_min">Show min</label>
     <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
