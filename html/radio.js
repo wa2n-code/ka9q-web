@@ -248,6 +248,7 @@ function calcFrequencies() {
             }
 
             if (pending_range_update) {
+                pending_range_update = false;
                 updateRangeValues();
                 saveSettings();
             }
@@ -580,7 +581,7 @@ function calcFrequencies() {
           ws.send("A:STOP:"+ssrc.toString());
         }
     }
-
+var updaterangevaluecount = 0;
 function updateRangeValues(){
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
