@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<!-- format cleanup wa2zkd wa2n v2.5 March 7 2025 -->
+<!-- format cleanup wa2zkd wa2n v2.5 March 13 2025 -->
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,11 +13,13 @@
     <script src="radio.js"></script>
     <script src="smeter.js" defer></script>
 </head>
+
 <body>
     <font face="Arial">
     <center>
     <div style="height:5px;font-size:5px;">&nbsp;</div>
-    <h4 id="heading">Web SDR + ka9q-radio</h4></center>
+      <h4 id="heading">Web SDR + ka9q-radio</h4>
+    </center>
     <div style="height:5px;font-size:5px;">&nbsp;</div>
     <audio id="audio">
     </audio>
@@ -49,31 +52,35 @@
     </td>
     <td rowspan=1 colspan=1>
     <button id="rangeinc" onclick="rangeIncrease()">Range +</button>
+          </td>
+          <td rowspan=2>
+            <input type="text" id="freq" style="color:green; font-size:26px; height:40px;
+    width:150px; border:solid" value="" onchange="setFrequency()" />
     </td>
     <td rowspan=2 colspan=1>
-    <input type="text" id="freq" style="color:green; font-size:30px; height:40px;
-    width:150px; border:solid" value="" onchange="setFrequency()"/>
+            <button id="autoscale" style="color:brown; height:40px; width:90px; border:solid" onclick="autoscale()">Autoscale</button>
     </td>
     <td rowspan=2 align="center">
-    <label for="step">Step:</label>
-    <select name="step" id="step" onchange="step_changed(this.value)">
-        <option value="1">1Hz</option>
-        <option value="10">10Hz</option>
-        <option value="100">100Hz</option>
-        <option value="250">250Hz</option>
-        <option value="500">500Hz</option>
-        <option value="1000">1KHz</option>
-        <option value="5000">5KHz</option>
-        <option value="9000">9KHz</option>
-        <option value="10000">10KHz</option>
-        <option value="100000">100KHz</option>
-        <option value="1000000">1MHz</option>
+            <label for="mode" style="font-size:15px">Mode:</label>
+            <select name="mode" id="mode" onchange="setMode(this.value)">
+              <option value="cwu">CWU</option>
+              <option value="cwl">CWL</option>
+              <option value="usb">USB</option>
+              <option value="wusb">WUSB</option>
+              <option value="lsb">LSB</option>
+              <option value="wlsb">WLSB</option>
+              <option value="am">AM</option>
+              <option value="sam">SAM</option>
+              <option value="fm">FM</option>
+              <option value="iq">I/Q</option>
+              <option value="user1">USER1</option>
+              <option value="user2">USER2</option>
+              <option value="user3">USER3</option>
     </select>
     </td>
-        <td rowspan=2 colspan=1>
-    <button id="autoscale" style="color:brown; font-size:20px; height:40px; width:160px; border:solid" onclick="autoscale()">Autoscale</button>
-    </td>
-   <td rowspan=1 colspan=2><label for="zoom_level">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" onchange="setZoom()"/>
+
+          <td rowspan=2 colspan=2>
+            <label for="zoom_level">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" onchange="setZoom()" />
     </td>
 
     </tr>
@@ -89,18 +96,22 @@
     </tr>
     <tr>
     <td rowspan=1 colspan=1>
-    <button id="fft_avg_up" onclick="spectrum.incrementAveraging()">FFT AVG +</button>
     </td>
     <td rowspan=1 colspan=1>
     <button id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()">Spectrum +</button>
     </td>
-        <td rowspan=2>
+           
+          <td align="center">
     <button onmousedown="startDecrement()" onmouseup="stopDecrement()"
-        style="width:78px">  Freq -  </button>
+            style="width:45px"> - </button>
+              <button style="color:green; border:solid; width:45px" onclick="setFrequency()">Set</button>
     <button onmousedown="startIncrement()" onmouseup="stopIncrement()"
-        style="width:78px">  Freq +  </button>
+              style="width:45px"> + </button>
+          </td>
+          <td rowspan=2>
+            <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
+      width:90px" onclick="audio_start_stop()" value="START">Start Audio</button>
     </td>
-
 
     <td>
     <label for="band" style="font-size:15px">Band/Chan:</label>
@@ -126,46 +137,39 @@
         <option value="25000000">WWV25MHz</option>
     </select>
     </td>
-    <td colspan=2 align="center">
-    <label for="mode" style="font-size:15px">Mode:</label>
-    <select name="mode" id="mode" onchange="setMode(this.value)">
-        <option value="cwu">CWU</option>
-        <option value="cwl">CWL</option>
-        <option value="usb">USB</option>
-        <option value="wusb">WUSB</option>
-        <option value="lsb">LSB</option>
-        <option value="wlsb">WLSB</option>
-        <option value="am">AM</option>
-        <option value="sam">SAM</option>
-        <option value="fm">FM</option>
-        <option value="iq">I/Q</option>
-        <option value="user1">USER1</option>
-        <option value="user2">USER2</option>
-        <option value="user3">USER3</option>
-    </select>
-    </td>
-      </td>
-    <td>
-    <button id="zoomminus" style="width:90px" onclick="zoomout()">Zoom Out</button>
-    <button id="zoomplus" style="width:90px" onclick="zoomin()">Zoom In</button>
+          <td align="center">
+            <button id="zoomminus" style="width:88px" onclick="zoomout()">Zoom Out</button>
+            <button id="zoomplus" style="width:88px" onclick="zoomin()">Zoom In</button>
     </td>
     </tr>
     <tr>
     <td rowspan=1 colspan=1>
-    <button id="fft_avg_down" onclick="spectrum.decrementAveraging()">FFT AVG -</button>
     </td>
     <td rowspan=1 colspan=1>
     <button id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()">Spectrum -</button>
     </td>
-        <td>
-    <button style="width:182px" onclick="setFrequency()">Set Frequency (kHz)</button>
+          <td align="center">
+            <label for="step">Step:</label>
+            <select name="step" id="step" onchange="step_changed(this.value)">
+              <option value="1">1Hz</option>
+              <option value="10">10Hz</option>
+              <option value="100">100Hz</option>
+              <option value="250">250Hz</option>
+              <option value="500">500Hz</option>
+              <option value="1000">1KHz</option>
+              <option value="5000">5KHz</option>
+              <option value="9000">9KHz</option>
+              <option value="10000">10KHz</option>
+              <option value="100000">100KHz</option>
+              <option value="1000000">1MHz</option>
+            </select>
     </td>
     <td align="center">
     <label for="max_hold" style="font-size:15px">Hold:</label>
     <button id="max_hold" onclick="spectrum.toggleMaxHold()">Max hold</button>
     </td>
       <td colspan=4>
-    <button id="zoomcenter" style="width:190px" onclick="zoomcenter()">Center</button>
+            <button id="zoomcenter" style="width:184px" onclick="zoomcenter()">Center</button>
     </td>
 
     </td>
@@ -173,19 +177,21 @@
 </tr>
 <font size="-1">
   <tr>
-    <td><font size="-1">WF range:</td>
-    <td><input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()"/>
-      <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()"/></td>
+            <td>
+              <font size="-1">WF range:
+            </td>
+            <td><input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" />
+              <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" />
+            </td>
+          <td align="center">
+            <button id="fft_avg_up" onclick="spectrum.incrementAveraging()">FFT AVG +</button>
+          </td>
+
      <td rowspan=2 colspan=1>
-    <button id="audio_button" style="color:DarkViolet; border: solid;
-      font-size:20px; height:40px; width:160px"  onclick="audio_start_stop()" value="START">Start Audio</button>
+              <button id="pause" style="color: blue; border:solid ;height:40px;
+      width:90px" onclick="spectrum.togglePaused()">Pause</button>
       </td>
      <td rowspan=1>
-        <button id="csv_out" style="height:20px; width:85x"  onclick="dumpCSV()">Write info file</button>
-        <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()">Upload bug</button>
-      </td>
-
-       <td rowspan=1 colspan=2>
         <label for="decay_list" style="font-size:15px">Max hold decay:</label>
         <select id="decay_list" onchange="spectrum.setDecay(this.value)">
           <option value="1">Infinite</option>
@@ -198,16 +204,30 @@
           <option value="1.1">1.1</option>
         </select>
       </td>
-    <td rowspan=2 align="center">Spectrum:
-    <button id="pause" style="height:40px; width:70px" onclick="spectrum.togglePaused()">Pause</button>
-    </td>
 
+            <td rowspan=1>
+              <button id="csv_out" style="height:20px; width:85x" onclick="dumpCSV()">Write info file</button>
+              <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()">Upload bug</button>
+    </td>
     </tr>
     <tr>
-      <td><font size="-1">Spectrum range:</td>
-      <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()"/>
-      <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()"/></td>
+            <td>
+              <font size="-1">Spectrum range:
+            </td>
+            <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" />
+              <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" />
+            </td>
+              <td align="center">
+            <button id="fft_avg_down" onclick="spectrum.decrementAveraging()">FFT AVG -</button>
+          </td>
 
+            <td rowspan=1 colspan=1 align="center">
+              <label for="meter" style="font-size:15px">Meter:</label>
+              <select name="meter" id="meter" onchange="meterType = this.value">
+                <option value="0">Signal</option>
+                <option value="1">SNR</option>
+              </select>
+            </td>
       <td rowspan=1 colspan=1 align="center">
         <label for="colormap" style="font-size:15px">Colormap:</label>
         <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
@@ -223,14 +243,6 @@
           <option value="9">kiwi</option>
         </select>
       </td>
-      <td rowspan=1 colspan=1 align="center">
-        <label for="meter" style="font-size:15px">Meter:</label>
-        <select name="meter" id="meter" onchange="meterType = this.value">
-          <option value="0">Signal</option>
-          <option value="1">SNR</option>
-        </select>
-      </td>
-
     </tr>
     </table>
     </center>
@@ -238,21 +250,53 @@
       <div style="height:1px;font-size:1px;">&nbsp;</div>
       <div style="width: 100%;" id="stat_div">
       <table id="stat_table">
-        <tr><td><span id="rf_gain"></span></td><td><span id="snr"></span></td><td><span id="gps_time"></span></td></tr>
-        <tr><td><span id="rf_attn"></span></td> <td><span id="hz_per_bin"></span></td><td><span id="uptime"></span></td></tr>
-        <tr><td><span id="rf_cal"></span></td><td><span id="bins"></span></td> <td><span id="adc_overs"></span></td></tr>
-        <tr><td><span id="rf_agc"></span></td><td><span id="ssrc"></span></td><td><span id="adc_last_over"></span></td></tr>
-        <tr><td><span id="if_power"></span></td><td><span id="fft_avg"></span></td><td><span id="blocks"></span></td></tr>
-        <tr><td><span id="noise_density"></span></td><td><span id="decay"></span></td><td><span id="adc_samples"></span></td></tr>
-        <tr><td><span id="baseband_power"></span></td><td><span id="adc_samp_rate"></span></td><td><span id="spare2"></span></td></tr>
-        <tr><td><span id="version"></span></td><td><span id="webserver_version"></span></td><td><span id="rx_rate"></span></td></tr>
+        <tr>
+          <td><span id="rf_gain"></span></td>
+          <td><span id="snr"></span></td>
+          <td><span id="gps_time"></span></td>
+        </tr>
+        <tr>
+          <td><span id="rf_attn"></span></td>
+          <td><span id="hz_per_bin"></span></td>
+          <td><span id="uptime"></span></td>
+        </tr>
+        <tr>
+          <td><span id="rf_cal"></span></td>
+          <td><span id="bins"></span></td>
+          <td><span id="adc_overs"></span></td>
+        </tr>
+        <tr>
+          <td><span id="rf_agc"></span></td>
+          <td><span id="ssrc"></span></td>
+          <td><span id="adc_last_over"></span></td>
+        </tr>
+        <tr>
+          <td><span id="if_power"></span></td>
+          <td><span id="fft_avg"></span></td>
+          <td><span id="blocks"></span></td>
+        </tr>
+        <tr>
+          <td><span id="noise_density"></span></td>
+          <td><span id="decay"></span></td>
+          <td><span id="adc_samples"></span></td>
+        </tr>
+        <tr>
+          <td><span id="baseband_power"></span></td>
+          <td><span id="adc_samp_rate"></span></td>
+          <td><span id="spare2"></span></td>
+        </tr>
+        <tr>
+          <td><span id="version"></span></td>
+          <td><span id="webserver_version"></span></td>
+          <td><span id="rx_rate"></span></td>
+        </tr>
       </table>
     </div>
 
-    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor"/>  <label for="cursor">Activate cursor</label>
-    <input type="checkbox" id="check_live" checked />  <label for="check_live">Show live</label>
-    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" />  <label for="check_max">Show max</label>
-    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" />  <label for="check_min">Show min</label>
+    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" /> <label for="cursor">Activate cursor</label>
+    <input type="checkbox" id="check_live" checked /> <label for="check_live">Show live</label>
+    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" /> <label for="check_max">Show max</label>
+    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" /> <label for="check_min">Show min</label>
     <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
@@ -302,4 +346,5 @@
     <br>
     <i>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)</i>
   </body>
+
 </html>
