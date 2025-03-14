@@ -104,7 +104,8 @@ function calcFrequencies() {
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         // can we load the saved frequency/zoom/preset here?
         ws.send("M:" + target_preset);
-        ws.send("Z:" + (22 - target_zoom_level).toString());
+        //ws.send("Z:" + (22 - target_zoom_level).toString());
+        ws.send("Z:" + (target_zoom_level).toString());
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
       }
@@ -204,7 +205,8 @@ function calcFrequencies() {
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
-            const z_level = 22 - view.getUint32(i,true); i+=4;
+//            const z_level = 22 - view.getUint32(i,true); i+=4;
+            const z_level = view.getUint32(i,true); i+=4;
             const bin_precision_bytes = view.getUint32(i,true); i+=4;
             const bins_autorange_offset =  view.getFloat32(i,true); i+=4;
             const bins_autorange_gain =  view.getFloat32(i,true); i+=4;
@@ -246,9 +248,8 @@ function calcFrequencies() {
             }
 
             if (pending_range_update) {
-              pending_range_update = false;
-              updateRangeValues();
-              saveSettings();
+                updateRangeValues();
+                saveSettings();
             }
 
             update_stats();
@@ -508,6 +509,7 @@ function calcFrequencies() {
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
       spectrum.setFrequency(f);
+      autoscaleNow();
       saveSettings();
     }
     function setBand(freq) {
@@ -520,6 +522,7 @@ function calcFrequencies() {
           setMode('usb');
         }
         ws.send("F:" + (freq / 1000).toFixed(3));
+        autoscaleNow();
       saveSettings();
     }
     function setMode(selected_mode) {
@@ -533,25 +536,35 @@ function calcFrequencies() {
         ws.send("M:"+mode);
       saveSettings();
     }
-
+    function autoscaleNow() {
+      spectrum.forceAutoscale();
+      pending_range_update = true;
+      console.log("autoscaleNow() called");
+    }
+  
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
+      autoscaleNow();
       saveSettings();
     }
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
+      autoscaleNow();
       saveSettings();
     }
     function zoomcenter() {
       ws.send("Z:c");
+      autoscaleNow();
       saveSettings();
     }
     function audioReporter(stats) {
     }
-function setZoom() {
-  const v = 22 - document.getElementById("zoom_level").valueAsNumber;
-  ws.send(`Z:${v}`);
-  saveSettings();
+    function setZoom() {
+      //const v = 22 - document.getElementById("zoom_level").valueAsNumber;
+      const v = document.getElementById("zoom_level").valueAsNumber;
+      ws.send(`Z:${v}`);
+      autoscaleNow();
+      saveSettings();
 }
     async function audio_start_stop()
     {

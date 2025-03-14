@@ -260,7 +260,7 @@ Spectrum.prototype.updateAxes = function() {
     this.ctx_axes.textBaseline = "middle";
 
     this.ctx_axes.textAlign = "left";
-    var step = 10;
+    var step = 5; // 5 dB steps, was 10 wdr
     for (var i = this.min_db + 10; i <= this.max_db - 10; i += step) {
         var y = height - this.squeeze(i, 0, height);
         this.ctx_axes.fillText(i, 5, y);
@@ -351,10 +351,17 @@ Spectrum.prototype.addData = function(data) {
         // attempt to autoscale based on the min/max of the current spectrum
         // or the current max hold (if it's turned on)
         // should pick reasonable scale in 5 dB increments
+        const maxAutoscaleWait = 2;
         if (this.autoscale) {
+            if(this.autoscaleWait < maxAutoscaleWait) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
+                this.autoscaleWait++;
+                console.log("autoscaleWait ",this.autoscaleWait.toString());
+                return;
+            }
+            this.autoscaleWait = 0; // Reset the flags and counters
             this.autoscale = false;
 
-            var increment = 5.0;
+            var increment = 5.0;    // RSSI graticule increament in dB
             var data_max = Math.max(...data);
             var data_min = Math.min(...data);
             if (this.maxHold) {
@@ -362,7 +369,13 @@ Spectrum.prototype.addData = function(data) {
                 data_max = Math.max(...this.binsMax, data_max);
                 data_min = Math.min(...this.binsMax, data_min);
             }
-            this.setRange(increment * Math.floor(data_min / increment),increment * Math.ceil(data_max / increment), true);
+            console.log("data_min=", data_min, " data_max=", data_max);
+            var minimum = Math.floor(data_min / increment) * increment;
+            var maximum = increment * Math.ceil(data_max / increment);
+            if(maximum < -80)  // Don't range too far into the weeds.
+                maximum = -80;
+            console.log("minimum=", minimum, " maximum=", maximum);
+            this.setRange(minimum,maximum, true);
         }
         this.drawSpectrum(data);
         this.addWaterfallRow(data);
@@ -703,6 +716,7 @@ function Spectrum(id, options) {
     this.ctx_wf = this.wf.getContext("2d");
 
     this.autoscale = false;
+    this.autoscaleWait = 0;
     this.decay = 1.0;
     this.cursor_active = false;
     this.cursor_step = 1000;
