@@ -261,7 +261,7 @@ Spectrum.prototype.updateAxes = function() {
 
     this.ctx_axes.textAlign = "left";
     var step = 5; // 5 dB steps, was 10 wdr
-    for (var i = this.min_db + 10; i <= this.max_db - 10; i += step) {
+    for (var i = this.min_db + step; i <= this.max_db - step; i += step) {
         var y = height - this.squeeze(i, 0, height);
         this.ctx_axes.fillText(i, 5, y);
 
