@@ -48,21 +48,21 @@
     <table style="border: solid;  border-color: dimgray;; border-radius: 10px ">
       <tr>
     <td rowspan=1 colspan=1>
-    <button id="postion_up" onclick="positionUp()">Position +</button>
+    <button id="postion_up" onclick="positionUp()" title="Increase spectrum baseline dBm">Position +</button>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="rangeinc" onclick="rangeIncrease()">Range +</button>
+    <button id="rangeinc" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">Range +</button>
           </td>
           <td rowspan=2>
             <input type="text" id="freq" style="color:green; font-size:26px; height:40px;
-    width:150px; border:solid" value="" onchange="setFrequency()" />
+    width:150px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
     </td>
     <td rowspan=2 colspan=1>
-            <button id="autoscale" style="color:brown; height:40px; width:90px; border:solid" onclick="autoscale()">Autoscale</button>
+            <button id="autoscale" style="color:brown; height:40px; width:90px; border:solid" onclick="autoscale()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
     </td>
     <td rowspan=2 align="center">
             <label for="mode" style="font-size:15px">Mode:</label>
-            <select name="mode" id="mode" onchange="setMode(this.value)">
+            <select name="mode" id="mode" onchange="setMode(this.value)" title="Select demodulation mode">
               <option value="cwu">CWU</option>
               <option value="cwl">CWL</option>
               <option value="usb">USB</option>
@@ -80,16 +80,16 @@
     </td>
 
           <td rowspan=2 colspan=2>
-            <label for="zoom_level">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" onchange="setZoom()" />
+            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" onchange="setZoom()" title="Adjust spectrum zoom level" />
     </td>
 
     </tr>
     <tr>
     <td rowspan=1 colspan=1>
-    <button id="position_down" onclick="positionDown()">Position -</button>
+    <button id="position_down" onclick="positionDown()" title="Decrease spectrum baseline dBm">Position -</button>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="rangedec" onclick="rangeDecrease()">Range -</button>
+    <button id="rangedec" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">Range -</button>
     </td>
     </tr>
 
@@ -98,24 +98,24 @@
     <td rowspan=1 colspan=1>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()">Spectrum +</button>
+    <button id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">Spectrum +</button>
     </td>
            
           <td align="center">
     <button onmousedown="startDecrement()" onmouseup="stopDecrement()"
-            style="width:45px"> - </button>
-              <button style="color:green; border:solid; width:45px" onclick="setFrequency()">Set</button>
+            style="width:45px" title="Decrease frequency"> - </button>
+              <button style="color:green; border:solid; width:45px" onclick="setFrequency()" title="Set frequency">Set</button>
     <button onmousedown="startIncrement()" onmouseup="stopIncrement()"
-              style="width:45px"> + </button>
+              style="width:45px" title="Increase frequency"> + </button>
           </td>
           <td rowspan=2>
             <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
-      width:90px" onclick="audio_start_stop()" value="START">Start Audio</button>
+      width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
     </td>
 
     <td>
     <label for="band" style="font-size:15px">Band/Chan:</label>
-    <select name="band" id="band" onchange="setBand(this.value)">
+    <select name="band" id="band" onchange="setBand(this.value)" title="Select radio band or time broadcast station">
         <option value="" disabled selected hidden>Select Band</option>
         <option value="1900000">160M</option>
         <option value="3715000">80M</option>
@@ -138,19 +138,19 @@
     </select>
     </td>
           <td align="center">
-            <button id="zoomminus" style="width:88px" onclick="zoomout()">Zoom Out</button>
-            <button id="zoomplus" style="width:88px" onclick="zoomin()">Zoom In</button>
+            <button id="zoomminus" style="width:88px" onclick="zoomout()" title="Zoom out spectrum">Zoom Out</button>
+            <button id="zoomplus" style="width:88px" onclick="zoomin()" title="Zoom in spectrum">Zoom In</button>
     </td>
     </tr>
     <tr>
     <td rowspan=1 colspan=1>
     </td>
     <td rowspan=1 colspan=1>
-    <button id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()">Spectrum -</button>
+    <button id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">Spectrum -</button>
     </td>
           <td align="center">
             <label for="step">Step:</label>
-            <select name="step" id="step" onchange="step_changed(this.value)">
+            <select name="step" id="step" onchange="step_changed(this.value)" title="Frequency change step size">
               <option value="1">1Hz</option>
               <option value="10">10Hz</option>
               <option value="100">100Hz</option>
@@ -166,10 +166,10 @@
     </td>
     <td align="center">
     <label for="max_hold" style="font-size:15px">Hold:</label>
-    <button id="max_hold" onclick="spectrum.toggleMaxHold()">Max hold</button>
+    <button id="max_hold" onclick="spectrum.toggleMaxHold()" title="Turn Max Hold On or Off">Max hold</button>
     </td>
       <td colspan=4>
-            <button id="zoomcenter" style="width:184px" onclick="zoomcenter()">Center</button>
+            <button id="zoomcenter" style="width:184px" onclick="zoomcenter()" title="Move current frequency to spectrum center">Center</button>
     </td>
 
     </td>
@@ -180,20 +180,20 @@
             <td>
               <font size="-1">WF range:
             </td>
-            <td><input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" />
-              <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" />
+            <td><input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
+              <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)"/>
             </td>
           <td align="center">
-            <button id="fft_avg_up" onclick="spectrum.incrementAveraging()">FFT AVG +</button>
+            <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
           </td>
 
      <td rowspan=2 colspan=1>
               <button id="pause" style="color: blue; border:solid ;height:40px;
-      width:90px" onclick="spectrum.togglePaused()">Pause</button>
+      width:90px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
       </td>
      <td rowspan=1>
         <label for="decay_list" style="font-size:15px">Max hold decay:</label>
-        <select id="decay_list" onchange="spectrum.setDecay(this.value)">
+        <select id="decay_list" onchange="spectrum.setDecay(this.value)" title="Set how long the spectrum min / max hold lives">
           <option value="1">Infinite</option>
           <option value="1.0001">1.0001</option>
           <option value="1.0005">1.0005</option>
@@ -206,31 +206,31 @@
       </td>
 
             <td rowspan=1>
-              <button id="csv_out" style="height:20px; width:85x" onclick="dumpCSV()">Write info file</button>
-              <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()">Upload bug</button>
+              <button id="csv_out" style="height:20px; width:85x" onclick="dumpCSV()" title="Write info file">Write info file</button>
+              <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()" title="Upload bug">Upload bug</button>
     </td>
     </tr>
     <tr>
             <td>
               <font size="-1">Spectrum range:
             </td>
-            <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" />
-              <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" />
+            <td><input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
+              <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm"/>
             </td>
               <td align="center">
-            <button id="fft_avg_down" onclick="spectrum.decrementAveraging()">FFT AVG -</button>
+            <button id="fft_avg_down" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button>
           </td>
 
             <td rowspan=1 colspan=1 align="center">
               <label for="meter" style="font-size:15px">Meter:</label>
-              <select name="meter" id="meter" onchange="meterType = this.value">
+              <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength or Signal To Noise Ratio meter">
                 <option value="0">Signal</option>
                 <option value="1">SNR</option>
               </select>
             </td>
       <td rowspan=1 colspan=1 align="center">
         <label for="colormap" style="font-size:15px">Colormap:</label>
-        <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)">
+        <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
           <option value="0">turbo</option>
           <option value="1">fosphorz</option>
           <option value="2">viridis</option>
@@ -293,10 +293,10 @@
       </table>
     </div>
 
-    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" /> <label for="cursor">Activate cursor</label>
-    <input type="checkbox" id="check_live" checked /> <label for="check_live">Show live</label>
-    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" /> <label for="check_max">Show max</label>
-    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" /> <label for="check_min">Show min</label>
+    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor"/> <label for="cursor">Activate cursor</label>
+    <input type="checkbox" id="check_live" checked title="Show live spectrum"/> <label for="check_live">Show live</label>
+    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line"/> <label for="check_max">Show max</label>
+    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line"/> <label for="check_min">Show min</label>
     <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
