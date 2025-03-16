@@ -1,7 +1,9 @@
 //
-// G0ORX WebSDR using ka9q-radio uddated March 7, 2025 WA2N WA2ZKD
+// G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
 //
+const usingRadiox=true; // Set to true to use the experimental radiox.html as the html file and also use that URL in the browser.  Else false for radio.html
+
       var ssrc;
 
       var band;
@@ -47,6 +49,7 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 21;
+
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -560,13 +563,32 @@ function calcFrequencies() {
     }
     function audioReporter(stats) {
     }
+
     function setZoom() {
       //const v = 22 - document.getElementById("zoom_level").valueAsNumber;
       const v = document.getElementById("zoom_level").valueAsNumber;
       ws.send(`Z:${v}`);
       autoscaleNow();
       saveSettings();
-}
+    }
+
+    function zoomReleased()
+    {
+
+    }
+
+    let zoomControlActive = false;
+    function zoomMouseDown() {
+        zoomControlActive = true;
+        console.log("Zoom control is active");
+    }
+
+    function zoomMouseUp() {
+        zoomControlActive = false;
+        console.log("Zoom control is inactive");
+    }
+
+
     async function audio_start_stop()
     {
         var btn = document.getElementById("audio_button");
@@ -585,6 +607,13 @@ var updaterangevaluecount = 0;
 function updateRangeValues(){
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
+  if(usingRadiox == true)
+  {
+    document.getElementById("waterfall_min_range").value = spectrum.wf_min_db;
+    document.getElementById("waterfall_max_range").value = spectrum.wf_max_db;
+  }
+
+
   document.getElementById("spectrum_min").value = spectrum.min_db;
   document.getElementById("spectrum_max").value = spectrum.max_db;
   saveSettings();
@@ -620,12 +649,22 @@ function rangeDecrease() {
 }
 
 function setWaterfallMin() {
-  spectrum.wf_min_db = parseFloat(document.getElementById("waterfall_min").value);
+  if(usingRadiox == true){
+    spectrum.wf_min_db = document.getElementById("waterfall_min_range").value;
+    document.getElementById("waterfall_min").value = spectrum.wf_min_db;
+  }
+  else
+    spectrum.wf_min_db = parseFloat(document.getElementById("waterfall_min").value);
   saveSettings();
 }
 
 function setWaterfallMax() {
-  spectrum.wf_max_db = parseFloat(document.getElementById("waterfall_max").value);
+  if(usingRadiox == true){
+    spectrum.wf_max_db = document.getElementById("waterfall_max_range").value;
+    document.getElementById("waterfall_max").value = spectrum.wf_max_db;
+  }
+  else
+    spectrum.wf_max_db = parseFloat(document.getElementById("waterfall_max").value);
   saveSettings();
 }
 

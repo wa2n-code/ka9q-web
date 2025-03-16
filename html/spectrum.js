@@ -4,6 +4,8 @@
  * See the LICENSE file for further details.
  */
 
+// Revised 3-16-25 02:44Z
+
 'use strict';
 
 Spectrum.prototype.setFrequency = function(freq) {
@@ -353,7 +355,7 @@ Spectrum.prototype.addData = function(data) {
         // should pick reasonable scale in 5 dB increments
         const maxAutoscaleWait = 2;
         if (this.autoscale) {
-            if(this.autoscaleWait < maxAutoscaleWait) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
+            if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
                 this.autoscaleWait++;
                 console.log("autoscaleWait ",this.autoscaleWait.toString());
                 return;
