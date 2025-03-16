@@ -460,10 +460,13 @@ Spectrum.prototype.toggleColor = function() {
 }
 
 Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall) {
+    console.log("setRange","old spec min:",this.min_db,"new spec min:",min_db,"old spec max:",this.max_db,
+        "new spec max:",max_db,"old wf min",this.wf_min_db,"new wf min -7",min_db,"old wf max",this.wf_max_db,"new wf max:",max_db);
+    
     this.min_db = min_db;
     this.max_db = max_db;
     if (adjust_waterfall) {
-        this.wf_min_db = min_db;
+        this.wf_min_db = min_db + 7;    // fix this wdr
         this.wf_max_db = max_db;
     }
     this.updateAxes();
