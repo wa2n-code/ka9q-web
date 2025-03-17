@@ -78,7 +78,7 @@
           </td>
 
           <td rowspan=2 colspan=2>
-            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" title="Adjust spectrum zoom level" />
+            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
           </td>
         </tr>
 
@@ -186,7 +186,7 @@
 
           <td>
             <label for="zoom_level" style="font-size:13px">WF
-              ceil:&nbsp;&nbsp;&nbsp;</label><input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" title="Adjust Waterfall Ceiling" />
+              ceil:&nbsp;&nbsp;&nbsp;</label><input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
             <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
           </td>
 
@@ -218,7 +218,7 @@
         <tr>
           <td>
             <label for="zoom_level" style="font-size:13px">WF floor:</label>
-            <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()" title="Adjust waterfall floor" />
+            <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()"  onwheel="adjustRange(this, event)" title="Adjust waterfall floor" />
             <input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
 
           </td>

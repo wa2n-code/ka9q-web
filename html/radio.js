@@ -668,6 +668,23 @@ function setSpectrumMax() {
   saveSettings();
 }
 
+function adjustRange(element, event) {
+  event.preventDefault(); // Prevent the default scroll behavior
+
+  const step = 1; // Define the step size for each wheel movement
+  if (event.deltaY < 0) {
+      // Scrolling up
+      element.value = Math.min(parseInt(element.value) + step, parseInt(element.max));
+  } else {
+      // Scrolling down
+      element.value = Math.max(parseInt(element.value) - step, parseInt(element.min));
+  }
+
+  // Trigger the input event to update the value
+  const inputEvent = new Event('input');
+  element.dispatchEvent(inputEvent);
+}
+
 function level_to_string(f) {
   let bin = spectrum.hz_to_bin(f);
   let s = "";
