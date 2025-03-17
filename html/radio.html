@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- format cleanup wa2zkd wa2n v2.6 March 16 2025, rev Mar 16 23:55Z -->
+<!-- format cleanup wa2zkd wa2n v2.6x March 17 2025 10:35Z -->
 <html lang="en">
 
 <head>
@@ -56,7 +56,7 @@
     width:125px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
           </td>
           <td rowspan=2 colspan=1>
-            <button id="autoscale" style="color:brown; height:40px; width:90px; border:solid" onclick="autoscale()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
+            <button id="autoscale" style="color:brown; height:40px; width:88px; border:solid" onclick="autoscale()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
           </td>
           <td rowspan=2 align="center">
             <label for="mode" style="font-size:15px">Mode:</label>
@@ -87,8 +87,8 @@
 
           <td>
             <font size="-1">Spectrum gain:
-              <button id="rangedec" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
-              <button id="rangeinc" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
+              <button id="rangedec"  style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
+              <button id="rangeinc"  style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
               <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
           </td>
 
@@ -97,8 +97,8 @@
         <tr>
           <td>
             <font size="-1">Spec Baseline:
-              <button id="position_down" onclick="positionDown()" title="Decrease spectrum baseline dBm">-</button>
-              <button id="postion_up" onclick="positionUp()" title="Increase spectrum baseline dBm">+</button>
+              <button id="position_down" style="width:45px" onclick="positionDown()" title="Decrease spectrum baseline dBm">-</button>
+              <button id="postion_up" style="width:45px" onclick="positionUp()" title="Increase spectrum baseline dBm">+</button>
               <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
 
           </td>
@@ -111,7 +111,7 @@
           </td>
           <td rowspan=2>
             <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
-      width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
+      width:88px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
           </td>
 
           <td>
@@ -148,8 +148,8 @@
         <tr>
           <td>
             <font size="-1">Spectrum size:
-              <button style="width:60px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
-              <button style="width:60px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+              <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
+              <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
           </td>
 
           <td align="center">
@@ -198,7 +198,7 @@
 
           <td rowspan=2 colspan=1>
             <button id="pause" style="color: blue; border:solid ;height:40px;
-      width:90px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
+      width:88px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
           </td>
           <td rowspan=1>
             <label for="decay_list" style="font-size:15px">Max hold decay:</label>
