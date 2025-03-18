@@ -237,6 +237,7 @@ Spectrum.prototype.drawSpectrum = function(bins) {
   if ((this.maxHold) && (true == document.getElementById("check_min").checked)) {
     this.ctx.fillStyle = "none";
     this.drawFFT(this.binsMin,"#ff0000");
+    //console.log("Min hold bin ", this.binsMin.length/2, "= ", this.binsMin[this.binsMin.length/2]);
   }
 
     // Restore scale
@@ -357,7 +358,7 @@ Spectrum.prototype.addData = function(data) {
         if (this.autoscale) {
             if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
                 this.autoscaleWait++;
-                console.log("autoscaleWait ",this.autoscaleWait.toString());
+                //console.log("autoscaleWait ",this.autoscaleWait.toString());
                 return;
             }
             this.autoscaleWait = 0; // Reset the flags and counters
@@ -366,17 +367,18 @@ Spectrum.prototype.addData = function(data) {
             var increment = 5.0;    // RSSI graticule increament in dB
             var data_max = Math.max(...data);
             var data_min = Math.min(...data);
+            //console.log("data_min= ",data_min);
             if (this.maxHold) {
                 // autoscale off peak bins in max hold mode
                 data_max = Math.max(...this.binsMax, data_max);
-                data_min = Math.min(...this.binsMax, data_min);
+                //data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
             }
-            console.log("data_min=", data_min, " data_max=", data_max);
+            //console.log("data_min=", data_min, " data_max=", data_max);
             var minimum = Math.floor(data_min / increment) * increment;
             var maximum = increment * Math.ceil(data_max / increment);
             if(maximum < -80)  // Don't range too far into the weeds.
                 maximum = -80;
-            console.log("minimum=", minimum, " maximum=", maximum);
+            //console.log("minimum=", minimum, " maximum=", maximum);
             this.setRange(minimum,maximum, true);
         }
         this.drawSpectrum(data);
@@ -460,8 +462,8 @@ Spectrum.prototype.toggleColor = function() {
 }
 
 Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall) {
-    console.log("setRange","old spec min:",this.min_db,"new spec min:",min_db,"old spec max:",this.max_db,
-        "new spec max:",max_db,"old wf min",this.wf_min_db,"new wf min",min_db,"old wf max",this.wf_max_db,"new wf max:",max_db,"adjust_waterfall=",adjust_waterfall);
+    //console.log("setRange","old spec min:",this.min_db,"new spec min:",min_db,"old spec max:",this.max_db,
+    //    "new spec max:",max_db,"old wf min",this.wf_min_db,"new wf min",min_db,"old wf max",this.wf_max_db,"new wf max:",max_db,"adjust_waterfall=",adjust_waterfall);
     
     this.min_db = min_db;
     this.max_db = max_db;
