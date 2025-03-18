@@ -966,7 +966,7 @@ function saveSettings() {
   localStorage.setItem("check_min", document.getElementById("check_min").checked.toString()); 
 }
 
-function checkcheckMaxMinChanged(){  // Save the check boxes for show max and min
+function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
