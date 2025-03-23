@@ -322,7 +322,7 @@ Spectrum.prototype.updateAxes = function() {
     }
     inc = isNaN(inc) ? 2000000 : inc;
 
-    console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins);
+    //console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins);
 
     var freq=this.start_freq-(this.start_freq%inc);
     var text;
@@ -361,9 +361,9 @@ Spectrum.prototype.addData = function(data) {
         // should pick reasonable scale in 5 dB increments
         const maxAutoscaleWait = 2;
         if (this.autoscale) {
-            if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
+            if((this.autoscaleWait < maxAutoscaleWait) & !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
                 this.autoscaleWait++;
-                //console.log("autoscaleWait ",this.autoscaleWait.toString());
+                console.log("autoscaleWait ",this.autoscaleWait.toString());
                 return;
             }
             this.autoscaleWait = 0; // Reset the flags and counters
@@ -373,21 +373,24 @@ Spectrum.prototype.addData = function(data) {
 
             var currentFreqBin = this.hz_to_bin(this.frequency);
            
-            var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
-            var lowBin = Math.max(0, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
-            var highBin = Math.min(this.nbins, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
+            var binsToBracket = 100;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
+            var lowBin = Math.max(5, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
+            var highBin = Math.min(this.nbins-5, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
             console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
 
             var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
             var data_max = 0;
-
+            var data_avg_high = 0;
+            var data_avg_low = 0;
             for (var i = lowBin; i < highBin; i++) {
+                data_avg_low = (data[i-5]+data[i-4]+data[i-3]+data[i-2]+data[i-1]+data[i]+data[i+1]+data[i+2]+data[i+3]+data[i+5])/10;  // Average +/- 5 bins
+                data_avg_high = data[i]; //(data[i-1]+data[i])/2;  // not so many bins to average, keep the peaks
                 if (i == lowBin) {
-                    data_min = data[i];
-                    data_max = data[i];
+                    data_max = data_avg_high;
+                    data_min = 0; //data_avg_low;;
                 } else {
-                    data_min = Math.min(data_min, data[i]);
-                    data_max = Math.max(data_max, data[i]);
+                    data_min = Math.min(data_min, data_avg_low);
+                    data_max = Math.max(data_max, data_avg_high);
                 }
             }
             //var data_max = Math.max(...data);
@@ -400,12 +403,12 @@ Spectrum.prototype.addData = function(data) {
                 //data_max = Math.max(...this.binsMax, data_max);
                 //data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
             }
-            //console.log("data_min=", data_min, " data_max=", data_max);
-            var minimum = Math.floor(data_min / increment) * increment;
-            var maximum = increment * Math.ceil(data_max / increment);
+            console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1));
+            var minimum = Math.floor(data_min / increment) * increment - increment;
+            var maximum = increment * Math.ceil(data_max / increment) + increment;
             if(maximum < -80)  // Don't range too far into the weeds.
                 maximum = -80;
-            //console.log("minimum=", minimum, " maximum=", maximum);
+            console.log("minimum=", minimum, " maximum=", maximum);
             this.setRange(minimum,maximum, true);
         }
         this.drawSpectrum(data);
@@ -495,7 +498,7 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall) {
     this.min_db = min_db;
     this.max_db = max_db;
     if (adjust_waterfall) {
-        this.wf_min_db = min_db + 0;    // fix this wdr
+        this.wf_min_db = min_db + 5;    // fix this wdr
         this.wf_max_db = max_db;
     }
     this.updateAxes();

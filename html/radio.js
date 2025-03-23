@@ -573,7 +573,8 @@ function calcFrequencies() {
 
     function zoomReleased()
     {
-
+      zoomControlActive = false;
+      console.log("Zoom control is inactive");
     }
 
     let zoomControlActive = false;
