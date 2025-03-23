@@ -47,7 +47,7 @@
       var target_frequency = frequencyHz;
       var target_center = centerHz;
       var target_preset = "am";
-      var target_zoom_level = 21;
+      var target_zoom_level = 14;
 
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
@@ -221,7 +221,7 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
-              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 21 : 22;
+              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 14: 15;
               document.getElementById("zoom_level").value = z_level;
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();

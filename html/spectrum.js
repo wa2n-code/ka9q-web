@@ -214,6 +214,9 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // draw pointer
     this.drawCursor(this.frequency, bins, "#ff0000", bins[this.hz_to_bin(this.frequency)]);
 
+//    console.log("drawCursor: frequency=",this.frequency," bin=",this.hz_to_bin(this.frequency)," amp=",bins[this.hz_to_bin(this.frequency)]);
+    
+
     // draw cursor
     if (this.cursor_active)
         this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
@@ -319,6 +322,8 @@ Spectrum.prototype.updateAxes = function() {
     }
     inc = isNaN(inc) ? 2000000 : inc;
 
+    console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins);
+
     var freq=this.start_freq-(this.start_freq%inc);
     var text;
     while(freq<=this.highHz) {
@@ -365,12 +370,34 @@ Spectrum.prototype.addData = function(data) {
             this.autoscale = false;
 
             var increment = 5.0;    // RSSI graticule increament in dB
-            var data_max = Math.max(...data);
-            var data_min = Math.min(...data);
+
+            var currentFreqBin = this.hz_to_bin(this.frequency);
+           
+            var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
+            var lowBin = Math.max(0, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
+            var highBin = Math.min(this.nbins, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
+            console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
+
+            var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
+            var data_max = 0;
+
+            for (var i = lowBin; i < highBin; i++) {
+                if (i == lowBin) {
+                    data_min = data[i];
+                    data_max = data[i];
+                } else {
+                    data_min = Math.min(data_min, data[i]);
+                    data_max = Math.max(data_max, data[i]);
+                }
+            }
+            //var data_max = Math.max(...data);
+            //var data_min = Math.min(...data);
+
+
             //console.log("data_min= ",data_min);
             if (this.maxHold) {
                 // autoscale off peak bins in max hold mode
-                data_max = Math.max(...this.binsMax, data_max);
+                //data_max = Math.max(...this.binsMax, data_max);
                 //data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
             }
             //console.log("data_min=", data_min, " data_max=", data_max);
