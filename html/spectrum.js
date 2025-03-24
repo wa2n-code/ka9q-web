@@ -366,7 +366,7 @@ Spectrum.prototype.addData = function(data) {
                 console.log("autoscaleWait ",this.autoscaleWait.toString());
                 return;
             }
-            if(this.autoscaleWait == maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
+            if(this.autoscaleWait >= maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
             {
                 this.autoscaleWait = 0; // Reset the flags and counters, we're going to autoscale now!
                 this.autoscale = false;
@@ -381,22 +381,8 @@ Spectrum.prototype.addData = function(data) {
 
             var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
             var data_max = 0;
-            var data_avg_high = 0;
+            var data_peak = 0;
             var data_avg_low = 0;
-            /*for (var i = lowBin; i < highBin; i++) {
-                data_avg_low = (data[i-5]+data[i-4]+data[i-3]+data[i-2]+data[i-1]+data[i]+data[i+1]+data[i+2]+data[i+3]+data[i+5])/10;  // Average +/- 5 bins
-                data_avg_high = data[i]; //(data[i-1]+data[i])/2;  // not so many bins to average, keep the peaks
-                if (i == lowBin) {
-                    data_max = data_avg_high;
-                    data_min = 0; //data_avg_low;;
-                } else {
-                    data_min = Math.min(data_min, data_avg_low);
-                    data_max = Math.max(data_max, data_avg_high);
-                }
-            }
-            */
-            //var data_max = Math.max(...data);
-            //var data_min = Math.min(...data);
 
             // Find the mean value of the baseline
             var min_mean = Infinity;
@@ -408,7 +394,7 @@ Spectrum.prototype.addData = function(data) {
                     data[i - 5], data[i - 4], data[i - 3], data[i - 2], data[i - 1],
                     data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10]];
                 data_avg_low = values.reduce((a, b) => a + b, 0) / values.length;   // Average +/- N bins
-                data_avg_high = data[i];                                            // keep the peaks
+                data_peak = data[i];                                            // keep the peaks
 
                 if (data_avg_low < min_mean) {
                     min_mean = data_avg_low;
@@ -416,11 +402,11 @@ Spectrum.prototype.addData = function(data) {
                 }
 
                 if (i == lowBin) {
-                    data_max = data_avg_high;
+                    data_max = data_peak;
                     data_min = 0; //data_avg_low;;
                 } else {
                     data_min = Math.min(data_min, data_avg_low);
-                    data_max = Math.max(data_max, data_avg_high);
+                    data_max = Math.max(data_max, data_peak);
                 }
             }
             // Find the standard deviation at the minimum baseline bin we've identified doing the mean above
@@ -437,20 +423,23 @@ Spectrum.prototype.addData = function(data) {
                 console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
             }
 
-            //console.log("data_min= ",data_min);
-            /*if (this.maxHold) {
+            /*if (this.maxHold) {   // Blow off caring about the max hold, stick with looking at the spectral data
                 autoscale off peak bins in max hold mode
                 data_max = Math.max(...this.binsMax, data_max);
-                data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
+                data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on
             }
             */
-            console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1));
+
+            // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
+            var wholeSpectrumMax = Math.max(...this.binsMax);
+            
+            console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
             // Update the min / max
 
             var minimum = Math.floor(data_min / increment) * increment - increment;
-            var maximum = increment * Math.ceil(data_max / increment) + increment;
-            const minimum_spectral_gain = -60;
+            var maximum = increment * Math.ceil(wholeSpectrumMax / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
+            const minimum_spectral_gain = -100;
             if(maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 maximum = minimum_spectral_gain;
             console.log("minimum=", minimum, " maximum=", maximum);
@@ -679,8 +668,13 @@ Spectrum.prototype.toggleFullscreen = function() {
     }
 }
 
-Spectrum.prototype.forceAutoscale = function() {
+Spectrum.prototype.forceAutoscale = function(waitToAutoscale = true) {
     this.autoscale = true;
+    if(waitToAutoscale)
+        this.autoscaleWait = 0; // if it's zero, then we're gonna wait
+    else
+        this.autoscaleWait = 100;  // not gonna wait
+    console.log("forceAutoscale() autoscaleWait set to", this.autoscaleWait)
 }
 
 Spectrum.prototype.onKeypress = function(e) {

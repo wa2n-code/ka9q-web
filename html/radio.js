@@ -207,7 +207,6 @@ function calcFrequencies() {
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
-//            const z_level = 22 - view.getUint32(i,true); i+=4;
             const z_level = view.getUint32(i,true); i+=4;
             const bin_precision_bytes = view.getUint32(i,true); i+=4;
             const bins_autorange_offset =  view.getFloat32(i,true); i+=4;
@@ -401,7 +400,7 @@ function calcFrequencies() {
       f=f-(f%increment);
       if (!spectrum.cursor_active) {
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
-        setFrequency();
+        setFrequency(false);
       } else {
         spectrum.cursor_freq = spectrum.limitCursor(Math.round((centerHz - (span / 2)) + (hzPerPixel * e.pageX)));
       }
@@ -423,7 +422,7 @@ function calcFrequencies() {
         f=Math.round((centerHz - (binWidthHz / 2)) + (hzPerPixel * e.pageX));
         f=f-(f%increment);
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
-        setFrequency();
+        setFrequency(false);
       }
       saveSettings();
       pressed=false;
@@ -506,14 +505,17 @@ function calcFrequencies() {
     function stopDecrement() {
         clearInterval(counter);
     }
-    function setFrequency()
+    function setFrequency(waitToAutoscale = true)
     {
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
         ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
       spectrum.setFrequency(f);
-      autoscaleNow();
+      if(waitToAutoscale)
+        autoscaleWithWait();
+      else
+        autoscale();      // don't wait, autoscale right away
       saveSettings();
     }
     function setBand(freq) {
@@ -526,7 +528,7 @@ function calcFrequencies() {
           setMode('usb');
         }
         ws.send("F:" + (freq / 1000).toFixed(3));
-        autoscaleNow();
+        autoscaleWithWait();
       saveSettings();
     }
     function setMode(selected_mode) {
@@ -540,27 +542,27 @@ function calcFrequencies() {
         ws.send("M:"+mode);
       saveSettings();
     }
-    function autoscaleNow() {
-      spectrum.forceAutoscale();
+    function autoscaleWithWait() {
+      spectrum.forceAutoscale(true);
       pending_range_update = true;
-      console.log("autoscaleNow() called");
+      console.log("autoscaleWithWait() called");
     }
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
       console.log("zoomin()");
-      autoscaleNow();
+      autoscaleWithWait();
       saveSettings();
     }
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
       console.log("zoomout()");
-      autoscaleNow();
+      autoscaleWithWait();
       saveSettings();
     }
     function zoomcenter() {
       ws.send("Z:c");
-      autoscaleNow();
+      autoscaleWithWait();
       saveSettings();
     }
     function audioReporter(stats) {
@@ -576,7 +578,7 @@ function calcFrequencies() {
     function zoomReleased()
     {
       zoomControlActive = false;
-      autoscaleNow();
+      autoscaleWithWait();
       console.log("Zoom control is inactive");
     }
 
@@ -606,7 +608,6 @@ function calcFrequencies() {
           ws.send("A:STOP:"+ssrc.toString());
         }
     }
-var updaterangevaluecount = 0;
 function updateRangeValues(){
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
@@ -614,12 +615,11 @@ function updateRangeValues(){
   document.getElementById("waterfall_max_range").value = spectrum.wf_max_db;
   document.getElementById("spectrum_min").value = spectrum.min_db;
   document.getElementById("spectrum_max").value = spectrum.max_db;
-  console.log("updateRangeValues spectrum_min: ",spectrum.min_db," spectrum_max",spectrum.max_db );
   saveSettings();
 }
 
-function autoscale() {
-  spectrum.forceAutoscale();
+function autoscale() {          // From the html autoscale button.  Don't need to wait for autoscalewait
+  spectrum.forceAutoscale(false); // don't wait to autoscale, do it now
   pending_range_update = true;
 }
 
