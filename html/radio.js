@@ -221,8 +221,9 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
-              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 14: 15;
+              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 15: 15; // above and below 64.8 Mhz now can do 15 levels of zoom?
               document.getElementById("zoom_level").value = z_level;
+              //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
             }
@@ -547,11 +548,13 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
+      console.log("zoomin()");
       autoscaleNow();
       saveSettings();
     }
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
+      console.log("zoomout()");
       autoscaleNow();
       saveSettings();
     }
@@ -564,16 +567,16 @@ function calcFrequencies() {
     }
 
     function setZoom() {
-      //const v = 22 - document.getElementById("zoom_level").valueAsNumber;
       const v = document.getElementById("zoom_level").valueAsNumber;
       ws.send(`Z:${v}`);
-      autoscaleNow();
+      console.log("setZoom()");
       saveSettings();
     }
 
     function zoomReleased()
     {
       zoomControlActive = false;
+      autoscaleNow();
       console.log("Zoom control is inactive");
     }
 
@@ -609,10 +612,9 @@ function updateRangeValues(){
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   document.getElementById("waterfall_min_range").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max_range").value = spectrum.wf_max_db;
-
-
   document.getElementById("spectrum_min").value = spectrum.min_db;
   document.getElementById("spectrum_max").value = spectrum.max_db;
+  console.log("updateRangeValues spectrum_min: ",spectrum.min_db," spectrum_max",spectrum.max_db );
   saveSettings();
 }
 
@@ -621,15 +623,15 @@ function autoscale() {
   pending_range_update = true;
 }
 
-function positionUp() {
-  spectrum.positionUp();
-  updateRangeValues();
+function baselineUp() {
+  spectrum.baselineUp();
+  document.getElementById("spectrum_min").value = spectrum.min_db;
   saveSettings();
 }
 
-function positionDown() {
-  spectrum.positionDown();
-  updateRangeValues();
+function baselineDown() {
+  spectrum.baselineDown();
+  document.getElementById("spectrum_min").value = spectrum.min_db;
   saveSettings();
 }
 

@@ -78,7 +78,7 @@
           </td>
 
           <td rowspan=2 colspan=2>
-            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" value="21" max="22" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
+            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="1" max="15" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
           </td>
         </tr>
 
@@ -97,8 +97,8 @@
         <tr>
           <td>
             <font size="-1">Spec Baseline:
-              <button id="position_down" style="width:45px" onclick="positionDown()" title="Decrease spectrum baseline dBm">-</button>
-              <button id="postion_up" style="width:45px" onclick="positionUp()" title="Increase spectrum baseline dBm">+</button>
+              <button id="baseline_down" style="width:45px" onclick="baselineDown()" title="Decrease spectrum baseline dBm">-</button>
+              <button id="baseline_up" style="width:45px" onclick="baselineUp()" title="Increase spectrum baseline dBm">+</button>
               <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
 
           </td>

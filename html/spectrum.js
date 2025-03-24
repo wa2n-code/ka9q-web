@@ -361,15 +361,23 @@ Spectrum.prototype.addData = function(data) {
         // should pick reasonable scale in 5 dB increments
         const maxAutoscaleWait = 2;
         if (this.autoscale) {
+            if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
+                this.autoscaleWait++;
+                console.log("autoscaleWait ",this.autoscaleWait.toString());
+                return;
+            }
+            if(this.autoscaleWait == maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
+            {
+                this.autoscaleWait = 0; // Reset the flags and counters, we're going to autoscale now!
+                this.autoscale = false;
+            }
 
             var increment = 5.0;    // RSSI graticule increament in dB
-
             var currentFreqBin = this.hz_to_bin(this.frequency);
-           
-            var binsToBracket = 100;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
-            var lowBin = Math.max(5, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
-            var highBin = Math.min(this.nbins-5, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
-            //console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
+            var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
+            var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
+            var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
+            console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
 
             var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
             var data_max = 0;
@@ -390,16 +398,17 @@ Spectrum.prototype.addData = function(data) {
             //var data_max = Math.max(...data);
             //var data_min = Math.min(...data);
 
+            // Find the mean value of the baseline
             var min_mean = Infinity;
             var min_mean_index = -1;
             var std_dev = 0;
             for (var i = lowBin; i < highBin; i++) {
                 let values = [
+                    data[i - 10], data[i - 9], data[i - 8], data[i - 7], data[i - 6],
                     data[i - 5], data[i - 4], data[i - 3], data[i - 2], data[i - 1],
-                    data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 5]
-                ];
-                data_avg_low = values.reduce((a, b) => a + b, 0) / values.length;  // Average +/- 5 bins
-                data_avg_high = data[i]; //(data[i - 1] + data[i]) / 2;  // not so many bins to average, keep the peaks
+                    data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10]];
+                data_avg_low = values.reduce((a, b) => a + b, 0) / values.length;   // Average +/- N bins
+                data_avg_high = data[i];                                            // keep the peaks
 
                 if (data_avg_low < min_mean) {
                     min_mean = data_avg_low;
@@ -414,43 +423,36 @@ Spectrum.prototype.addData = function(data) {
                     data_max = Math.max(data_max, data_avg_high);
                 }
             }
-
+            // Find the standard deviation at the minimum baseline bin we've identified doing the mean above
             if (min_mean_index !== -1) {
                 let values = [
+                    data[min_mean_index - 10], data[min_mean_index - 9], data[min_mean_index - 8], data[min_mean_index - 7], data[min_mean_index - 6],
                     data[min_mean_index - 5], data[min_mean_index - 4], data[min_mean_index - 3], data[min_mean_index - 2], data[min_mean_index - 1],
-                    data[min_mean_index], data[min_mean_index + 1], data[min_mean_index + 2], data[min_mean_index + 3], data[min_mean_index + 5]
-                ];
+                    data[min_mean_index], data[min_mean_index + 1], data[min_mean_index + 2], data[min_mean_index + 3], data[min_mean_index + 5],
+                    data[min_mean_index+6], data[min_mean_index + 7], data[min_mean_index + 8], data[min_mean_index + 9], data[min_mean_index + 10]];
                 let mean = min_mean;
                 let variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
                 std_dev = Math.sqrt(variance);
 
-                console.log("Standard Deviation: ", std_dev.toFixed(2));
+                console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
             }
 
             //console.log("data_min= ",data_min);
-            if (this.maxHold) {
-                // autoscale off peak bins in max hold mode
-                //data_max = Math.max(...this.binsMax, data_max);
-                //data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
+            /*if (this.maxHold) {
+                autoscale off peak bins in max hold mode
+                data_max = Math.max(...this.binsMax, data_max);
+                data_min = Math.min(...this.binsMax, data_min);   // Messes up waterfall when autoscaling with Max Hold on wdr
             }
+            */
             console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1));
-            if((this.autoscaleWait < maxAutoscaleWait) & !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
-                this.autoscaleWait++;
-                console.log("autoscaleWait ",this.autoscaleWait.toString());
-                return;
-            }
-            if(this.autoscaleWait == maxAutoscaleWait)
-            {
-                this.autoscaleWait = 0; // Reset the flags and counters
-                this.autoscale = false;
-            }
 
             // Update the min / max
 
             var minimum = Math.floor(data_min / increment) * increment - increment;
             var maximum = increment * Math.ceil(data_max / increment) + increment;
-            if(maximum < -80)  // Don't range too far into the weeds.
-                maximum = -80;
+            const minimum_spectral_gain = -60;
+            if(maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
+                maximum = minimum_spectral_gain;
             console.log("minimum=", minimum, " maximum=", maximum);
             this.setRange(minimum,maximum, true,Math.round(std_dev * 2.0));
         }
@@ -535,11 +537,12 @@ Spectrum.prototype.toggleColor = function() {
 }
 
 Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_adjust) {
-    //console.log("setRange","old spec min:",this.min_db,"new spec min:",min_db,"old spec max:",this.max_db,
-    //    "new spec max:",max_db,"old wf min",this.wf_min_db,"new wf min",min_db,"old wf max",this.wf_max_db,"new wf max:",max_db,"adjust_waterfall=",adjust_waterfall);
-    
+    console.log("spectum.setRange min_db: ",min_db," max_db",max_db);
     this.min_db = min_db;
     this.max_db = max_db;
+    document.getElementById("spectrum_min").value = min_db;
+    document.getElementById("spectrum_max").value = max_db;
+
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // fix this wdr, maybe use min_db + stdev of the min?  For now, just add +5 to darken the waterfall.
         this.wf_max_db = max_db;
@@ -549,13 +552,19 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     this.saveSettings();
 }
 
-Spectrum.prototype.positionUp = function() {
-    this.setRange(this.min_db - 5, this.max_db - 5, false,0);
+Spectrum.prototype.baselineUp = function() {
+    this.min_db -=5;
+    this.updateAxes();
+    document.getElementById("spectrum_min").value = this.min_db;
+    //this.setRange(this.min_db - 5, this.max_db - 5, false,0);
     this.saveSettings();
 }
 
-Spectrum.prototype.positionDown = function() {
-    this.setRange(this.min_db + 5, this.max_db + 5, false,0);
+Spectrum.prototype.baselineDown = function() {
+    this.min_db +=5;
+    this.updateAxes();
+    document.getElementById("spectrum_min").value = this.min_db;
+    //this.setRange(this.min_db + 5, this.max_db + 5, false,0);
     this.saveSettings();
 }
 
@@ -682,9 +691,9 @@ Spectrum.prototype.onKeypress = function(e) {
     } else if (e.key == "c") {
         this.toggleColor();
     } else if (e.key == "ArrowUp") {
-        this.positionUp();
+        this.baselineUp();
     } else if (e.key == "ArrowDown") {
-        this.positionDown();
+        this.baselineDown();
     } else if (e.key == "ArrowLeft") {
         this.rangeDecrease();
     } else if (e.key == "ArrowRight") {
