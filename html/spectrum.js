@@ -431,7 +431,7 @@ Spectrum.prototype.addData = function(data) {
             */
 
             // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
-            var wholeSpectrumMax = Math.max(...this.binsMax);
+            var wholeSpectrumMax = Math.max(...data);
             
             console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
