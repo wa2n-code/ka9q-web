@@ -431,14 +431,18 @@ Spectrum.prototype.addData = function(data) {
             */
 
             // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
-            var wholeSpectrumMax = Math.max(...data);
+            var wholeSpectrumMax = Math.max(...this.bin_copy);
             
             console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
+
+            if (!isNaN(wholeSpectrumMax))
+                if(wholeSpectrumMax > data_max)
+                    data_max = wholeSpectrumMax;
 
             // Update the min / max
 
             var minimum = Math.floor(data_min / increment) * increment - increment;
-            var maximum = increment * Math.ceil(wholeSpectrumMax / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
+            var maximum = increment * Math.ceil(data_max / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
             const minimum_spectral_gain = -100;
             if(maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 maximum = minimum_spectral_gain;
