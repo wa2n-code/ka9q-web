@@ -48,6 +48,7 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 14;
+      var switchModesByFrequency = false;
 
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
@@ -522,13 +523,15 @@ function calcFrequencies() {
         f=parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
-        if (f < 10000000) {
-          setMode('lsb');
-        } else {
-          setMode('usb');
-        }
-        ws.send("F:" + (freq / 1000).toFixed(3));
-        autoscaleWithWait();
+        if(switchModesByFrequency ) {
+          if (f < 10000000) {
+            setMode('lsb');
+          } else {
+            setMode('usb');
+          }
+      }
+      ws.send("F:" + (freq / 1000).toFixed(3));
+      autoscaleWithWait();
       saveSettings();
     }
     function setMode(selected_mode) {
@@ -966,7 +969,8 @@ function saveSettings() {
   localStorage.setItem("meterIndex", document.getElementById("meter").value.toString());
   localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
   localStorage.setItem("check_max", document.getElementById("check_max").checked.toString()); 
-  localStorage.setItem("check_min", document.getElementById("check_min").checked.toString()); 
+  localStorage.setItem("check_min", document.getElementById("check_min").checked.toString());
+  localStorage.setItem("switchModesByFrequency", document.getElementById("switchModesByFrequency").checked.toString());
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -1014,6 +1018,8 @@ function loadSettings() {
   spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
   spectrum.check_max = check_max.checked = (localStorage.getItem("check_max") == "true");
   spectrum.check_min = check_min.checked = (localStorage.getItem("check_min") == "true");
+  switchModesByFrequency = (localStorage.getItem("switchModesByFrequency") == "true");
+  document.getElementById("switchModesByFrequency").checked = switchModesByFrequency;
   return true;
 }
 
@@ -1030,3 +1036,80 @@ function rx(x) {
   }
 }
 
+// Event handlers for new Spectrum Options Dialog box
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('OptionsButton').addEventListener('click', function() {
+    document.getElementById('optionsDialog').classList.add('open');
+    document.getElementById('dialogOverlay').classList.add('open');
+  });
+});
+
+function initializeDialogEventListeners() {
+  document.getElementById('closeButton').addEventListener('click', function() {
+    document.getElementById('optionsDialog').classList.remove('open');
+    document.getElementById('dialogOverlay').classList.remove('open');
+  });
+
+  // Remove the event listener that closes the dialog when the overlay is clicked
+  // document.getElementById('dialogOverlay').addEventListener('click', function() {
+  //   document.getElementById('optionsDialog').classList.remove('open');
+  //   document.getElementById('dialogOverlay').classList.remove('open');
+  // });
+
+  // Add event listeners to the checkboxes
+  document.getElementById('checkbox1').addEventListener('change', function() {
+    console.log('Checkbox 1:', this.checked);
+  });
+
+  document.getElementById('checkbox2').addEventListener('change', function() {
+    console.log('Checkbox 2:', this.checked);
+  });
+
+  document.getElementById('checkbox3').addEventListener('change', function() {
+    console.log('Checkbox 3:', this.checked);
+  });
+
+  document.getElementById('checkbox4').addEventListener('change', function() {
+    console.log('Checkbox 4:', this.checked);
+  });
+
+  document.getElementById('checkbox5').addEventListener('change', function() {
+    console.log('Checkbox 5:', this.checked);
+  });
+
+  document.getElementById('switchModesByFrequency').addEventListener('change', function() {
+    console.log('switchModesByFrequency:', this.checked);
+    switchModesByFrequency = this.checked;
+    saveSettings();
+  });
+
+  // Make the dialog box draggable
+  makeDialogDraggable(document.getElementById('optionsDialog'));
+}
+
+function makeDialogDraggable(dialog) {
+  let isDragging = false;
+  let offsetX, offsetY;
+
+  dialog.addEventListener('mousedown', function(e) {
+    isDragging = true;
+    offsetX = e.clientX - dialog.getBoundingClientRect().left;
+    offsetY = e.clientY - dialog.getBoundingClientRect().top;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+
+  function onMouseMove(e) {
+    if (isDragging) {
+      dialog.style.left = `${e.clientX - offsetX}px`;
+      dialog.style.top = `${e.clientY - offsetY}px`;
+    }
+  }
+
+  function onMouseUp() {
+    isDragging = false;
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  }
+}

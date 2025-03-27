@@ -34,3 +34,37 @@ h4#heading {
     padding: 0;
     line-height: 1.2; /* Adjust this value as needed */
 }
+
+#optionsDialog {
+  display: none;
+  position: absolute; /* Change from fixed to absolute */
+  left: 50%;
+  top: 50%;
+  /* transform: translate(-50%, -50%); */
+  border: 2px solid #ccc;
+  padding: 20px;
+  background-color: lightgray;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000; /* Ensure the dialog box is above other content */
+  cursor: move; /* Change cursor to indicate moveable */
+}
+
+#optionsDialog.open {
+  display: block;
+}
+
+#dialogOverlay {
+  display: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 500; /* Ensure the overlay is behind the main content */
+  /*background-color: rgba(0, 0, 0, 0.5); Optional: Add a semi-transparent background */
+  pointer-events: none; /* Make the overlay non-interactive */
+}
+
+#dialogOverlay.open {
+  display: block;
+}

@@ -299,10 +299,25 @@
       </table>
     </div>
 
+    <!-- Placeholder for the dialog box -->
+    <div id="dialogPlaceholder"></div>
+
+    <script>
+      // Load the dialog box content from optionsDialog.html
+      fetch('optionsDialog.html')
+        .then(response => response.text())
+        .then(data => {
+          document.getElementById('dialogPlaceholder').innerHTML = data;
+          // Initialize event listeners after loading the dialog content
+          initializeDialogEventListeners();
+        });
+    </script>
+
     <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
     <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Show live</label>
     <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label for="check_max">Show max</label>
     <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label for="check_min">Show min</label>
+    <button id="OptionsButton" title="Additional option">Options</button>
     <span id="cursor_data"></span>
     <span id="info"> </span>
     <span id="audiospan"> </span>
@@ -352,5 +367,4 @@
     <br>
     <i>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)</i>
 </body>
-
 </html>

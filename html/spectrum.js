@@ -436,8 +436,14 @@ Spectrum.prototype.addData = function(data) {
             console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
             if (!isNaN(wholeSpectrumMax))
+            {
+                console.log("wholeSpectrumMax is good");
                 if(wholeSpectrumMax > data_max)
+                {
+                    console.log("wholeSpectrumMax is bigger, use it");
                     data_max = wholeSpectrumMax;
+                }
+            }
 
             // Update the min / max
 
