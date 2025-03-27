@@ -1040,7 +1040,14 @@ function rx(x) {
 
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('OptionsButton').addEventListener('click', function() {
-    document.getElementById('optionsDialog').classList.add('open');
+//    document.getElementById('optionsDialog').classList.add('open');
+//    document.getElementById('dialogOverlay').classList.add('open');
+
+    const dialog = document.getElementById('optionsDialog');
+    dialog.style.left = '50%';
+    dialog.style.top = '50%';
+    //dialog.style.transform = 'translate(-50%, -50%)';
+    dialog.classList.add('open');
     document.getElementById('dialogOverlay').classList.add('open');
   });
 });
@@ -1051,30 +1058,24 @@ function initializeDialogEventListeners() {
     document.getElementById('dialogOverlay').classList.remove('open');
   });
 
-  // Remove the event listener that closes the dialog when the overlay is clicked
-  // document.getElementById('dialogOverlay').addEventListener('click', function() {
-  //   document.getElementById('optionsDialog').classList.remove('open');
-  //   document.getElementById('dialogOverlay').classList.remove('open');
-  // });
-
   // Add event listeners to the checkboxes
-  document.getElementById('checkbox1').addEventListener('change', function() {
+  document.getElementById('checkbox2').addEventListener('change', function() {
     console.log('Checkbox 1:', this.checked);
   });
 
-  document.getElementById('checkbox2').addEventListener('change', function() {
+  document.getElementById('checkbox3').addEventListener('change', function() {
     console.log('Checkbox 2:', this.checked);
   });
 
-  document.getElementById('checkbox3').addEventListener('change', function() {
+  document.getElementById('checkbox4').addEventListener('change', function() {
     console.log('Checkbox 3:', this.checked);
   });
 
-  document.getElementById('checkbox4').addEventListener('change', function() {
+  document.getElementById('checkbox5').addEventListener('change', function() {
     console.log('Checkbox 4:', this.checked);
   });
 
-  document.getElementById('checkbox5').addEventListener('change', function() {
+  document.getElementById('checkbox6').addEventListener('change', function() {
     console.log('Checkbox 5:', this.checked);
   });
 
