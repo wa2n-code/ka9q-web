@@ -1114,18 +1114,19 @@ function makeDialogDraggable(dialog) {
   let isDragging = false;
   let offsetX, offsetY;
 
-  dialog.addEventListener('mousedown', function(e) {
+  dialog.addEventListener('mousedown', function (e) {
     isDragging = true;
-    offsetX = e.clientX - dialog.getBoundingClientRect().left;
-    offsetY = e.clientY - dialog.getBoundingClientRect().top;
+    offsetX = e.pageX - dialog.getBoundingClientRect().left - window.scrollX;
+    offsetY = e.pageY - dialog.getBoundingClientRect().top - window.scrollY;
+    console.log('Dialog offset:', offsetX, offsetY, 'e.pageX:', e.pageX, 'e.pageY:', e.pageY);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });
 
   function onMouseMove(e) {
     if (isDragging) {
-      dialog.style.left = `${e.clientX - offsetX}px`;
-      dialog.style.top = `${e.clientY - offsetY}px`;
+      dialog.style.left = `${e.pageX - offsetX}px`;
+      dialog.style.top = `${e.pageY - offsetY}px`;
     }
   }
 
