@@ -49,6 +49,7 @@
       var target_preset = "am";
       var target_zoom_level = 14;
       var switchModesByFrequency = false;
+      var onlyAutoscaleByButton = false;
 
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
@@ -389,7 +390,8 @@ function calcFrequencies() {
         getVersion();
       }
 
-    window.addEventListener('load', init, false);
+    // removed addevent listener for load and call init in the fetch script in radio.html
+    // window.addEventListener('load', init, false);
 
     var increment=1000;
 
@@ -464,8 +466,8 @@ function calcFrequencies() {
     var counter;
 
     function step_changed(value) {
-      increment = parseInt(value);
-      saveSettings();
+        increment = parseInt(value);
+        saveSettings();
     }
 
     function incrementFrequency()
@@ -477,8 +479,9 @@ function calcFrequencies() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
-      saveSettings();
+        saveSettings();
     }
+
     function decrementFrequency()
     {
         var value = parseFloat(document.getElementById('freq').value,10);
@@ -488,37 +491,40 @@ function calcFrequencies() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
-      saveSettings();
+        saveSettings();
     }
+
     function startIncrement() {
         incrementFrequency();
         counter=setInterval(incrementFrequency,200);
       saveSettings();
     }
+
     function stopIncrement() {
         clearInterval(counter);
     }
+
     function startDecrement() {
         decrementFrequency();
         counter=setInterval(decrementFrequency,200);
-      saveSettings();
+        saveSettings();
     }
+
     function stopDecrement() {
         clearInterval(counter);
     }
+
     function setFrequency(waitToAutoscale = true)
     {
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
         ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
-      spectrum.setFrequency(f);
-      if(waitToAutoscale)
-        autoscaleWithWait();
-      else
-        autoscale();      // don't wait, autoscale right away
-      saveSettings();
+        spectrum.setFrequency(f);
+        autoAutoscale(waitToAutoscale);      
+        saveSettings();
     }
+
     function setBand(freq) {
         f=parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
@@ -531,43 +537,43 @@ function calcFrequencies() {
           }
       }
       ws.send("F:" + (freq / 1000).toFixed(3));
-      autoscaleWithWait();
+      autoAutoscale(true);  // wait for autoscale
       saveSettings();
     }
+
     function setMode(selected_mode) {
         document.getElementById('mode').value = selected_mode;
         ws.send("M:"+selected_mode);
-      saveSettings();
+        saveSettings();
     }
+
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
         ws.send("M:"+mode);
       saveSettings();
     }
-    function autoscaleWithWait() {
-      spectrum.forceAutoscale(true);
-      pending_range_update = true;
-      console.log("autoscaleWithWait() called");
-    }
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
       console.log("zoomin()");
-      autoscaleWithWait();
+      autoAutoscale(true);
       saveSettings();
     }
+
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
       console.log("zoomout()");
-      autoscaleWithWait();
+      autoAutoscale(true);
       saveSettings();
     }
+
     function zoomcenter() {
       ws.send("Z:c");
-      autoscaleWithWait();
+      autoAutoscale(true);
       saveSettings();
     }
+
     function audioReporter(stats) {
     }
 
@@ -581,7 +587,7 @@ function calcFrequencies() {
     function zoomReleased()
     {
       zoomControlActive = false;
-      autoscaleWithWait();
+      autoAutoscale(true);
       console.log("Zoom control is inactive");
     }
 
@@ -595,7 +601,6 @@ function calcFrequencies() {
         zoomControlActive = false;
         console.log("Zoom control is inactive");
     }
-
 
     async function audio_start_stop()
     {
@@ -611,6 +616,7 @@ function calcFrequencies() {
           ws.send("A:STOP:"+ssrc.toString());
         }
     }
+
 function updateRangeValues(){
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
@@ -621,9 +627,16 @@ function updateRangeValues(){
   saveSettings();
 }
 
-function autoscale() {          // From the html autoscale button.  Don't need to wait for autoscalewait
-  spectrum.forceAutoscale(false); // don't wait to autoscale, do it now
+function autoscaleButtonPush() {                      // autoscale button pressed, definitely do autoscale right away
+  spectrum.forceAutoscale(false);           
   pending_range_update = true;
+}
+
+function autoAutoscale(waitToAutoscale = false) {     // Autoscale commanded by a change other than autoscale button press
+  if (!onlyAutoscaleByButton) {
+    spectrum.forceAutoscale(waitToAutoscale);           
+    pending_range_update = true;
+  }
 }
 
 function baselineUp() {
@@ -970,7 +983,8 @@ function saveSettings() {
   localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
   localStorage.setItem("check_max", document.getElementById("check_max").checked.toString()); 
   localStorage.setItem("check_min", document.getElementById("check_min").checked.toString());
-  localStorage.setItem("switchModesByFrequency", document.getElementById("switchModesByFrequency").checked.toString());
+  localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
+  localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -1019,7 +1033,9 @@ function loadSettings() {
   spectrum.check_max = check_max.checked = (localStorage.getItem("check_max") == "true");
   spectrum.check_min = check_min.checked = (localStorage.getItem("check_min") == "true");
   switchModesByFrequency = (localStorage.getItem("switchModesByFrequency") == "true");
-  document.getElementById("switchModesByFrequency").checked = switchModesByFrequency;
+  document.getElementById("cksbFrequency").checked = switchModesByFrequency;
+  onlyAutoscaleByButton = (localStorage.getItem("onlyAutoscaleByButton") == "true");
+  document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton;
   return true;
 }
 
@@ -1059,8 +1075,17 @@ function initializeDialogEventListeners() {
   });
 
   // Add event listeners to the checkboxes
-  document.getElementById('checkbox2').addEventListener('change', function() {
-    console.log('Checkbox 1:', this.checked);
+
+  document.getElementById('cksbFrequency').addEventListener('change', function() {
+    console.log('cksbFrequency:', this.checked);
+    switchModesByFrequency = this.checked;
+    saveSettings();
+  });
+
+  document.getElementById('ckonlyAutoscaleButton').addEventListener('change', function() {
+    console.log('ckonlyAutoscaleButton:', this.checked);
+    onlyAutoscaleByButton = this.checked; // Only autoscale when the autoscale button is pressed
+    saveSettings();
   });
 
   document.getElementById('checkbox3').addEventListener('change', function() {
@@ -1079,11 +1104,7 @@ function initializeDialogEventListeners() {
     console.log('Checkbox 5:', this.checked);
   });
 
-  document.getElementById('switchModesByFrequency').addEventListener('change', function() {
-    console.log('switchModesByFrequency:', this.checked);
-    switchModesByFrequency = this.checked;
-    saveSettings();
-  });
+  
 
   // Make the dialog box draggable
   makeDialogDraggable(document.getElementById('optionsDialog'));

@@ -52,11 +52,10 @@
           </td>
           <td rowspan=2>
             <input type="text" id="freq" style="color:green; font-size:26px;
-            height:32px;
-    width:125px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
+            height:32px;width:125px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
           </td>
           <td rowspan=2 colspan=1>
-            <button id="autoscale" style="color:brown; height:40px; width:88px; border:solid" onclick="autoscale()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
+            <button id="autoscale" style="color:brown; height:40px; width:88px; border:solid" onclick="autoscaleButtonPush()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
           </td>
           <td rowspan=2 align="center">
             <label for="mode" style="font-size:15px">Mode:</label>
@@ -302,16 +301,24 @@
     <!-- Placeholder for the dialog box -->
     <div id="dialogPlaceholder"></div>
 
-    <script>
-      // Load the dialog box content from optionsDialog.html
-      fetch('optionsDialog.html')
-        .then(response => response.text())
-        .then(data => {
-          document.getElementById('dialogPlaceholder').innerHTML = data;
-          // Initialize event listeners after loading the dialog content
-          initializeDialogEventListeners();
-        });
-    </script>
+<script>
+  // Load the dialog box content from optionsDialog.html
+  fetch('optionsDialog.html')
+    .then(response => response.text())
+    .then(data => {
+      // Insert the fetched content into the placeholder
+      document.getElementById('dialogPlaceholder').innerHTML = data;
+
+      // Initialize event listeners after loading the dialog content
+      initializeDialogEventListeners();
+
+      // Call init AFTER the dialog content is loaded,  window.addEventListener('load', init, false) was removed from radio.js to be sure this is called after the dialog is loaded
+      init();
+    })
+    .catch(error => {
+      console.error('Error loading optionsDialog.html:', error);
+    });
+</script>
 
     <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
     <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Show live</label>
