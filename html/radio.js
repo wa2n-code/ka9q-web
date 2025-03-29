@@ -1060,13 +1060,7 @@ function rx(x) {
 
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('OptionsButton').addEventListener('click', function() {
-//    document.getElementById('optionsDialog').classList.add('open');
-//    document.getElementById('dialogOverlay').classList.add('open');
-
     const dialog = document.getElementById('optionsDialog');
-    dialog.style.left = '50%';
-    dialog.style.top = '50%';
-    //dialog.style.transform = 'translate(-50%, -50%)';
     dialog.classList.add('open');
     document.getElementById('dialogOverlay').classList.add('open');
   });

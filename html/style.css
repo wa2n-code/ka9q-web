@@ -38,8 +38,8 @@ h4#heading {
 #optionsDialog {
   display: none;
   position: absolute;
-  left: 50%;
-  top: 50%;
+  left: 50%; /* Center horizontally */
+  top: 80%; /* Adjust this value to move the dialog lower (e.g., 70% of the viewport height) */
   width: auto; /* Let the width adjust to the content */
   padding: 10px; /* Reduce padding inside the dialog box */
   background-color: lightgray;
