@@ -37,13 +37,13 @@ h4#heading {
 
 #optionsDialog {
   display: none;
-  position: absolute; /* Change from fixed to absolute */
+  position: absolute;
   left: 50%;
   top: 50%;
-  /* transform: translate(-50%, -50%); */
-  border: 2px solid #ccc;
-  padding: 20px;
+  width: auto; /* Let the width adjust to the content */
+  padding: 10px; /* Reduce padding inside the dialog box */
   background-color: lightgray;
+  border: 2px solid #ccc;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000; /* Ensure the dialog box is above other content */
   cursor: move; /* Change cursor to indicate moveable */
@@ -51,6 +51,26 @@ h4#heading {
 
 #optionsDialog.open {
   display: block;
+}
+
+#optionsDialog input[type="checkbox"] {
+  margin: 0 5px 0 0; /* Remove vertical margins and add small horizontal spacing */
+}
+
+#optionsDialog label {
+  margin: 0; /* Remove margins around labels */
+}
+
+#optionsDialog menu {
+  margin: 5px 0 0 0; /* Add minimal spacing above the close button */
+  padding: 0; /* Remove padding inside the menu */
+  display: flex;
+  justify-content: flex-end; /* Align the close button to the right */
+}
+
+#optionsDialog button {
+  padding: 5px 10px; /* Reduce padding inside the button */
+  margin: 0; /* Remove margins around the button */
 }
 
 #dialogOverlay {

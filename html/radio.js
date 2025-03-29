@@ -1092,23 +1092,6 @@ function initializeDialogEventListeners() {
     saveSettings();
   });
 
-  document.getElementById('checkbox3').addEventListener('change', function() {
-    console.log('Checkbox 2:', this.checked);
-  });
-
-  document.getElementById('checkbox4').addEventListener('change', function() {
-    console.log('Checkbox 3:', this.checked);
-  });
-
-  document.getElementById('checkbox5').addEventListener('change', function() {
-    console.log('Checkbox 4:', this.checked);
-  });
-
-  document.getElementById('checkbox6').addEventListener('change', function() {
-    console.log('Checkbox 5:', this.checked);
-  });
-
-  
 
   // Make the dialog box draggable
   makeDialogDraggable(document.getElementById('optionsDialog'));
