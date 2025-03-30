@@ -363,7 +363,7 @@ Spectrum.prototype.addData = function(data) {
         if (this.autoscale) {
             if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
                 this.autoscaleWait++;
-                console.log("autoscaleWait ",this.autoscaleWait.toString());
+                //console.log("autoscaleWait ",this.autoscaleWait.toString());
                 return;
             }
             if(this.autoscaleWait >= maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
@@ -440,7 +440,7 @@ Spectrum.prototype.addData = function(data) {
                 //console.log("wholeSpectrumMax is good");
                 if(wholeSpectrumMax > data_max)
                 {
-                    console.log("wholeSpectrumMax is bigger, use it");
+                    //console.log("wholeSpectrumMax is bigger, use it");
                     data_max = wholeSpectrumMax;
                 }
             }

@@ -556,14 +556,14 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
-      console.log("zoomin()");
+      //console.log("zoomin()");
       autoAutoscale(true);
       saveSettings();
     }
 
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
-      console.log("zoomout()");
+      //console.log("zoomout()");
       autoAutoscale(true);
       saveSettings();
     }
@@ -580,7 +580,7 @@ function calcFrequencies() {
     function setZoom() {
       const v = document.getElementById("zoom_level").valueAsNumber;
       ws.send(`Z:${v}`);
-      console.log("setZoom()");
+      //console.log("setZoom()");
       saveSettings();
     }
 
@@ -594,12 +594,12 @@ function calcFrequencies() {
     let zoomControlActive = false;
     function zoomMouseDown() {
         zoomControlActive = true;
-        console.log("Zoom control is active");
+        //console.log("Zoom control is active");
     }
 
     function zoomMouseUp() {
         zoomControlActive = false;
-        console.log("Zoom control is inactive");
+        //console.log("Zoom control is inactive");
     }
 
     async function audio_start_stop()
