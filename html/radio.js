@@ -1067,28 +1067,51 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function initializeDialogEventListeners() {
-  document.getElementById('closeButton').addEventListener('click', function() {
-    document.getElementById('optionsDialog').classList.remove('open');
-    document.getElementById('dialogOverlay').classList.remove('open');
+  const optionsButton = document.getElementById('OptionsButton'); // The launch button
+  const optionsDialog = document.getElementById('optionsDialog'); // The dialog box
+  const closeButton = document.getElementById('closeButton'); // The close button
+
+  // Ensure the elements exist before attaching event listeners
+  if (!optionsButton || !optionsDialog || !closeButton) {
+    console.error('One or more elements are missing. Ensure optionsDialog.html is loaded correctly.');
+    return;
+  }
+
+  // Open the options dialog
+  optionsButton.addEventListener('click', function () {
+    // Get the position of the launch button
+    const buttonRect = optionsButton.getBoundingClientRect();
+
+    // Position the dialog just below the launch button
+    optionsDialog.style.position = 'absolute'; // Use absolute positioning
+    optionsDialog.style.left = `${buttonRect.left + window.scrollX - 200}px`; // Adjust for horizontal scrolling, -200px to shift left button
+    optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 45}px`; // Adjust for vertical scrolling and add 45px spacing below button
+    optionsDialog.style.transform = 'none'; // Reset any transform applied by CSS
+
+    // Show the dialog
+    optionsDialog.classList.add('open');
+  });
+
+  // Close the options dialog
+  closeButton.addEventListener('click', function () {
+    optionsDialog.classList.remove('open');
   });
 
   // Add event listeners to the checkboxes
-
-  document.getElementById('cksbFrequency').addEventListener('change', function() {
+  document.getElementById('cksbFrequency').addEventListener('change', function () {
     console.log('cksbFrequency:', this.checked);
     switchModesByFrequency = this.checked;
     saveSettings();
   });
 
-  document.getElementById('ckonlyAutoscaleButton').addEventListener('change', function() {
+  document.getElementById('ckonlyAutoscaleButton').addEventListener('change', function () {
     console.log('ckonlyAutoscaleButton:', this.checked);
     onlyAutoscaleByButton = this.checked; // Only autoscale when the autoscale button is pressed
     saveSettings();
   });
 
-
   // Make the dialog box draggable
-  makeDialogDraggable(document.getElementById('optionsDialog'));
+  makeDialogDraggable(optionsDialog);
 }
 
 function makeDialogDraggable(dialog) {
@@ -1099,7 +1122,6 @@ function makeDialogDraggable(dialog) {
     isDragging = true;
     offsetX = e.pageX - dialog.getBoundingClientRect().left - window.scrollX;
     offsetY = e.pageY - dialog.getBoundingClientRect().top - window.scrollY;
-    console.log('Dialog offset:', offsetX, offsetY, 'e.pageX:', e.pageX, 'e.pageY:', e.pageY);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   });

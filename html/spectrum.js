@@ -377,7 +377,7 @@ Spectrum.prototype.addData = function(data) {
             var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
             var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
             var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
-            console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
+            //console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
 
             var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
             var data_max = 0;
@@ -420,7 +420,7 @@ Spectrum.prototype.addData = function(data) {
                 let variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
                 std_dev = Math.sqrt(variance);
 
-                console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
+                //console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
             }
 
             /*if (this.maxHold) {   // Blow off caring about the max hold, stick with looking at the spectral data
@@ -433,11 +433,11 @@ Spectrum.prototype.addData = function(data) {
             // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
             var wholeSpectrumMax = Math.max(...this.bin_copy);
             
-            console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
+            //console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
             if (!isNaN(wholeSpectrumMax))
             {
-                console.log("wholeSpectrumMax is good");
+                //console.log("wholeSpectrumMax is good");
                 if(wholeSpectrumMax > data_max)
                 {
                     console.log("wholeSpectrumMax is bigger, use it");
@@ -452,7 +452,7 @@ Spectrum.prototype.addData = function(data) {
             const minimum_spectral_gain = -100;
             if(maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 maximum = minimum_spectral_gain;
-            console.log("minimum=", minimum, " maximum=", maximum);
+            //console.log("minimum=", minimum, " maximum=", maximum);
             this.setRange(minimum,maximum, true,Math.round(std_dev * 2.0));
         }
         this.drawSpectrum(data);
@@ -536,7 +536,7 @@ Spectrum.prototype.toggleColor = function() {
 }
 
 Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_adjust) {
-    console.log("spectum.setRange min_db: ",min_db," max_db",max_db);
+    //console.log("spectum.setRange min_db: ",min_db," max_db",max_db);
     this.min_db = min_db;
     this.max_db = max_db;
     document.getElementById("spectrum_min").value = min_db;
@@ -545,7 +545,7 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // fix this wdr, maybe use min_db + stdev of the min?  For now, just add +5 to darken the waterfall.
         this.wf_max_db = max_db;
-        console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
+        //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
     this.updateAxes();
     this.saveSettings();
@@ -684,7 +684,7 @@ Spectrum.prototype.forceAutoscale = function(waitToAutoscale = true) {
         this.autoscaleWait = 0; // if it's zero, then we're gonna wait
     else
         this.autoscaleWait = 100;  // not gonna wait
-    console.log("forceAutoscale() autoscaleWait set to", this.autoscaleWait)
+    //console.log("forceAutoscale() autoscaleWait set to", this.autoscaleWait)
 }
 
 Spectrum.prototype.onKeypress = function(e) {

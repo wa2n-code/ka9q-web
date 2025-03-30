@@ -37,16 +37,13 @@ h4#heading {
 
 #optionsDialog {
   display: none;
-  position: absolute;
-  left: 50%; /* Center horizontally */
-  top: 80vh; /* Adjust this value to move the dialog lower (e.g., 70% of the viewport height) */
+  position: absolute; /* Position relative to the document or nearest positioned ancestor */
   width: auto; /* Let the width adjust to the content */
-  padding: 10px; /* Reduce padding inside the dialog box */
+  padding: 10px;
   background-color: lightgray;
   border: 2px solid #ccc;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000; /* Ensure the dialog box is above other content */
-  cursor: move; /* Change cursor to indicate moveable */
 }
 
 #optionsDialog.open {
