@@ -380,7 +380,7 @@ function calcFrequencies() {
         document.getElementById('decay_list').value = spectrum.decay.toString();
         document.getElementById('cursor').checked = spectrum.cursor_active;
         document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause");
-        document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Norm" : "Max hold");
+        document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on");
 
         // set zoom, preset, spectrum percentage?
         spectrum.setAveraging(spectrum.averaging);

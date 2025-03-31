@@ -62,9 +62,11 @@ function createUpdateSMeter() {
             gradient.addColorStop
             ctx.fillStyle = gradient;
         }
-        else {  // SNR meter    
-            ctx.fillStyle = "rgb(1, 136, 199)";  // Set the meter rectangle to blue for the SNR meter
-            //ctx.fillStyle = "orange";  // Set the meter rectangle to blue for the SNR meter
+        else {  
+            if(meterType == 1)  // SNR meter
+                ctx.fillStyle = "rgb(1, 136, 199)";  // Set the meter rectangle to blue for the SNR meter
+            else  // OVF meter, set to a default color            
+                ctx.fillStyle = "orange";  // Set the meter rectangle to blue for the SNR meter
         }
 
         // Experimental SNR calculation and display
@@ -90,10 +92,11 @@ function createUpdateSMeter() {
             } else {
                 normSig = s9pfs + (adjustedSignal - adjustedSignalAtS9) / aboveS9Span * s9Plus60pfs;
             }
-        } else 
-        {  // SNR meter
+        } else   // SNR meter
+        if (meterType == 1)
             normSig = SignalToNoiseRatio / 50 + 0.1; // 50dB SNR is full scale, -10db is the minimum value 
-        }
+        else
+            normSig = Number(input_samprate) / Number(samples_since_over);
 
         // Protect over under range
         if (normSig > 1) {
@@ -131,12 +134,6 @@ function createUpdateSMeter() {
             // Display the held SNR value
             document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(0)} dB`;
             document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(0)}`;
-            if(meterType == 1) { // SNR meter
-                document.getElementById('snr_units').textContent = "dB | SNR: ";
-            }
-            else {
-                document.getElementById('snr_units').textContent = "dB | Signal: "; 
-            }
         }
         else 
         {
@@ -145,13 +142,20 @@ function createUpdateSMeter() {
             // Display the real-time SNR value
             document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(0)} dB`;
             document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(0)}`;
-            if(meterType == 1) { // SNR meter
-                document.getElementById('snr_units').textContent = "dB | SNR: ";
-            }
-            else {
-                document.getElementById('snr_units').textContent = "dB | Signal: "; 
-            }
         }   
+
+        if(meterType == 1) { // SNR meter
+            document.getElementById('snr_units').textContent = "dB | SNR: ";
+        }
+        else {
+            if(meterType == 0) { // RSSI meter
+                document.getElementById('snr_units').textContent = "dB | Signal: ";
+            }
+            else
+                document.getElementById('snr_units').textContent = "dB | Ovrflo: "; 
+        }
+
+
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
 

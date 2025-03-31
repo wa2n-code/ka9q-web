@@ -642,7 +642,7 @@ Spectrum.prototype.setMaxHold = function(maxhold) {
 
 Spectrum.prototype.toggleMaxHold = function() {
     this.setMaxHold(!this.maxHold);
-    document.getElementById("max_hold").textContent = (this.maxHold ? "Norm" : "Max hold");
+    document.getElementById("max_hold").textContent = (this.maxHold ? "Turn hold off" : "Turn hold on");
     this.saveSettings();
 }
 

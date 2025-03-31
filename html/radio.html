@@ -34,13 +34,13 @@
       <table style="border: solid;  border-color: dimgray; border-radius: 10px">
         <tr>
           <td><span id="ge_data"></span></td>
-          <td width="88px"><span id="pwr_data"></span></td>
+          <td width="88px"><span id="pwr_data" title="Signal power dBm"></span></td>
           <td width="100px"><span id="pwr_units"></span></td>
-          <td width="55px"><span id="s_data"></span></td>
-          <td width="86px"><span id="snr_data"></span></td>
+          <td width="55px"><span id="s_data" title="Signal level S Units" ></span></td>
+          <td width="86px"><span id="snr_data" title="Signal to Noise Ratio"></span></td>
           <td width="90px"><span id="snr_units"></span></td>
           <td width="102px">
-            <canvas id="smeter" width="100" height="20"></canvas>
+            <canvas id="smeter" width="100" height="20" title="Signal power, SNR, or Oveflow rate"></canvas>
           </td>
         </tr>
       </table>
@@ -168,14 +168,15 @@
             </select>
           </td>
           <td align="center">
-            <label for="max_hold" style="font-size:15px">Hold:</label>
+            <label for="max_hold" style="font-size:15px">Max Hold:</label>
             <button id="max_hold" onclick="spectrum.toggleMaxHold()" title="Turn Max Hold On or Off">Max hold</button>
           </td>
           <td rowspan=1 colspan=1 align="center">
             <label for="meter" style="font-size:15px">Meter:</label>
-            <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength or Signal To Noise Ratio meter">
+            <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or Overflow rate meter">
               <option value="0">Signal</option>
               <option value="1">SNR</option>
+              <option value="2">OVF</option>
             </select>
           </td>
 
