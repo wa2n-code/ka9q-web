@@ -9,8 +9,27 @@
       <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
       <label for="ckonlyAutoscaleButton">Autoscale only with Autoscale button press</label>
     </div>
-    <menu>
+    <td rowspan=1 colspan=1 align="center">
+      <label for="colormap" style="font-size:15px">Colormap:</label>
+      <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
+        <option value="0">turbo</option>
+        <option value="1">fosphorz</option>
+        <option value="2">viridis</option>
+        <option value="3">inferno</option>
+        <option value="4">magma</option>
+        <option value="5">jet</option>
+        <option value="6">binary</option>
+        <option value="7">blue</option>
+        <option value="8">short</option>
+        <option value="9">kiwi</option>
+      </select>
+    </td>
+    <td rowspan=1>
+      <button id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
+      <button id="bug_upload" onclick="uploadBug()" title="Upload bug">Upload bug</button>
+    </td>
+    <div>
       <button type="button" id="closeButton">Close</button>
-    </menu>
+    </div>
   </form>
 </div>

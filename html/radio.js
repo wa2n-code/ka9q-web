@@ -1087,6 +1087,8 @@ function initializeDialogEventListeners() {
     optionsDialog.style.left = `${buttonRect.left + window.scrollX - 200}px`; // Adjust for horizontal scrolling, -200px to shift left button
     optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 45}px`; // Adjust for vertical scrolling and add 45px spacing below button
     optionsDialog.style.transform = 'none'; // Reset any transform applied by CSS
+    //optionsDialog.style.width = auto; 
+    //optionsDialog.style.height = auto;
 
     // Show the dialog
     optionsDialog.classList.add('open');
