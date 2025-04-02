@@ -1141,3 +1141,9 @@ function makeDialogDraggable(dialog) {
     document.removeEventListener('mouseup', onMouseUp);
   }
 }
+
+function setPlayerVolume(value) {
+    player.volume(parseFloat(value)); // Set the volume using player.js's volume function
+    //console.log(`Volume set to: ${value}`);
+  } 
+
