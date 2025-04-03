@@ -641,8 +641,11 @@ Spectrum.prototype.setMaxHold = function(maxhold) {
 }
 
 Spectrum.prototype.toggleMaxHold = function() {
-    this.setMaxHold(!this.maxHold);
-    document.getElementById("max_hold").textContent = (this.maxHold ? "Turn hold off" : "Turn hold on");
+    const maxHoldCheckbox = document.getElementById("max_hold");
+    if (maxHoldCheckbox) {
+        this.maxHold = maxHoldCheckbox.checked; // Update the Spectrum object's maxHold property
+        console.log(`Max Hold checkbox is ${this.maxHold ? "checked" : "unchecked"}`);
+    }
     this.saveSettings();
 }
 
