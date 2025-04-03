@@ -690,13 +690,21 @@ function setSpectrumMax() {
 function adjustRange(element, event) {
   event.preventDefault(); // Prevent the default scroll behavior
 
-  const step = 1; // Define the step size for each wheel movement
+  // Determine the step size based on the element's ID
+  let step = 1; // Default step size
+  if (element.id === 'volume_control') {
+    step = 0.1; // Step size for volume control
+  }
+
+  const currentValue = parseFloat(element.value);
+
+  // Adjust the value based on scroll direction
   if (event.deltaY < 0) {
-      // Scrolling up
-      element.value = Math.min(parseInt(element.value) + step, parseInt(element.max));
+    // Scrolling up
+    element.value = Math.min(currentValue + step, parseFloat(element.max));
   } else {
-      // Scrolling down
-      element.value = Math.max(parseInt(element.value) - step, parseInt(element.min));
+    // Scrolling down
+    element.value = Math.max(currentValue - step, parseFloat(element.min));
   }
 
   // Trigger the input event to update the value

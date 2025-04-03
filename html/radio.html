@@ -263,7 +263,7 @@
     <div style="width: 100%;" id="stat_div">
       <table id="stat_table">
         <tr>
-          <td><span id="rf_gain"></span><label for="volume_control" style="font-size:15px"> Volume:</label><input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" oninput="setPlayerVolume(this.value)" title="Adjust audio volume" /></td>
+          <td><span id="rf_gain"></span><label for="volume_control" style="font-size:15px"> Volume:</label><input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" oninput="setPlayerVolume(this.value)" onwheel="adjustRange(this, event)" title="Adjust audio volume" /></td>
           <td><span id="snr"></span></td>
           <td><span id="gps_time"></span></td>
         </tr>
