@@ -1129,6 +1129,11 @@ function makeDialogDraggable(dialog) {
   let offsetX, offsetY;
 
   dialog.addEventListener('mousedown', function (e) {
+    // Prevent dragging if the target is the slider or any other interactive element
+    if (e.target.id === 'panner_control') {
+      return;
+    }
+
     isDragging = true;
     offsetX = e.pageX - dialog.getBoundingClientRect().left - window.scrollX;
     offsetY = e.pageY - dialog.getBoundingClientRect().top - window.scrollY;
@@ -1155,3 +1160,10 @@ function setPlayerVolume(value) {
     //console.log(`Volume set to: ${value}`);
   } 
 
+  function setPanner(value) {
+    if (typeof player !== 'undefined' && typeof player.pan === 'function') {
+        player.pan(parseFloat(value)); // Update the panner value
+    } else {
+        console.error('Player or pan function is not defined.');
+    }
+}

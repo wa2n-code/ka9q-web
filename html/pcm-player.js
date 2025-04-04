@@ -43,14 +43,29 @@ PCMPlayer.prototype.getTypedArray = function () {
 PCMPlayer.prototype.createContext = function() {
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // context needs to be resumed on iOS and Safari (or it will stay in "suspended" state)
+    // Resume the context for iOS and Safari
     this.audioCtx.resume();
-    //this.audioCtx.onstatechange = () => console.log(this.audioCtx.state);   // if you want to see "Running" state in console and be happy about it
-    
+
+    // Create a gain node for volume control
     this.gainNode = this.audioCtx.createGain();
     this.gainNode.gain.value = 1;
+
+    // Create a stereo panner node for panning control
+    this.pannerNode = this.audioCtx.createStereoPanner();
+    this.pannerNode.pan.value = 0; // Default to center (0)
+
+    // Connect the nodes: panner -> gain -> destination
+    this.pannerNode.connect(this.gainNode);
     this.gainNode.connect(this.audioCtx.destination);
+
     this.startTime = this.audioCtx.currentTime;
+};
+
+PCMPlayer.prototype.pan = function(value) { // Method to set the pan value
+    if (this.pannerNode) {
+        this.pannerNode.pan.value = value;
+        console.log(`Panner set to: ${value}`);
+    }
 };
 
 PCMPlayer.prototype.resume = function() {
@@ -105,34 +120,23 @@ PCMPlayer.prototype.flush = function() {
         audioData,
         channel,
         offset,
-        i,
-        decrement;
+        i;
 
     for (channel = 0; channel < this.option.channels; channel++) {
         audioData = audioBuffer.getChannelData(channel);
         offset = channel;
-        decrement = 50;
         for (i = 0; i < length; i++) {
             audioData[i] = this.samples[offset];
-            /* fadein */
-// just make this a simple copy to eliminate thumping - KA9Q 7 March 2024
-//            if (i < 50) {
-//                audioData[i] =  (audioData[i] * i) / 50;
-//            }
-            /* fadeout*/
-//            if (i >= (length - 51)) {
-//                audioData[i] =  (audioData[i] * decrement--) / 50;
-//            }
             offset += this.option.channels;
         }
     }
-    
+
     if (this.startTime < this.audioCtx.currentTime) {
         this.startTime = this.audioCtx.currentTime;
     }
-    //console.log('start vs current '+this.startTime+' vs '+this.audioCtx.currentTime+' duration: '+audioBuffer.duration);
+
     bufferSource.buffer = audioBuffer;
-    bufferSource.connect(this.gainNode);
+    bufferSource.connect(this.pannerNode); // Connect to the panner node
     bufferSource.start(this.startTime);
     this.startTime += audioBuffer.duration;
     this.samples = new Float32Array();
