@@ -45,11 +45,17 @@
         </tr>
       </table>
       <div style="height:5px;font-size:5px;">&nbsp;</div>
-      <table style="border: solid;  border-color: dimgray;; border-radius: 10px ">
+      <table style="border: solid;  border-color: dimgray; border-radius: 10px;
+      font-size:14px">
         <tr>
-          <td align="center">
-            <font size="-1">Spectrum / Waterfall
+
+          <td>
+              Spectrum gain:
+              <button id="rangedec"  style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
+              <button id="rangeinc"  style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
+              <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
           </td>
+
           <td rowspan=2>
             <input type="text" id="freq" style="color:green; font-size:26px;
             height:32px;width:125px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
@@ -57,8 +63,8 @@
           <td rowspan=2 colspan=1>
             <button id="autoscale" style="color:brown; height:40px; width:88px; border:solid" onclick="autoscaleButtonPush()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
           </td>
-          <td rowspan=2 align="center">
-            <label for="mode" style="font-size:15px">Mode:</label>
+          <td rowspan=1 align="center">
+            <label for="mode">Mode:</label>
             <select name="mode" id="mode" onchange="setMode(this.value)" title="Select demodulation mode">
               <option value="cwu">CWU</option>
               <option value="cwl">CWL</option>
@@ -77,44 +83,21 @@
           </td>
 
           <td rowspan=2 colspan=2>
-            <label for="zoom_level" style="font-size:15px">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="1" max="15" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
+            <label for="zoom_level">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="1" max="15" oninput="setZoom()" onmouseup="zoomReleased()" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
           </td>
         </tr>
 
         <tr>
-          </td>
-
           <td>
-            <font size="-1">Spectrum gain:
-              <button id="rangedec"  style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
-              <button id="rangeinc"  style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
-              <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
-          </td>
-
-        </tr>
-
-        <tr>
-          <td>
-            <font size="-1">Spec Baseline:
+              Spec Baseline:
               <button id="baseline_down" style="width:45px" onclick="baselineDown()" title="Decrease spectrum baseline dBm">-</button>
               <button id="baseline_up" style="width:45px" onclick="baselineUp()" title="Increase spectrum baseline dBm">+</button>
               <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
 
           </td>
 
-
-          <td align="center">
-            <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
-            <button style="color:green; border:solid; width:40px" onclick="setFrequency()" title="Set frequency">Set</button>
-            <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
-          </td>
-          <td rowspan=2>
-            <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
-      width:88px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
-          </td>
-
           <td>
-            <label for="band" style="font-size:15px">Band/Chan:</label>
+            <label for="band">Band/Chan:</label>
             <select name="band" id="band" onchange="setBand(this.value)" title="Select radio band or time broadcast station">
               <option value="" disabled selected hidden>Select Band</option>
               <option value="1900000">160M</option>
@@ -137,6 +120,35 @@
               <option value="25000000">WWV25MHz</option>
             </select>
           </td>
+
+        </tr>
+
+        <tr>
+          <td>
+              Spectrum size:
+              <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
+              <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+          </td>
+
+
+          <td align="center">
+            <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
+            <button style="color:green; border:solid; width:40px" onclick="setFrequency()" title="Set frequency">Set</button>
+            <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
+          </td>
+          <td rowspan=2>
+            <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
+      width:88px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
+          </td>
+          <td rowspan=1 colspan=1 align="center">
+            <label for="meter">Meter:</label>
+            <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or Overflow rate meter">
+              <option value="0">Signal</option>
+              <option value="1">SNR</option>
+              <option value="2">OVF</option>
+            </select>
+          </td>
+
           <td align="center">
             <button id="zoomminus" onclick="zoomout()" title="Zoom out spectrum">Out</button>
             <button id="zoomcenter" onclick="zoomcenter()" title="Move current frequency to spectrum
@@ -146,10 +158,11 @@
         </tr>
         <tr>
           <td>
-            <font size="-1">Spectrum size:
-              <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
-              <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+            <label for="zoom_level">WF
+              ceil:&nbsp;&nbsp;&nbsp;</label><input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
+            <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
           </td>
+
 
           <td align="center">
             <label for="step">Step:</label>
@@ -167,41 +180,10 @@
               <option value="1000000">1MHz</option>
             </select>
           </td>
-          <td align="center">
-            <label for="max_hold" style="font-size:15px">Max Hold:</label>
+                    <td>
+            <label for="max_hold">Max Hold:</label>
             <input type="checkbox" id="max_hold" onchange="spectrum.toggleMaxHold()" title="Turn Max Hold On or Off" />
-          </td>
-          <td rowspan=1 colspan=1 align="center">
-            <label for="meter" style="font-size:15px">Meter:</label>
-            <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or Overflow rate meter">
-              <option value="0">Signal</option>
-              <option value="1">SNR</option>
-              <option value="2">OVF</option>
-            </select>
-          </td>
-
-        </tr>
-
-        <tr>
-
-          <td>
-            <label for="zoom_level" style="font-size:13px">WF
-              ceil:&nbsp;&nbsp;&nbsp;</label><input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
-            <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
-          </td>
-
-
-
-          <td align="center">
-            <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
-          </td>
-
-          <td rowspan=2 colspan=1>
-            <button id="pause" style="color: blue; border:solid ;height:40px;
-      width:88px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
-          </td>
-          <td rowspan=1>
-            <label for="decay_list" style="font-size:15px">Max hold decay:</label>
+            <label for="decay_list" >Decay:</label>
             <select id="decay_list" onchange="spectrum.setDecay(this.value)" title="Set how long the spectrum min / max hold lives">
               <option value="1">Infinite</option>
               <option value="1.0001">1.0001</option>
@@ -213,16 +195,19 @@
               <option value="1.1">1.1</option>
             </select>
           </td>
-       <td align="center">
-            <label for="OptionsButton" style="font-size:15px">Options:</label>
-            <button id="OptionsButton" title="Additional options">Options</button>
+          <td align="center">
+
+    <label for="panner_control" style="font-size:15px">Pan:</label>  
+    <input type="range" id="spare_panner" min="-1" max="1" step="0.1" value="0" 
+       on input="" title="I do nothing" />  
           </td>
           
 
         </tr>
+
         <tr>
           <td>
-            <label for="zoom_level" style="font-size:13px">WF floor:</label>
+            <label for="zoom_level"> WF floor:</label>
             <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()"  onwheel="adjustRange(this, event)" title="Adjust waterfall floor" />
             <input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
 
@@ -230,30 +215,50 @@
 
 
 
+
+
+          <td align="center">
+            <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
+          </td>
+
+          <td rowspan=2 colspan=1>
+            <button id="pause" style="color: blue; border:solid ;height:40px;
+      width:88px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
+          </td>
+          <td align="center">Show: 
+    <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label
+    for="check_live">Live</label>
+    <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label
+    for="check_max">Max</label>
+    <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label
+    for="check_min">Min</label>
+</td>
+          <td align="center">      
+            <button id="pl" onclick="" title="<<<">&lt;</button>
+            Spectrum Pan
+            <button id="pr" onclick="" title=">>>">&gt;</button>
+</td>
+
+        </tr>
+        <tr>
+          <td>
+          <label for="volume_control">Volume:</label><input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" oninput="setPlayerVolume(this.value)" onwheel="adjustRange(this, event)" title="Adjust audio volume" /></td>
+           </td>
+          </td>
+
+
           <td align="center">
             <button id="fft_avg_down" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button>
           </td>
+           <td align="center">
+    <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
+</td>
 
-         <!-- <td rowspan=1 colspan=1 align="center">
-            <label for="colormap" style="font-size:15px">Colormap:</label>
-            <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
-              <option value="0">turbo</option>
-              <option value="1">fosphorz</option>
-              <option value="2">viridis</option>
-              <option value="3">inferno</option>
-              <option value="4">magma</option>
-              <option value="5">jet</option>
-              <option value="6">binary</option>
-              <option value="7">blue</option>
-              <option value="8">short</option>
-              <option value="9">kiwi</option>
-            </select>
+               <td align="center" rowspan=2>
+            <button id="OptionsButton" title="Additional options">Options</button>
           </td>
-          <td rowspan=1>
-            <button id="csv_out" style="height:20px; width:85x" onclick="dumpCSV()" title="Write info file">Write info file</button>
-            <button id="bug_upload" style="height:20px; width:85px" onclick="uploadBug()" title="Upload bug">Upload bug</button>
-          </td>
-        -->
+
+          
         </tr>
       </table>
     </center>
@@ -263,7 +268,7 @@
     <div style="width: 100%;" id="stat_div">
       <table id="stat_table">
         <tr>
-          <td><span id="rf_gain"></span><label for="volume_control" style="font-size:15px"> Volume:</label><input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" oninput="setPlayerVolume(this.value)" onwheel="adjustRange(this, event)" title="Adjust audio volume" /></td>
+          <td><span id="rf_gain"></span></td>
           <td><span id="snr"></span></td>
           <td><span id="gps_time"></span></td>
         </tr>
