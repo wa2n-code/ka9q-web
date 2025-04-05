@@ -64,7 +64,6 @@ PCMPlayer.prototype.createContext = function() {
 PCMPlayer.prototype.pan = function(value) { // Method to set the pan value
     if (this.pannerNode) {
         this.pannerNode.pan.value = value;
-        console.log(`Panner set to: ${value}`);
     }
 };
 

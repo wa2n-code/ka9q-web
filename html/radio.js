@@ -727,12 +727,15 @@ function level_to_string(f) {
   }
 
   f /= 1e6;
-  s = "bin " + bin.toString() + ", " + f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dB";
+  //s = "bin " + bin.toString() + ", " + f.toFixed(3) + " MHz: " + amp.toFixed(1) + " dB";
+  s = f.toFixed(3) + " MHz: " + amp.toFixed(1) + " dBm";
+  /* deep six the maxhold stuff for now
   var max_amp = -120.0;
   if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
     max_amp = spectrum.binsMax[bin];
     s += " (" + max_amp.toFixed(1) + " dB max hold)";
   }
+    */
   return s;
 }
 
@@ -785,16 +788,22 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
   if (webpage_version != webserver_version)
     document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
 
-  if(spectrum.cursor_active)
-    document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
-  else
+//  if(spectrum.cursor_active)
+//    document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
+//  else
     document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
   
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
-  document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${Math.abs(filter_high - filter_low).toFixed(0)} Hz |`;
-  // print units in 3rd column
+
+  if(!spectrum.cursor_active)
+    document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${Math.abs(filter_high - filter_low).toFixed(0)} Hz |`;
+  else
+  {
+    document.getElementById("ge_data").textContent =  "Cursor: " + level_to_string(spectrum.cursor_freq) + " | ";
+  }
+    // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
 
