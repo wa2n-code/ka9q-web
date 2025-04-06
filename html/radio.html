@@ -181,11 +181,10 @@
                      <option value="1.1">1.1</option>
                   </select>
                </td>
-               <td hidden align="center">
+               <td align="center">
                   <label for="panner_control" style="font-size:15px">Pan:</label>  
                   <input type="range" id="panner_control" min="-1" max="1" step="0.1" value="0" 
-                     on input="setPanner(this.value)" title="Pan audio left (-1) to right (1)" />  
-               </td>
+                     oninput="setPanner(this.value)" title="Pan audio left (-1) to right (1)" />                </td>
             </tr>
             <tr>
                <td>
@@ -299,10 +298,11 @@
              console.error('Error loading optionsDialog.html:', error);
            });
       </script>
-      <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
+      <!--<input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
       <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Show live</label>
       <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label for="check_max">Show max</label>
       <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label for="check_min">Show min</label>
+   -->
       <span id="cursor_data"></span>
       <span id="info"> </span>
       <span id="audiospan"> </span>

@@ -1,16 +1,17 @@
 <div id="dialogOverlay"></div>
 <div id="optionsDialog">
   <form method="dialog">
-    <div>
+    <ul style="list-style-type:none">
+
+    <li>
       <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
       <label for="cksbFrequency">Switch Modes by Frequency</label>
-    </div>
-    <div>
+    <li> 
       <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
       <label for="ckonlyAutoscaleButton">Autoscale only with Autoscale button press</label>
-    </div>
-    <td rowspan=1 colspan=1 align="center">
-      <label for="colormap" style="font-size:15px">Colormap:</label>
+<center>
+    <li>
+      <label for="colormap">Colormap:</label>
       <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
         <option value="0">turbo</option>
         <option value="1">fosphorz</option>
@@ -23,16 +24,9 @@
         <option value="8">short</option>
         <option value="9">kiwi</option>
       </select>
-    </td>
-    <td rowspan=1>
-      <button id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
+    <li>
+      <button  id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
       <button id="bug_upload" onclick="uploadBug()" title="Upload bug">Upload bug</button>
-    </td>
-    <div>
       <button type="button" id="closeButton">Close</button>
-    </div>
-    <label for="panner_control" style="font-size:15px">Panner:</label>  
-    <input type="range" id="panner_control" min="-1" max="1" step="0.1" value="0" 
-       oninput="setPanner(this.value)" title="Pan audio left (-1) to right (1)" />  
   </form>
-</div>
+</div><br>
