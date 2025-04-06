@@ -152,7 +152,7 @@ function createUpdateSMeter() {
                 document.getElementById('snr_units').textContent = "dB | Signal: ";
             }
             else
-                document.getElementById('snr_units').textContent = "dB | Ovrflo: "; 
+                document.getElementById('snr_units').textContent = "dB | OVR:"; 
         }
 
 
