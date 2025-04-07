@@ -56,10 +56,6 @@
                   <input type="text" id="freq" style="color:green; font-size:26px;
                      height:32px;width:125px; border:solid" value="" onchange="setFrequency()" title="Frequency direct entry" />
                </td>
-               <td rowspan=2 colspan=1>
-                  <button id="autoscale" style="color:brown; height:40px; width:88px; border:solid" onclick="autoscaleButtonPush()" 
-                     title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
-               </td>
                <td rowspan=1 align="center">
                   <label for="mode">Mode:</label>
                   <select name="mode" id="mode" onchange="setMode(this.value)" title="Select demodulation mode">
@@ -134,10 +130,6 @@
                   <button style="color:green; border:solid; width:40px" onclick="setFrequency()" title="Set frequency">Set</button>
                   <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
                </td>
-               <td rowspan=2>
-                  <button id="audio_button" style="color:DarkViolet; border: solid; height:40px;
-                     width:88px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
-               </td>
                <td rowspan=1 colspan=1 align="center">
                   <label for="meter">Meter:</label>
                   <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or
@@ -198,7 +190,9 @@
                      oninput="setPanner(this.value)" onwheel="adjustRange(this, event)" title="Pan audio left to right" />
                   <datalist id="ticks">
                      <option value="-1"></option>
+                     <option value="-0.1"></option>
                      <option value="0"></option>
+                     <option value=".1"></option>
                      <option value="1"></option>
                   </datalist>
                </td>
@@ -212,11 +206,7 @@
                      title="Minimum waterfall dBm level (background brightness)" />
                </td>
                <td align="center">
-                  <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
-               </td>
-               <td rowspan=2 colspan=1>
-                  <button id="pause" style="color: blue; border:solid ;height:40px;
-                     width:88px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
+                  <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
                </td>
                <td align="center">Show: 
                   <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label
@@ -237,15 +227,21 @@
                   </datalist>
                </td>
             </tr>
-            <tr>
-               <td align="center" rowspan=2>
-                  <button id="OptionsButton" title="Additional options">Options</button>
+            <tr align="center">
+               </td>
+               <td>
+                  <button id="pause" style="color: blue; border:solid;
+                     width:120px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
+               </td>
+               <td>
+                  <button id="autoscale" style="color:brown; border:solid;
+                     width:90px;" onclick="autoscaleButtonPush()" 
+                     title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
                </td>
                <td align="center">
-                  <button id="fft_avg_down" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button>
-               </td>
-               <td align="center">
-                  <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
+                  <button id="audio_button" style="color:DarkViolet; border: solid;
+                     width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
+                  &nbsp;&nbsp;<button id="OptionsButton" title="Additional options">Options</button>
                </td>
             </tr>
          </table>

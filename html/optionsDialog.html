@@ -1,16 +1,15 @@
 <div id="dialogOverlay"></div>
 <div id="optionsDialog">
   <form method="dialog">
-    <ul style="list-style-type:none">
-
-    <li>
+    <div>
       <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
       <label for="cksbFrequency">Switch Modes by Frequency</label>
-    <li> 
+    </div>
+    <div>
       <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
       <label for="ckonlyAutoscaleButton">Autoscale only with Autoscale button press</label>
-<center>
-    <li>
+    </div>
+    <div>
       <label for="colormap">Colormap:</label>
       <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
         <option value="0">turbo</option>
@@ -24,9 +23,13 @@
         <option value="8">short</option>
         <option value="9">kiwi</option>
       </select>
-    <li>
-      <button  id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
+    </div>
+    <div style="text-align: center; margin-top: 10px;">
+      <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
+      <button id="fft_avg_down" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button>
+      <button id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
       <button id="bug_upload" onclick="uploadBug()" title="Upload bug">Upload bug</button>
       <button type="button" id="closeButton">Close</button>
+    </div>
   </form>
-</div><br>
+</div>

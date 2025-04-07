@@ -39,11 +39,13 @@ h4#heading {
   display: none;
   position: absolute; /* Position relative to the document or nearest positioned ancestor */
   width: auto; /* Let the width adjust to the content */
-  padding: 10px;
+  max-width: 500px; /* Set a maximum width for the dialog box */
+  padding: 5px; /* Reduce padding inside the dialog box */
   background-color: lightgray;
   border: 2px solid #ccc;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000; /* Ensure the dialog box is above other content */
+  font-size: 14px; /* Optionally reduce font size for smaller content */
 }
 
 #optionsDialog.open {
