@@ -788,10 +788,7 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
   if (webpage_version != webserver_version)
     document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
 
-//  if(spectrum.cursor_active)
-//    document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency) + "<br>Cursor: " + level_to_string(spectrum.cursor_freq);
-//  else
-    document.getElementById("cursor_data").innerHTML = "<br>Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
+  document.getElementById("cursor_data").innerHTML = "Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
   
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
 
