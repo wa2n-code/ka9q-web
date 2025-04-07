@@ -196,12 +196,10 @@
                <td align="center">
                   <label for="panner_control" style="font-size:15px">Pan:</label>  
                   <input type="range" list="ticks" id="panner_control" min="-1" max="1" step="0.1" value="0" 
-                     oninput="setPanner(this.value)" title="Pan audio left (-1) to right (1)" />
+                     oninput="setPanner(this.value)" onwheel="adjustRange(this, event)" title="Pan audio left to right" />
                   <datalist id="ticks">
                      <option value="-1"></option>
-                     <option value="-.1"></option>
                      <option value="0"></option>
-                     <option value=".1"></option>
                      <option value="1"></option>
                   </datalist>
                </td>

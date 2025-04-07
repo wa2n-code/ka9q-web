@@ -692,8 +692,8 @@ function adjustRange(element, event) {
 
   // Determine the step size based on the element's ID
   let step = 1; // Default step size
-  if (element.id === 'volume_control') {
-    step = 0.1; // Step size for volume control
+  if ((element.id === 'volume_control') || (element.id === 'panner_control')) {
+    step = 0.1; // Step size for volume and panner control
   }
 
   const currentValue = parseFloat(element.value);
