@@ -1029,8 +1029,9 @@ function loadSettings() {
   spectrum.centerHz = parseFloat(localStorage.getItem("spectrum_center_hz"));
   centerHz = spectrum.centerHz;
   target_center = centerHz;
-  spectrum.averaging = parseFloat(localStorage.getItem("averaging"));
   spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
+//  console.log(`loading form storage maxHold = ${spectrum.maxHold}`);
+  document.getElementById("max_hold").checked = spectrum.maxHold;
   spectrum.paused = (localStorage.getItem("paused") == "true");
   spectrum.decay = parseFloat(localStorage.getItem("decay"));
   spectrum.cursor_active = (localStorage.getItem("cursor_active") == "true");

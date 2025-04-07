@@ -179,7 +179,7 @@
                </td>
                <td>
                   <label for="max_hold">Max Hold:</label>
-                  <input type="checkbox" id="max_hold" onchange="spectrum.toggleMaxHold()" title="Turn Max Hold On or Off" />
+                  <input type="checkbox" id="max_hold" onchange="spectrum.setMaxHold(this.checked)" title="Turn Max Hold On or Off" />
                   <label for="decay_list" >Decay:</label>
                   <select id="decay_list" onchange="spectrum.setDecay(this.value)" title="Set how long the spectrum min / max hold lives">
                      <option value="1">Infinite</option>

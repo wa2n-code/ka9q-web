@@ -635,11 +635,15 @@ Spectrum.prototype.togglePaused = function() {
 
 Spectrum.prototype.setMaxHold = function(maxhold) {
     this.maxHold = maxhold;
-    this.binsMax = undefined;
-    this.binsMin = undefined;
+    //console.log(`spectrum.setmaxhold: Max Hold set to ${this.maxHold}`);
+
+//    this.binsMax = undefined;
+//    this.binsMin = undefined;
     this.saveSettings();
 }
 
+// Need to get rid of this togglemaxhold function and make it work like the show max show min checkboxes / saving to settings
+/*
 Spectrum.prototype.toggleMaxHold = function() {
     const maxHoldCheckbox = document.getElementById("max_hold");
     if (maxHoldCheckbox) {
@@ -648,6 +652,7 @@ Spectrum.prototype.toggleMaxHold = function() {
     }
     this.saveSettings();
 }
+*/
 
 Spectrum.prototype.saveSettings = function() {
     if (typeof this.radio_pointer !== "undefined") {
