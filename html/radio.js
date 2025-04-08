@@ -542,10 +542,37 @@ function calcFrequencies() {
     }
 
     function setMode(selected_mode) {
-        document.getElementById('mode').value = selected_mode;
-        ws.send("M:"+selected_mode);
-        saveSettings();
-    }
+      document.getElementById('mode').value = selected_mode;
+      ws.send("M:" + selected_mode);
+  
+      // Determine the new sample rate and number of channels based on the mode
+      let newSampleRate = 12000;
+      let newChannels = 1;
+  
+      if (selected_mode === "iq") {
+          newChannels = 2; // Stereo for IQ mode
+      } else {
+          newChannels = 1; // Mono for other modes
+      }
+  
+      if (selected_mode === "fm") {
+          newSampleRate = 24000; // Higher sample rate for FM mode
+      } else {
+          newSampleRate = 12000; // Default sample rate for other modes
+      }
+  
+      // Reinitialize the PCMPlayer with the new configuration
+      player.destroy(); // Destroy the existing player instance
+      player = new PCMPlayer({
+          encoding: '16bitInt',
+          channels: newChannels,
+          sampleRate: newSampleRate,
+          flushingTime: 250
+      });
+  
+      console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
+      saveSettings();
+  }
 
     function selectMode(mode) {
         let element = document.getElementById('mode');

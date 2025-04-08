@@ -140,3 +140,16 @@ PCMPlayer.prototype.flush = function() {
     this.startTime += audioBuffer.duration;
     this.samples = new Float32Array();
 };
+
+PCMPlayer.prototype.destroy = function() {
+    console.log("destroy PCMPlayer");
+    if (this.audioCtx && this.scriptNode) {
+        this.scriptNode.disconnect();
+        this.scriptNode = null;
+    }
+    if (this.audioCtx) {
+        this.audioCtx.close();
+        this.audioCtx = null;
+    }
+    this.samples = [];
+};
