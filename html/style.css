@@ -87,3 +87,7 @@ h4#heading {
 #dialogOverlay.open {
   display: block;
 }
+
+#closeXButton:hover {
+  color: red; /* Optional: Change color on hover */
+}

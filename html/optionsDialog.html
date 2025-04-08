@@ -1,5 +1,8 @@
 <div id="dialogOverlay"></div>
 <div id="optionsDialog">
+  <!-- Add the "X" button -->
+  <button id="closeXButton" title="Close" style="position: absolute; top: 5px; right: 5px; background: none; border: none; font-size: 16px; cursor: pointer;">&times;</button>
+  
   <form method="dialog">
     <div>
       <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
@@ -30,7 +33,7 @@
       <button id="fft_avg_up" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
       <button id="csv_out" onclick="dumpCSV()" title="Write info file">Write info file</button>
       <button id="bug_upload" onclick="uploadBug()" title="Upload bug">Upload bug</button>
-      <button type="button" id="closeButton">Close</button>
+      <button type="button" id="closeButton" title="Close Options">Close</button>
     </div>
   </form>
 </div>

@@ -1014,6 +1014,7 @@ function loadSettings() {
   if (localStorage.length == 0) {
     return false;
   }
+  spectrum.averaging = parseInt(localStorage.getItem("averaging"));
   spectrum.frequency = parseFloat(localStorage.getItem("tune_hz"));
   frequencyHz = parseFloat(localStorage.getItem("tune_hz"));
   target_frequency = frequencyHz;
@@ -1084,10 +1085,11 @@ document.addEventListener('DOMContentLoaded', function() {
 function initializeDialogEventListeners() {
   const optionsButton = document.getElementById('OptionsButton'); // The launch button
   const optionsDialog = document.getElementById('optionsDialog'); // The dialog box
-  const closeButton = document.getElementById('closeButton'); // The close button
+  const dialogOverlay = document.getElementById('dialogOverlay'); // The overlay
+  const closeButtons = [document.getElementById('closeButton'), document.getElementById('closeXButton')]; // Both close buttons
 
   // Ensure the elements exist before attaching event listeners
-  if (!optionsButton || !optionsDialog || !closeButton) {
+  if (!optionsButton || !optionsDialog || !dialogOverlay || closeButtons.some(button => button === null)) {
     console.error('One or more elements are missing. Ensure optionsDialog.html is loaded correctly.');
     return;
   }
@@ -1099,19 +1101,21 @@ function initializeDialogEventListeners() {
 
     // Position the dialog just below the launch button
     optionsDialog.style.position = 'absolute'; // Use absolute positioning
-    optionsDialog.style.left = `${buttonRect.left + window.scrollX - 200}px`; // Adjust for horizontal scrolling, -200px to shift left button
-    optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 45}px`; // Adjust for vertical scrolling and add 45px spacing below button
+    optionsDialog.style.left = `${buttonRect.left + window.scrollX}px`; // Adjust for horizontal scrolling
+    optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 10}px`; // Adjust for vertical scrolling and add 10px spacing below button
     optionsDialog.style.transform = 'none'; // Reset any transform applied by CSS
-    //optionsDialog.style.width = auto; 
-    //optionsDialog.style.height = auto;
 
     // Show the dialog
     optionsDialog.classList.add('open');
+    dialogOverlay.classList.add('open');
   });
 
-  // Close the options dialog
-  closeButton.addEventListener('click', function () {
-    optionsDialog.classList.remove('open');
+  // Attach the same event handler to both close buttons
+  closeButtons.forEach(button => {
+    button.addEventListener('click', function () {
+      optionsDialog.classList.remove('open');
+      dialogOverlay.classList.remove('open');
+    });
   });
 
   // Add event listeners to the checkboxes

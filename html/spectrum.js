@@ -607,6 +607,7 @@ Spectrum.prototype.setAveraging = function(num) {
         this.averaging = num;
         this.alpha = 2 / (this.averaging + 1)
     }
+    //console.log("setAveraging: ", this.averaging + " calling this.saveSettings()");
     this.saveSettings();
 }
 
@@ -617,14 +618,12 @@ Spectrum.prototype.setDecay = function(num) {
 
 Spectrum.prototype.incrementAveraging = function() {
     this.setAveraging(this.averaging + 1);
-    this.saveSettings();
 }
 
 Spectrum.prototype.decrementAveraging = function() {
     if (this.averaging > 0) {
         this.setAveraging(this.averaging - 1);
     }
-    this.saveSettings();
 }
 
 Spectrum.prototype.togglePaused = function() {
