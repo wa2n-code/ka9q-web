@@ -153,3 +153,59 @@ PCMPlayer.prototype.destroy = function() {
     }
     this.samples = [];
 };
+
+PCMPlayer.prototype.startRecording = function() {
+    if (!this.audioCtx) {
+        console.error("AudioContext is not initialized.");
+        return;
+    }
+
+    // Create a MediaStreamDestination to capture the audio output
+    this.mediaStreamDestination = this.audioCtx.createMediaStreamDestination();
+    this.gainNode.connect(this.mediaStreamDestination); // Connect the gain node to the destination
+
+    // Initialize MediaRecorder
+    this.mediaRecorder = new MediaRecorder(this.mediaStreamDestination.stream);
+    this.recordedChunks = [];
+
+    // Collect audio data chunks
+    this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+            this.recordedChunks.push(event.data);
+        }
+    };
+
+    // Start recording
+    this.mediaRecorder.start();
+    console.log("Recording started...");
+};
+
+PCMPlayer.prototype.stopRecording = function() {
+    if (!this.mediaRecorder) {
+        console.error("MediaRecorder is not initialized.");
+        return;
+    }
+
+    // Stop the MediaRecorder
+    this.mediaRecorder.stop();
+    console.log("Recording stopped...");
+
+    // Save the recorded audio when recording stops
+    this.mediaRecorder.onstop = () => {
+        const blob = new Blob(this.recordedChunks, { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+
+        // Create a download link
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = 'recorded-audio.wav';
+        document.body.appendChild(a);
+        a.click();
+
+        // Clean up
+        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        console.log("Audio file saved as 'recorded-audio.wav'.");
+    };
+};

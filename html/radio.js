@@ -1205,3 +1205,22 @@ function setPlayerVolume(value) {
         console.error('Player or pan function is not defined.');
     }
 }
+
+let isRecording = false;
+
+function toggleAudioRecording() {
+    if (!player) {
+        console.error("Player object is not initialized.");
+        return;
+    }
+
+    if (isRecording) {
+        player.stopRecording();
+        document.getElementById('toggleRecording').innerText = 'Record';
+    } else {
+        player.startRecording();
+        document.getElementById('toggleRecording').innerText = 'Stop Recording';
+    }
+
+    isRecording = !isRecording;
+}
