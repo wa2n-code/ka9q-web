@@ -1214,6 +1214,14 @@ function toggleAudioRecording() {
         return;
     }
 
+    // Check if the audio is currently stopped
+    const audioButton = document.getElementById("audio_button");
+    if (audioButton && audioButton.value === "START") {
+      console.error("Cannot start recording because audio is not running.");
+      alert("Please start the audio before recording.");
+      return;
+    }
+
     if (isRecording) {
         player.stopRecording();
         document.getElementById('toggleRecording').innerText = 'Record';
