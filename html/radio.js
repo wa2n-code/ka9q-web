@@ -34,7 +34,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.67";
+      const webpage_version = "2.68";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -151,7 +151,7 @@ function calcFrequencies() {
           n = view.getUint32(i);
           i=i+4;
           var this_ssrc=ntohl(n);
-          i=i+cc;
+          i=i+(cc *4);
           if(extension) {
             n = view.getUint32(i);
             var ext_len=ntohl(n);
