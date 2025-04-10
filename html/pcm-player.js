@@ -180,7 +180,7 @@ PCMPlayer.prototype.startRecording = function() {
     console.log("Recording started...");
 };
 
-PCMPlayer.prototype.stopRecording = function() {
+PCMPlayer.prototype.stopRecording = function(frequency, mode) {
     if (!this.mediaRecorder) {
         console.error("MediaRecorder is not initialized.");
         return;
@@ -195,17 +195,28 @@ PCMPlayer.prototype.stopRecording = function() {
         const blob = new Blob(this.recordedChunks, { type: 'audio/wav' });
         const url = URL.createObjectURL(blob);
 
+        // Generate the filename in 24-hour Zulu format with underscores
+        const now = new Date();
+        const zuluTime = now.toISOString()
+            //.replace(/-/g, '_') // Replace dashes with underscores
+            .replace(/:/g, '_') // Replace colons with underscores
+            .split('.')[0] + 'Z'; // Remove milliseconds and append 'Z'
+
+        // Append frequency and mode to the filename
+        const formattedFrequency = parseFloat(frequency).toFixed(2); // Format frequency to 2 decimal places
+        const filename = `${zuluTime}_${formattedFrequency}_${mode}.wav`;
+
         // Create a download link
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        a.download = 'recorded-audio.wav';
+        a.download = filename; // Use the generated filename
         document.body.appendChild(a);
         a.click();
 
         // Clean up
         URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        console.log("Audio file saved as 'recorded-audio.wav'.");
+        console.log(`Audio file saved as '${filename}'.`);
     };
 };

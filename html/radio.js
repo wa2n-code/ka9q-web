@@ -1223,12 +1223,14 @@ function toggleAudioRecording() {
     }
 
     if (isRecording) {
-        player.stopRecording();
-        document.getElementById('toggleRecording').innerText = 'Record';
-    } else {
-        player.startRecording();
-        document.getElementById('toggleRecording').innerText = 'Stop Recording';
-    }
+      const currentFrequency = frequencyHz / 1000.0; // Convert frequency to kHz
+      const currentMode = document.getElementById('mode').value; // Get the current mode
+      player.stopRecording(currentFrequency, currentMode); // Pass frequency and mode
+      document.getElementById('toggleRecording').innerText = 'Record';
+  } else {
+      player.startRecording();
+      document.getElementById('toggleRecording').innerText = 'Stop Recording';
+  }
 
     isRecording = !isRecording;
 }
