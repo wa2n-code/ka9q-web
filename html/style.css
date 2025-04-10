@@ -39,7 +39,7 @@ h4#heading {
   display: none;
   position: absolute; /* Position relative to the document or nearest positioned ancestor */
   width: auto; /* Let the width adjust to the content */
-  max-width: 500px; /* Set a maximum width for the dialog box */
+  max-width: 600px; /* Set a maximum width for the dialog box */
   padding: 5px; /* Reduce padding inside the dialog box */
   background-color: lightgray;
   border: 2px solid #ccc;
