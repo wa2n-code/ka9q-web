@@ -230,6 +230,8 @@
             <tr align="center">
                </td>
                <td>
+               <button id="OptionsButton" title="Additional options">Options</button>
+                &nbsp;&nbsp;
                   <button id="pause" style="color: blue; border:solid;
                      width:120px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
                </td>
@@ -241,7 +243,10 @@
                <td align="center">
                   <button id="audio_button" style="color:DarkViolet; border: solid;
                      width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
-                  &nbsp;&nbsp;<button id="OptionsButton" title="Additional options">Options</button>
+                  &nbsp;&nbsp;
+      <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording" style="margin-right: 10px;">Record</button>
+      
+
                </td>
             </tr>
          </table>
