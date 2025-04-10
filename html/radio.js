@@ -1205,3 +1205,32 @@ function setPlayerVolume(value) {
         console.error('Player or pan function is not defined.');
     }
 }
+
+let isRecording = false;
+
+function toggleAudioRecording() {
+    if (!player) {
+        console.error("Player object is not initialized.");
+        return;
+    }
+
+    // Check if the audio is currently stopped
+    const audioButton = document.getElementById("audio_button");
+    if (audioButton && audioButton.value === "START") {
+      console.error("Cannot start recording because audio is not running.");
+      alert("Please start the audio before recording.");
+      return;
+    }
+
+    if (isRecording) {
+      const currentFrequency = frequencyHz / 1000.0; // Convert frequency to kHz
+      const currentMode = document.getElementById('mode').value; // Get the current mode
+      player.stopRecording(currentFrequency, currentMode); // Pass frequency and mode
+      document.getElementById('toggleRecording').innerText = 'Record';
+  } else {
+      player.startRecording();
+      document.getElementById('toggleRecording').innerText = 'Stop Recording';
+  }
+
+    isRecording = !isRecording;
+}
