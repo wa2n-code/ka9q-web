@@ -135,7 +135,7 @@ conj = no
 hang-time = 1.1
 recovery-rate = 20
 ```
-The line above that is different from the original [usb] mode is high = +3.5k, which has been changed from high = +3k.  Note that the new mode's ID tag in presets.conf must be written in lower case, but match the upper case characters from shown in the ka9q-web mode drop down selector button list.
+The line above that is different from the original [usb] mode is high = +3.5k, which has been changed from high = +3k.  Note that the new mode's ID tag in presets.conf must be written in lower case but match the upper case characters shown in the ka9q-web mode drop down selector button list. Also be aware that while the sample rate can be changed in presets.conf, which may modify ka9q-radio's behavior, the sample rate in ka9q-web is either 24k for fm or 12k for all other modes including I/Q. I/Q is a special case where the number of channels that will be saved to disk when using the record function is upped from 1 to 2 to write both I and Q audio streams to disk.
 
 ## References
 
