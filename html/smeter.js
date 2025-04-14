@@ -191,8 +191,11 @@ function createComputeSUnits() {
     
         // Compute the S units based on the power level p from above, being real time or max hold
         var s;
+        var sm1;
         if (p <= -73) {     
-            s = 'S' + Math.floor((p + 127) / 6);    // S0 to S9
+            sm1 = Math.floor((p + 127) / 6);       // S0 to S9
+            if (sm1 < 0) sm1 = 0;                // S0 is the lowest value
+            s = 'S' +  sm1;    // S0 to S9
         } 
         else {
             s = 'S9+' + ((p + 73) / 10) * 10;       // S9+1 to S9+60

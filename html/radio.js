@@ -570,7 +570,7 @@ function calcFrequencies() {
           flushingTime: 250
       });
   
-      console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
+      //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
   }
 
@@ -615,7 +615,7 @@ function calcFrequencies() {
     {
       zoomControlActive = false;
       autoAutoscale(true);
-      console.log("Zoom control is inactive");
+      //console.log("Zoom control is inactive");
     }
 
     let zoomControlActive = false;
@@ -1147,13 +1147,13 @@ function initializeDialogEventListeners() {
 
   // Add event listeners to the checkboxes
   document.getElementById('cksbFrequency').addEventListener('change', function () {
-    console.log('cksbFrequency:', this.checked);
+    //console.log('cksbFrequency:', this.checked);
     switchModesByFrequency = this.checked;
     saveSettings();
   });
 
   document.getElementById('ckonlyAutoscaleButton').addEventListener('change', function () {
-    console.log('ckonlyAutoscaleButton:', this.checked);
+    //console.log('ckonlyAutoscaleButton:', this.checked);
     onlyAutoscaleByButton = this.checked; // Only autoscale when the autoscale button is pressed
     saveSettings();
   });
