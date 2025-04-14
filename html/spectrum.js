@@ -4,8 +4,6 @@
  * See the LICENSE file for further details.
  */
 
-// Revised 3-16-25 02:44Z
-
 'use strict';
 
 Spectrum.prototype.setFrequency = function(freq) {
