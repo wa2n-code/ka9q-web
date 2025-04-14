@@ -78,7 +78,9 @@ function createUpdateSMeter() {
         if((spnovernp -1) > 0) 
             SignalToNoiseRatio = power2dB(spnovernp - 1);
         else
-            SignalToNoiseRatio = -100;  // Avoid calling power2dB with a negative number
+            SignalToNoiseRatio = 0;  // Avoid calling power2dB with a negative number
+        if(SignalToNoiseRatio < 0)
+            SignalToNoiseRatio = 0;  
 
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
@@ -94,7 +96,7 @@ function createUpdateSMeter() {
             }
         } else   // SNR meter
         if (meterType == 1)
-            normSig = SignalToNoiseRatio / 50 + 0.1; // 50dB SNR is full scale, -10db is the minimum value 
+            normSig = SignalToNoiseRatio / 50; // 50dB SNR is full scale, 0 is the minimum value 
         else
             normSig = Number(input_samprate) / Number(samples_since_over);
 
