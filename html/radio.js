@@ -595,6 +595,18 @@ function calcFrequencies() {
       saveSettings();
     }
 
+    function bumpAGCWithFM() {
+      const originalMode = document.getElementById('mode').value; // Get the currently selected mode
+      ws.send("M:fm"); // Switch to FM mode
+      console.log("Switched to FM mode");
+    
+      // Wait for 500 ms before switching back to the original mode
+      setTimeout(() => {
+        ws.send("M:" + originalMode); // Switch back to the original mode
+        console.log("Switched back to original mode: " + originalMode);
+      }, 100); // 100 ms delay
+    }
+
     function zoomcenter() {
       ws.send("Z:c");
       autoAutoscale(true);
