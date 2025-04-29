@@ -635,7 +635,7 @@ Spectrum.prototype.setMaxHold = function(maxhold) {
     //console.log(`spectrum.setmaxhold: Max Hold set to ${this.maxHold}`);
 
 //    this.binsMax = undefined;
-//    this.binsMin = undefined;
+    this.binsMin = undefined;
     this.saveSettings();
 }
 
