@@ -91,3 +91,33 @@ h4#heading {
 #closeXButton:hover {
   color: red; /* Optional: Change color on hover */
 }
+
+#pwr_data {
+  width: 10ch; /* Enough for values like "-123.4" */
+  text-align: left; /* Align text to the right for better readability */
+  display: inline-block; /* Prevent the width from shrinking */
+}
+
+#pwr_units {
+  width: 11ch; /* Enough for units like "dBm" */
+  text-align: left;
+  display: inline-block;
+}
+
+#s_data {
+  width: 6ch; /* Enough for values like "S9+60" */
+  text-align: left;
+  display: inline-block;
+}
+
+#snr_data {
+  width: 8ch;
+  text-align: left;
+  display: inline-block;
+}
+
+#snr_units {
+  width: 10ch; /* Enough for units like "dB | Signal:" */
+  text-align: left;
+  display: inline-block;
+}
