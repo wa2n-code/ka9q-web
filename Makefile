@@ -18,6 +18,8 @@ CPPFLAGS=$(INCLUDES) -DRESOURCES_BASE_DIR=$(RESOURCES_BASE_DIR)
 
 KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_RADIO_DIR)/misc.o $(KA9Q_RADIO_DIR)/decode_status.o $(KA9Q_RADIO_DIR)/rtp.o
 
+all: ka9q-web
+
 ka9q-web: ka9q-web.o $(KA9Q_RADIO_OBJS)
 	$(CC) -o $@ $^ -lonion -lbsd -lm
 
@@ -29,4 +31,6 @@ install-config:
 	install -b -m 644 config/* /etc/radio
 
 clean:
-	rm -f ka9q-web *.o *.d
+	-rm -f ka9q-web *.o *.d
+
+.PHONY: clean all install
