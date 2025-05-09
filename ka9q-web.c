@@ -608,7 +608,7 @@ static void *audio_thread(void *arg) {
     pthread_mutex_lock(&output_dest_socket_mutex);
     while(Channel.output.dest_socket.sa_family == 0)
         pthread_cond_wait(&output_dest_socket_cond, &output_dest_socket_mutex);
-    Input_fd = listen_mcast(&Channel.output.dest_socket,NULL);
+    Input_fd = listen_mcast(NULL,&Channel.output.dest_socket,NULL);
     pthread_mutex_unlock(&output_dest_socket_mutex);
   }
 
@@ -671,7 +671,7 @@ int init_connections(const char *multicast_group) {
   pthread_mutex_init(&ctl_mutex,NULL);
 
   resolve_mcast(multicast_group,&Metadata_dest_socket,DEFAULT_STAT_PORT,iface,sizeof(iface),0);
-  Status_fd = listen_mcast(&Metadata_dest_socket,iface);
+  Status_fd = listen_mcast(NULL,&Metadata_dest_socket,iface);
   if(Status_fd == -1){
     fprintf(stderr,"Can't listen to mcast status %s\n",multicast_group);
     return(EX_IOERR);
