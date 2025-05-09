@@ -27,3 +27,6 @@ install: ka9q-web
 
 install-config:
 	install -b -m 644 config/* /etc/radio
+
+clean:
+	rm -f ka9q-web *.o *.d
