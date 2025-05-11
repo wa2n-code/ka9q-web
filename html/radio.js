@@ -34,7 +34,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.68";
+      const webpage_version = "2.69";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -224,7 +224,7 @@ function calcFrequencies() {
               spectrum.bins = binCount;
               document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 15: 15; // above and below 64.8 Mhz now can do 15 levels of zoom?
               document.getElementById("zoom_level").value = z_level;
-              console.log("Zoom level=",z_level);
+              //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
             }
@@ -337,7 +337,7 @@ function calcFrequencies() {
           spectrum.averaging = 0;
           spectrum.maxHold = false;
           spectrum.paused = false;
-          spectrum.colorIndex = 0;
+          spectrum.colorIndex = 9;  // Default to kiwi color map
           spectrum.decay = 1.0;
           spectrum.cursor_active = false;
           spectrum.bins = binCount;
@@ -583,14 +583,14 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
-      console.log("zoomin(): ",document.getElementById('freq').value);
+      //console.log("zoomin(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
     }
 
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
-      console.log("zoomout(): ",document.getElementById('freq').value);
+      //console.log("zoomout(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
     }
