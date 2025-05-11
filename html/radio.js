@@ -6,7 +6,8 @@
       var ssrc;
 
       var band;
-
+    let ws = null; // Declare WebSocket as a global variable
+      let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
       let binWidthHz = 20000; // 20000 Hz per bin
       var centerHz = 10000000; // center frequency
@@ -112,8 +113,8 @@ function calcFrequencies() {
         ws.send("Z:" + (target_zoom_level).toString());
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
+        fetchZoomTableSize(); // Fetch and store the zoom table size
       }
-
       function on_ws_close() {
       }
 
@@ -222,7 +223,7 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
-              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 15: 15; // above and below 64.8 Mhz now can do 15 levels of zoom?
+              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? zoomTableSize-1: zoomTableSize-1; // above and below 64.8 Mhz now can do 15 levels of zoom?
               document.getElementById("zoom_level").value = z_level;
               //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
@@ -357,6 +358,7 @@ function calcFrequencies() {
         ws.onclose=on_ws_close;
         ws.binaryType = "arraybuffer";
         ws.onerror = on_ws_error;
+
 
 //        if(is_touch_enabled()) {
 //console.log("touch enabled");
@@ -583,6 +585,7 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
+      console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
@@ -590,6 +593,7 @@ function calcFrequencies() {
 
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
+      console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
@@ -609,6 +613,7 @@ function calcFrequencies() {
 
     function zoomcenter() {
       ws.send("Z:c");
+      console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(true);
       saveSettings();
     }
@@ -1245,4 +1250,53 @@ function toggleAudioRecording() {
   }
 
     isRecording = !isRecording;
+}
+
+function getZoomTableSize() {
+    return new Promise((resolve, reject) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            reject("WebSocket is not open");
+            return;
+        }
+
+        // Send the command to get the zoom table size
+        ws.send("Z:SIZE");
+
+        // Temporary event listener for the ZSIZE response
+        function handleZoomTableSize(event) {
+            if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
+                const size = parseInt(event.data.split(":")[1], 10);
+                ws.removeEventListener("message", handleZoomTableSize); // Remove the listener after handling
+                resolve(size);
+            }
+        }
+
+        // Add the temporary event listener
+        ws.addEventListener("message", handleZoomTableSize);
+
+        // Handle errors
+        ws.addEventListener("error", function (error) {
+            ws.removeEventListener("message", handleZoomTableSize); // Clean up the listener
+            reject("WebSocket error: " + error);
+        }, { once: true });
+    });
+}
+
+async function fetchZoomTableSize() {
+    try {
+        const size = await getZoomTableSize(); // Fetch the zoom table size
+        zoomTableSize = size; // Store it in the global variable
+        console.log("Zoom table size fetched and stored:", zoomTableSize);
+
+        // Update the max attribute of the zoom_level range control
+        const zoomLevelControl = document.getElementById("zoom_level");
+        if (zoomLevelControl) {
+            zoomLevelControl.max = zoomTableSize - 1; // Set max to table size - 1
+        }
+
+        return size; // Return the size for further use if needed
+    } catch (error) {
+        console.error("Error fetching zoom table size:", error);
+        return null; // Return null if there was an error
+    }
 }
