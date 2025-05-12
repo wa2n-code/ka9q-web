@@ -834,7 +834,7 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
   document.getElementById("cursor_data").innerHTML = "Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
   
-  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
+  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
 
