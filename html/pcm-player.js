@@ -192,31 +192,125 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
 
     // Save the recorded audio when recording stops
     this.mediaRecorder.onstop = () => {
-        const blob = new Blob(this.recordedChunks, { type: 'audio/wav' });
-        const url = URL.createObjectURL(blob);
+        console.log("MediaRecorder onstop event triggered.");
 
-        // Generate the filename in 24-hour Zulu format with underscores
-        const now = new Date();
-        const zuluTime = now.toISOString()
-            //.replace(/-/g, '_') // Replace dashes with underscores
-            .replace(/:/g, '_') // Replace colons with underscores
-            .split('.')[0] + 'Z'; // Remove milliseconds and append 'Z'
+        const audioBlob = new Blob(this.recordedChunks, { type: 'audio/webm' });
+        console.log("Audio Blob created:", audioBlob);
 
-        // Append frequency and mode to the filename
-        const formattedFrequency = parseFloat(frequency).toFixed(2); // Format frequency to 2 decimal places
-        const filename = `${zuluTime}_${formattedFrequency}_${mode}.wav`;
+        // Decode the audio Blob into raw PCM data
+        const reader = new FileReader();
+        reader.onload = () => {
+            console.log("FileReader onload event triggered.");
 
-        // Create a download link
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = filename; // Use the generated filename
-        document.body.appendChild(a);
-        a.click();
+            const arrayBuffer = reader.result;
 
-        // Clean up
-        URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        console.log(`Audio file saved as '${filename}'.`);
+            // Use AudioContext to decode the audio data
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx.decodeAudioData(arrayBuffer, (audioBuffer) => {
+                console.log("Audio data decoded successfully.");
+
+                // Extract PCM data from the decoded audio buffer
+                const numOfChannels = audioBuffer.numberOfChannels;
+                const sampleRate = audioBuffer.sampleRate;
+                const pcmData = [];
+
+                for (let channel = 0; channel < numOfChannels; channel++) {
+                    pcmData.push(audioBuffer.getChannelData(channel));
+                }
+
+                // Encode the PCM data into a valid .wav file
+                const wavBuffer = this.encodeWAV(pcmData, sampleRate, numOfChannels);
+                console.log("WAV buffer created.");
+
+                // Create a Blob for the .wav file
+                const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+                console.log("WAV Blob created:", wavBlob);
+
+                // Generate the filename in 24-hour Zulu format with underscores
+                const now = new Date();
+                const zuluTime = now.toISOString()
+                    .replace(/:/g, '_') // Replace colons with underscores
+                    .split('.')[0] + 'Z'; // Remove milliseconds and append 'Z'
+
+                // Append frequency and mode to the filename
+                const formattedFrequency = parseFloat(frequency).toFixed(2); // Format frequency to 2 decimal places
+                const filename = `${zuluTime}_${formattedFrequency}_${mode}.wav`;
+
+                // Create a download link
+                const url = URL.createObjectURL(wavBlob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename; // Use the generated filename
+                document.body.appendChild(a);
+                a.click();
+                console.log(`Download link triggered for file: ${filename}`);
+
+                // Clean up
+                URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                console.log("Temporary download link removed.");
+            }, (error) => {
+                console.error("Error decoding audio data:", error);
+            });
+        };
+
+        reader.readAsArrayBuffer(audioBlob);
     };
+};
+
+// Helper function to encode PCM data into a valid .wav file
+PCMPlayer.prototype.encodeWAV = function(pcmData, sampleRate, numOfChannels) {
+    const bitsPerSample = 16; // Assuming 16-bit PCM
+    const byteRate = (sampleRate * numOfChannels * bitsPerSample) / 8;
+    const blockAlign = (numOfChannels * bitsPerSample) / 8;
+
+    // Calculate the total data size
+    const dataSize = pcmData[0].length * numOfChannels * (bitsPerSample / 8);
+
+    const buffer = new ArrayBuffer(44 + dataSize); // 44 bytes for WAV header
+    const view = new DataView(buffer);
+
+    // Write WAV header
+    let offset = 0;
+
+    // "RIFF" chunk descriptor
+    this.writeString(view, offset, 'RIFF'); offset += 4;
+    view.setUint32(offset, 36 + dataSize, true); offset += 4; // File size - 8 bytes
+    this.writeString(view, offset, 'WAVE'); offset += 4;
+
+    // "fmt " sub-chunk
+    this.writeString(view, offset, 'fmt '); offset += 4;
+    view.setUint32(offset, 16, true); offset += 4; // Sub-chunk size (16 for PCM)
+    view.setUint16(offset, 1, true); offset += 2; // Audio format (1 for PCM)
+    view.setUint16(offset, numOfChannels, true); offset += 2; // Number of channels
+    view.setUint32(offset, sampleRate, true); offset += 4; // Sample rate
+    view.setUint32(offset, byteRate, true); offset += 4; // Byte rate
+    view.setUint16(offset, blockAlign, true); offset += 2; // Block align
+    view.setUint16(offset, bitsPerSample, true); offset += 2; // Bits per sample
+
+    // "data" sub-chunk
+    this.writeString(view, offset, 'data'); offset += 4;
+    view.setUint32(offset, dataSize, true); offset += 4; // Data size
+
+    // Write PCM data
+    for (let i = 0; i < pcmData[0].length; i++) {
+        for (let channel = 0; channel < numOfChannels; channel++) {
+            const sample = Math.max(-1, Math.min(1, pcmData[channel][i])); // Clamp sample to [-1, 1]
+            const intSample = sample < 0
+                ? sample * 0x8000
+                : sample * 0x7FFF; // Convert to 16-bit PCM
+            view.setInt16(offset, intSample, true);
+            offset += 2;
+        }
+    }
+
+    return buffer;
+};
+
+// Helper function to write strings to DataView
+PCMPlayer.prototype.writeString = function(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
 };
