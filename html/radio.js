@@ -327,7 +327,9 @@ function calcFrequencies() {
         binWidthHz = 20000;
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         if (!loadSettings()) {
-          spectrum.setSpectrumPercent(50);
+          console.log("loadSettings() returned false, setting defaults");
+          setDefaultSettings(); 
+/*          spectrum.setSpectrumPercent(50);
           spectrum.setFrequency(frequencyHz);
           spectrum.setCenterHz(centerHz);
           spectrum.setSpanHz(binWidthHz * binCount);
@@ -343,6 +345,7 @@ function calcFrequencies() {
           spectrum.cursor_active = false;
           spectrum.bins = binCount;
           document.getElementById('mode').value = "am";
+*/
         }
         spectrum.radio_pointer = this;
         page_title = "";
@@ -1053,9 +1056,50 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
+function setDefaultSettings() {
+  spectrum.averaging = 4;
+  spectrum.frequency = 10000000;
+  frequencyHz = 10000000;
+  target_frequency = 10000000;
+  spectrum.min_db = -115;
+  document.getElementById("spectrum_min").value = spectrum.min_db;
+  spectrum.max_db = -35;
+  document.getElementById("spectrum_max").value = spectrum.max_db;
+  spectrum.wf_min_db = -115;
+  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
+  spectrum.wf_max_db = -35;
+  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
+  spectrum.spectrumPercent = 65;
+  spectrum.centerHz = 10000000;
+  centerHz = spectrum.centerHz;
+  target_center = centerHz;
+  spectrum.maxHold = true;
+  document.getElementById("max_hold").checked = spectrum.maxHold;
+  spectrum.paused = false;
+  spectrum.decay = 1.05;
+  spectrum.cursor_active = false;
+  document.getElementById("mode").value = "am";
+  target_preset = "usb";
+  increment = 500;
+  document.getElementById("colormap").value = 9;
+  spectrum.colorIndex = 9;
+  document.getElementById("meter").value = 0;
+  meterType = 0;
+  document.getElementById("zoom_level").value =6;
+  target_zoom_level = 6;
+  spectrum.cursor_freq = 10000000;
+  spectrum.check_max = false;
+  spectrum.check_min = false;
+  switchModesByFrequency = true;
+  document.getElementById("cksbFrequency").checked = switchModesByFrequency;
+  onlyAutoscaleByButton = false;
+  document.getElementById("ckonlyAutoscaleButton").checked = false;
+
+}
+
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if (localStorage.length == 0) {
+  if ((localStorage.length == 0) || localStorage.length != 22) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
