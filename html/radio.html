@@ -230,8 +230,8 @@
             <tr align="center">
                </td>
                <td>
-               <button id="OptionsButton" title="Additional options">Options</button>
-                &nbsp;&nbsp;
+                  <button id="OptionsButton" title="Additional options">Options</button>
+                  &nbsp;&nbsp;
                   <button id="pause" style="color: blue; border:solid;
                      width:120px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
                </td>
@@ -244,9 +244,7 @@
                   <button id="audio_button" style="color:DarkViolet; border: solid;
                      width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
                   &nbsp;&nbsp;
-      <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording" style="margin-right: 10px;">Record</button>
-      
-
+                  <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording" style="margin-right: 10px;">Record</button>
                </td>
             </tr>
          </table>
@@ -325,8 +323,10 @@
       <span id="cursor_data"></span>
       <span id="info"> </span>
       <span id="audiospan"> </span>
+      <br><br>
+      <div id="note_div">Notes (free-form entry):<textarea id="note_text" class="no-scrollbars"></textarea></div>
       <br>
-      <div id="note_div">Notes:<textarea id="note_text" class="no-scrollbars"></textarea></div>
+      Help:      
       <ul>
          <li>Use mouse to click to a frequency.</li>
          <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
@@ -349,28 +349,24 @@
          <li>'i' to zoom in spectrum</li>
          <li>'o' to zoom out spectrum</li>
       </ul>
+      <font size="-1">
+      Recent changes:
       <ul>
-         Recent changes:
+         <li>v2.69: Major UI update</li>
          <li>v2.68: Bugfix: RTP header offset was wrong</li>
-         <li>v2.67: Retry tuning frequency changes until they take effect</li>
-         <li>v2.66: More html cleanup, thanks to Jim Lill WA2ZKD</li>
-         <li>v2.65: Remove server diag messages</li>
-         <li>v2.64: Remove dead spectrum noise density, alter server diag messages</li>
-         <li>Exit on CTRL-C, fix ADC sample count suffix</li>
-         <li>Major html cleanup, thanks to Jim Lill WA2ZKD</li>
-         <li>Experimental/WIP: Added checkboxes for live, min, max spectrum traces.</li>
-         <li>Added "Upload bug" button to send info and screenshot for examination.</li>
-         <li>Fixed cryptic realtime priority warning; use "-r" on the server
-            command line to (attempt) to run with realtime or elevated priority
-         </li>
-         <li>"Write info file" button now saves both CSV file and an HTML screenshot. Try it!</li>
       </ul>
-      <i>Web Server by John Melton, G0ORX (https://github.com/g0orx/ka9q-radio)</i>
+      Credits:
+      <i>
+      <ul>
+         <li>Web Server by John Melton, G0ORX (https://github.com/g0orx/ka9q-radio)
+         <li>ka9q-radio by Phil Karn, KA9Q (https://github.com/ka9q/ka9q-radio)
+         <li>Onion Web Framework by David Moreno (https://github.com/davidmoreno/onion)
+         <li>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)
+         <li>Low-level code updates by Scott Newell, K5TNL
+         <li>UI added features and updates: Wayne Roth, WA2N and Jim Lill,
+            WA2ZKD 
+      </ul>
+      <hr>
       <br>
-      <i>ka9q-radio by Phil Karn, KA9Q (https://github.com/ka9q/ka9q-radio)</i>
-      <br>
-      <i>Onion Web Framework by David Moreno (https://github.com/davidmoreno/onion)</i>
-      <br>
-      <i>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)</i>
    </body>
 </html>

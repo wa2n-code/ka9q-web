@@ -264,7 +264,7 @@ Spectrum.prototype.updateAxes = function() {
     this.ctx_axes.textBaseline = "middle";
 
     this.ctx_axes.textAlign = "left";
-    var step = 5; // 5 dB steps, was 10 wdr
+    var step = this.graticuleIncrement; // 5 or 10 dB depending on range of the spectrum
     for (var i = this.min_db + step; i <= this.max_db - step; i += step) {
         var y = height - this.squeeze(i, 0, height);
         this.ctx_axes.fillText(i, 5, y);
@@ -288,7 +288,7 @@ Spectrum.prototype.updateAxes = function() {
           inc=10000;
           break;
         case 200:
-          inc=50000;
+          inc=25000;
           break;
         case 400:
           inc=50000;
@@ -297,13 +297,13 @@ Spectrum.prototype.updateAxes = function() {
           inc=100000;
           break;
         case 1000:
-          inc=200000;
+          inc=100000;
           break;
         case 2000:
-          inc=500000;
+          inc=250000;
           break;
         case 4000:
-          inc=1000000;
+          inc=500000;
           break;
         case 8000:
           inc=1000000;
@@ -320,8 +320,12 @@ Spectrum.prototype.updateAxes = function() {
     }
     inc = isNaN(inc) ? 2000000 : inc;
 
-    //console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins);
-
+    //console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins,"this.spanHz/this.nbins=",this.spanHz/this.nbins);
+    var precision = 3;
+    if((this.highHz - this.lowHz) < 10000)  // 10kHz
+        precision = 4;
+    else
+        precision = 3;
     var freq=this.start_freq-(this.start_freq%inc);
     var text;
     while(freq<=this.highHz) {
@@ -329,7 +333,7 @@ Spectrum.prototype.updateAxes = function() {
         var x = (freq-this.start_freq)/hz_per_pixel;
         text = freq / 1e6;
         //this.ctx_axes.fillText(text.toFixed(3), x, height);
-        this.ctx_axes.fillText(text.toFixed(3), x, 2);
+        this.ctx_axes.fillText(text.toFixed(precision), x, 2);
         this.ctx_axes.beginPath();
         this.ctx_axes.moveTo(x, 0);
         this.ctx_axes.lineTo(x, height);
@@ -370,7 +374,7 @@ Spectrum.prototype.addData = function(data) {
                 this.autoscale = false;
             }
 
-            var increment = 5.0;    // RSSI graticule increament in dB
+            var increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
             var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
             var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
@@ -539,9 +543,16 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     this.max_db = max_db;
     document.getElementById("spectrum_min").value = min_db;
     document.getElementById("spectrum_max").value = max_db;
+    
+    if(this.max_db > (this.min_db) + 50) // set the number of graticule lines based on the range
+        this.graticuleIncrement = 10;
+    else
+        this.graticuleIncrement = 5;
+
+    //console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," graticuleIncrement: ",this.graticuleIncrement);   
 
     if (adjust_waterfall) {
-        this.wf_min_db = min_db + wf_min_adjust;    // fix this wdr, maybe use min_db + stdev of the min?  For now, just add +5 to darken the waterfall.
+        this.wf_min_db = min_db + wf_min_adjust;    // min_db + stdev of the min? 
         this.wf_max_db = max_db;
         //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
@@ -778,6 +789,7 @@ function Spectrum(id, options) {
     this.averaging = (options && options.averaging) ? options.averaging : 0;
     this.maxHold = (options && options.maxHold) ? options.maxHold : false;
     this.bins = (options && options.bins) ? options.bins : false;
+    this.graticuleIncrement = 5;  // Default value for graticule spacing
 
     // Setup state
     this.paused = false;
@@ -791,8 +803,8 @@ function Spectrum(id, options) {
     this.spectrumHeight = 0;
 
     // Colors
-    this.colorindex = 0;
-    this.colormap = colormaps[0];
+    this.colorindex = 9;                // Default colormap index to Kiwi
+    this.colormap = colormaps[9];
 
     // Create main canvas and adjust dimensions to match actual
     this.canvas = document.getElementById(id);

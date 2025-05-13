@@ -6,7 +6,8 @@
       var ssrc;
 
       var band;
-
+    let ws = null; // Declare WebSocket as a global variable
+      let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
       let binWidthHz = 20000; // 20000 Hz per bin
       var centerHz = 10000000; // center frequency
@@ -34,7 +35,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.68";
+      const webpage_version = "2.69";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -112,8 +113,8 @@ function calcFrequencies() {
         ws.send("Z:" + (target_zoom_level).toString());
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
+        fetchZoomTableSize(); // Fetch and store the zoom table size
       }
-
       function on_ws_close() {
       }
 
@@ -222,9 +223,9 @@ function calcFrequencies() {
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
-              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? 15: 15; // above and below 64.8 Mhz now can do 15 levels of zoom?
+              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? zoomTableSize-1: zoomTableSize-1; // above and below 64.8 Mhz now can do 15 levels of zoom?
               document.getElementById("zoom_level").value = z_level;
-              console.log("Zoom level=",z_level);
+              //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
             }
@@ -326,7 +327,9 @@ function calcFrequencies() {
         binWidthHz = 20000;
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         if (!loadSettings()) {
-          spectrum.setSpectrumPercent(50);
+          console.log("loadSettings() returned false, setting defaults");
+          setDefaultSettings(); 
+/*          spectrum.setSpectrumPercent(50);
           spectrum.setFrequency(frequencyHz);
           spectrum.setCenterHz(centerHz);
           spectrum.setSpanHz(binWidthHz * binCount);
@@ -337,11 +340,12 @@ function calcFrequencies() {
           spectrum.averaging = 0;
           spectrum.maxHold = false;
           spectrum.paused = false;
-          spectrum.colorIndex = 0;
+          spectrum.colorIndex = 9;  // Default to kiwi color map
           spectrum.decay = 1.0;
           spectrum.cursor_active = false;
           spectrum.bins = binCount;
           document.getElementById('mode').value = "am";
+*/
         }
         spectrum.radio_pointer = this;
         page_title = "";
@@ -357,6 +361,7 @@ function calcFrequencies() {
         ws.onclose=on_ws_close;
         ws.binaryType = "arraybuffer";
         ws.onerror = on_ws_error;
+
 
 //        if(is_touch_enabled()) {
 //console.log("touch enabled");
@@ -583,14 +588,16 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
-      console.log("zoomin(): ",document.getElementById('freq').value);
+      console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
+      //console.log("zoomin(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
     }
 
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
-      console.log("zoomout(): ",document.getElementById('freq').value);
+      console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
+      //console.log("zoomout(): ",document.getElementById('freq').value);
       autoAutoscale(true);
       saveSettings();
     }
@@ -609,6 +616,7 @@ function calcFrequencies() {
 
     function zoomcenter() {
       ws.send("Z:c");
+      console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(true);
       saveSettings();
     }
@@ -829,7 +837,7 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
   document.getElementById("cursor_data").innerHTML = "Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
   
-  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, center: ${centerHz / 1000.0} kHz, tune: ${frequencyHz / 1000.0} kHz`;
+  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
 
@@ -1048,9 +1056,50 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
+function setDefaultSettings() {
+  spectrum.averaging = 4;
+  spectrum.frequency = 10000000;
+  frequencyHz = 10000000;
+  target_frequency = 10000000;
+  spectrum.min_db = -115;
+  document.getElementById("spectrum_min").value = spectrum.min_db;
+  spectrum.max_db = -35;
+  document.getElementById("spectrum_max").value = spectrum.max_db;
+  spectrum.wf_min_db = -115;
+  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
+  spectrum.wf_max_db = -35;
+  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
+  spectrum.spectrumPercent = 65;
+  spectrum.centerHz = 10000000;
+  centerHz = spectrum.centerHz;
+  target_center = centerHz;
+  spectrum.maxHold = true;
+  document.getElementById("max_hold").checked = spectrum.maxHold;
+  spectrum.paused = false;
+  spectrum.decay = 1.05;
+  spectrum.cursor_active = false;
+  document.getElementById("mode").value = "am";
+  target_preset = "usb";
+  increment = 500;
+  document.getElementById("colormap").value = 9;
+  spectrum.colorIndex = 9;
+  document.getElementById("meter").value = 0;
+  meterType = 0;
+  document.getElementById("zoom_level").value =6;
+  target_zoom_level = 6;
+  spectrum.cursor_freq = 10000000;
+  spectrum.check_max = false;
+  spectrum.check_min = false;
+  switchModesByFrequency = true;
+  document.getElementById("cksbFrequency").checked = switchModesByFrequency;
+  onlyAutoscaleByButton = false;
+  document.getElementById("ckonlyAutoscaleButton").checked = false;
+
+}
+
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if (localStorage.length == 0) {
+  if ((localStorage.length == 0) || localStorage.length != 22) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1245,4 +1294,53 @@ function toggleAudioRecording() {
   }
 
     isRecording = !isRecording;
+}
+
+function getZoomTableSize() {
+    return new Promise((resolve, reject) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            reject("WebSocket is not open");
+            return;
+        }
+
+        // Send the command to get the zoom table size
+        ws.send("Z:SIZE");
+
+        // Temporary event listener for the ZSIZE response
+        function handleZoomTableSize(event) {
+            if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
+                const size = parseInt(event.data.split(":")[1], 10);
+                ws.removeEventListener("message", handleZoomTableSize); // Remove the listener after handling
+                resolve(size);
+            }
+        }
+
+        // Add the temporary event listener
+        ws.addEventListener("message", handleZoomTableSize);
+
+        // Handle errors
+        ws.addEventListener("error", function (error) {
+            ws.removeEventListener("message", handleZoomTableSize); // Clean up the listener
+            reject("WebSocket error: " + error);
+        }, { once: true });
+    });
+}
+
+async function fetchZoomTableSize() {
+    try {
+        const size = await getZoomTableSize(); // Fetch the zoom table size
+        zoomTableSize = size; // Store it in the global variable
+        console.log("Zoom table size fetched and stored:", zoomTableSize);
+
+        // Update the max attribute of the zoom_level range control
+        const zoomLevelControl = document.getElementById("zoom_level");
+        if (zoomLevelControl) {
+            zoomLevelControl.max = zoomTableSize - 1; // Set max to table size - 1
+        }
+
+        return size; // Return the size for further use if needed
+    } catch (error) {
+        console.error("Error fetching zoom table size:", error);
+        return null; // Return null if there was an error
+    }
 }

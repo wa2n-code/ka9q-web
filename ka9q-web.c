@@ -263,7 +263,9 @@ const struct zoom_table_t zoom_table[] = {
   {40, 1620},
   {20, 1620},
   {10, 1620},
-  {5, 1620}
+  {5, 1620},
+  {2, 1620},
+  {1, 1620}
 };
 
 static void zoom_to(struct session *sp, int level) {
@@ -401,6 +403,14 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
             }
           }
           //check_frequency(sp);
+        } else if (strcmp(token, "SIZE") == 0) { // New command to get zoom table size
+            int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+            char response[16];
+            snprintf(response, sizeof(response), "ZSIZE:%d", table_size);
+            pthread_mutex_lock(&sp->ws_mutex);
+            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+            onion_websocket_write(sp->ws, response, strlen(response));
+            pthread_mutex_unlock(&sp->ws_mutex);
         } else {
           char *end_ptr;
           long int zoom_level = strtol(&tmp[2],&end_ptr,10);
