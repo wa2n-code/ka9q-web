@@ -575,7 +575,7 @@ function calcFrequencies() {
           flushingTime: 250
       });
   
-      //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
+      console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
   }
 

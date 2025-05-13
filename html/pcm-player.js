@@ -209,47 +209,63 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
             audioCtx.decodeAudioData(arrayBuffer, (audioBuffer) => {
                 console.log("Audio data decoded successfully.");
 
-                // Extract PCM data from the decoded audio buffer
-                const numOfChannels = audioBuffer.numberOfChannels;
-                const sampleRate = audioBuffer.sampleRate;
-                const pcmData = [];
+                // Resample the audio to the desired sample rate
+                const targetSampleRate = this.option.sampleRate; // Use the player's sample rate (e.g., 12 kHz or 24 kHz)
+                const offlineCtx = new OfflineAudioContext(
+                    audioBuffer.numberOfChannels,
+                    audioBuffer.duration * targetSampleRate,
+                    targetSampleRate
+                );
 
-                for (let channel = 0; channel < numOfChannels; channel++) {
-                    pcmData.push(audioBuffer.getChannelData(channel));
-                }
+                const source = offlineCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(offlineCtx.destination);
+                source.start(0);
 
-                // Encode the PCM data into a valid .wav file
-                const wavBuffer = this.encodeWAV(pcmData, sampleRate, numOfChannels);
-                console.log("WAV buffer created.");
+                offlineCtx.startRendering().then((resampledBuffer) => {
+                    console.log("Audio resampled to:", targetSampleRate);
 
-                // Create a Blob for the .wav file
-                const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-                console.log("WAV Blob created:", wavBlob);
+                    // Extract PCM data from the resampled audio buffer
+                    const numOfChannels = resampledBuffer.numberOfChannels;
+                    const pcmData = [];
 
-                // Generate the filename in 24-hour Zulu format with underscores
-                const now = new Date();
-                const zuluTime = now.toISOString()
-                    .replace(/:/g, '_') // Replace colons with underscores
-                    .split('.')[0] + 'Z'; // Remove milliseconds and append 'Z'
+                    for (let channel = 0; channel < numOfChannels; channel++) {
+                        pcmData.push(resampledBuffer.getChannelData(channel));
+                    }
 
-                // Append frequency and mode to the filename
-                const formattedFrequency = parseFloat(frequency).toFixed(2); // Format frequency to 2 decimal places
-                const filename = `${zuluTime}_${formattedFrequency}_${mode}.wav`;
+                    // Encode the PCM data into a valid .wav file
+                    const wavBuffer = this.encodeWAV(pcmData, targetSampleRate, numOfChannels);
+                    console.log("WAV buffer created at sample rate:", targetSampleRate, "channels:", numOfChannels);
 
-                // Create a download link
-                const url = URL.createObjectURL(wavBlob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = filename; // Use the generated filename
-                document.body.appendChild(a);
-                a.click();
-                console.log(`Download link triggered for file: ${filename}`);
+                    // Create a Blob for the .wav file
+                    const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+                    console.log("WAV Blob created:", wavBlob);
 
-                // Clean up
-                URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                console.log("Temporary download link removed.");
+                    // Generate the filename in 24-hour Zulu format with underscores
+                    const now = new Date();
+                    const zuluTime = now.toISOString()
+                        .replace(/:/g, '_') // Replace colons with underscores
+                        .split('.')[0] + 'Z'; // Remove milliseconds and append 'Z'
+
+                    // Append frequency and mode to the filename
+                    const formattedFrequency = parseFloat(frequency).toFixed(2); // Format frequency to 2 decimal places
+                    const filename = `${zuluTime}_${formattedFrequency}_${mode}.wav`;
+
+                    // Create a download link
+                    const url = URL.createObjectURL(wavBlob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = filename; // Use the generated filename
+                    document.body.appendChild(a);
+                    a.click();
+                    console.log(`Download link triggered for file: ${filename}`);
+
+                    // Clean up
+                    URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    console.log("Temporary download link removed.");
+                });
             }, (error) => {
                 console.error("Error decoding audio data:", error);
             });
