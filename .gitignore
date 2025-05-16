@@ -1,3 +1,4 @@
 ka9q-web
 *.o
 private
+.vscode/
