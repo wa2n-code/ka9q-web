@@ -400,7 +400,7 @@ function calcFrequencies() {
 
     var increment=1000;
 
-    function onClick(e) {
+    function onClick(e) {   // click on waterfall or spectrum
       var span = binWidthHz * binCount;
       width=document.getElementById('waterfall').width;
       hzPerPixel=span/width;
@@ -408,7 +408,7 @@ function calcFrequencies() {
       f=f-(f%increment);
       if (!spectrum.cursor_active) {
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
-        setFrequency(false);
+        setFrequencyW(false);
       } else {
         spectrum.cursor_freq = spectrum.limitCursor(Math.round((centerHz - (span / 2)) + (hzPerPixel * e.pageX)));
       }
@@ -430,7 +430,7 @@ function calcFrequencies() {
         f=Math.round((centerHz - (binWidthHz / 2)) + (hzPerPixel * e.pageX));
         f=f-(f%increment);
         document.getElementById("freq").value = (f / 1000.0).toFixed(3);
-        setFrequency(false);
+        setFrequencyW(false);
       }
       saveSettings();
       pressed=false;
@@ -519,7 +519,7 @@ function calcFrequencies() {
         clearInterval(counter);
     }
 
-    function setFrequency(waitToAutoscale = true)
+    function setFrequencyW(waitToAutoscale = true)
     {
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
         ws.send("F:" + (f / 1000.0).toFixed(3));
@@ -641,7 +641,7 @@ function calcFrequencies() {
     let zoomControlActive = false;
     function zoomMouseDown() {
         zoomControlActive = true;
-        //console.log("Zoom control is active");
+        console.log("Zoom control is active");
     }
 
     function zoomMouseUp() {
