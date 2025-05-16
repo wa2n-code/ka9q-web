@@ -1,53 +1,54 @@
 <div id="dialogOverlay"></div>
 <div id="optionsDialog">
-   <!-- Add the "X" button -->
-   <button id="closeXButton" title="Close" style="position: absolute;
+    <!-- Add the "X" button -->
+    <button id="closeXButton" title="Close" style="position: absolute;
 top: 5px; right: 5px; background: none; border: none; font-size: 16px;
 cursor: pointer;">&times;</button>
-
-   <form method="dialog">
-     <div>
-       <input type="checkbox" id="cksbFrequency" name="cksbFrequency"
+    <form method="dialog">
+       <div>
+          <input type="checkbox" id="cksbFrequency" name="cksbFrequency"
 title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
-       <label for="cksbFrequency">Switch Modes by Frequency</label>
-     </div>
-     <div>
-       <input type="checkbox" id="ckonlyAutoscaleButton"
-name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
-       <label for="ckonlyAutoscaleButton">Autoscale only with Autoscale
+          <label for="cksbFrequency">Switch Modes by Frequency</label>
+          <label
+for="colormap">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Colormap:</label>
+          <select name="colormap" id="colormap"
+onchange="spectrum.setColormap(this.value)" title="Colormap to use for
+             spectrum and waterfall">
+             <option value="0">turbo</option>
+             <option value="1">fosphorz</option>
+             <option value="2">viridis</option>
+             <option value="3">inferno</option>
+             <option value="4">magma</option>
+             <option value="5">jet</option>
+             <option value="6">binary</option>
+             <option value="7">blue</option>
+             <option value="8">short</option>
+             <option value="9">kiwi</option>
+          </select>
+       </div>
+       <div style="height:5px;font-size:5px;">&nbsp;</div>
+       <div>
+          <input type="checkbox" id="ckonlyAutoscaleButton"
+name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button
+is pressed">
+          <label for="ckonlyAutoscaleButton">Autoscale, manual only with
 button press</label>
-     </div>
-     <div style="height:5px;font-size:5px;">&nbsp;</div>
-     <div>
-       <label for="colormap">Colormap:</label>
-       <select name="colormap" id="colormap"
-onchange="spectrum.setColormap(this.value)" title="Colormap to use for waterfall">
-         <option value="0">turbo</option>
-         <option value="1">fosphorz</option>
-         <option value="2">viridis</option>
-         <option value="3">inferno</option>
-         <option value="4">magma</option>
-         <option value="5">jet</option>
-         <option value="6">binary</option>
-         <option value="7">blue</option>
-         <option value="8">short</option>
-         <option value="9" selected>kiwi</option> <!-- Set default to value 9 -->
-       </select>
-     </div>
-     <div style="font-size:13px;text-align:center; margin-top:5px">
-       <button id="fft_avg_down" onclick="spectrum.decrementAveraging()"
-title="Decrease FFT averaging">FFT AVG -</button>
-       <button id="fft_avg_up" onclick="spectrum.incrementAveraging()"
-title="Increase FFT averaging">FFT AVG +</button>
-       <button id="csv_out" onclick="dumpCSV()" title="Write info
-file">Write info file</button>
-
-       <!-- Add the toggle button for audio recording -->
-       <!--<button id="toggleRecording" onclick="toggleAudioRecording()"
-title="Start/Stop Audio Recording" style="margin-right:
-10px;">Record</button>
-       -->
-       <button type="button" id="closeButton">Close</button>
-     </div>
-   </form>
+       </div>
+       <div style="font-size:10px;margin-top:5px">
+          <button type="button" style=" font-size:10px; width:70px;
+height:25px"
+          id="closeBotton">Reserved</button>
+          <button id="fft_avg_down" style="font-size:10px; width:90px;
+height:25px" onclick="spectrum.decrementAveraging()" title="Decrease FFT
+averaging">FFT AVG -</button>
+          <button id="fft_avg_up" style="font-size:10px; width:90px;
+height:25px" onclick="spectrum.incrementAveraging()" title="Increase FFT
+averaging">FFT AVG +</button>
+          <button id="csv_out" style="font-size:10px; width:90px;
+height:25px" onclick="dumpCSV()" title="Write info file">Write info
+file</button>
+          <button type="button" style=" font-size:10px; width:70px;
+height:25px" id="closeButton">Close</button>
+       </div>
+    </form>
 </div>
