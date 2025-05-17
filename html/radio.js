@@ -526,7 +526,7 @@ function calcFrequencies() {
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
-        autoAutoscale(waitToAutoscale);      
+        autoAutoscale(0,waitToAutoscale);      
         saveSettings();
     }
 
@@ -542,7 +542,7 @@ function calcFrequencies() {
           }
       }
       ws.send("F:" + (freq / 1000).toFixed(3));
-      autoAutoscale(true);  // wait for autoscale
+      autoAutoscale(0,true);  // wait for autoscale
       saveSettings();
     }
 
@@ -590,7 +590,7 @@ function calcFrequencies() {
       ws.send("Z:+:"+document.getElementById('freq').value);
       console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
-      autoAutoscale(true);
+      autoAutoscale(15,true);
       saveSettings();
     }
 
@@ -598,7 +598,7 @@ function calcFrequencies() {
       ws.send("Z:-:"+document.getElementById('freq').value);
       console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
-      autoAutoscale(true);
+      autoAutoscale(15,true);
       saveSettings();
     }
 
@@ -617,7 +617,7 @@ function calcFrequencies() {
     function zoomcenter() {
       ws.send("Z:c");
       console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
-      autoAutoscale(true);
+      autoAutoscale(100,true);
       saveSettings();
     }
 
@@ -634,7 +634,7 @@ function calcFrequencies() {
     function zoomReleased()
     {
       zoomControlActive = false;
-      autoAutoscale(true);
+      autoAutoscale(0,true);
       //console.log("Zoom control is inactive");
     }
 
@@ -675,13 +675,14 @@ function updateRangeValues(){
 }
 
 function autoscaleButtonPush() {                      // autoscale button pressed, definitely do autoscale right away
-  spectrum.forceAutoscale(false);           
+  spectrum.forceAutoscale(100,false); 
+  console.log("autoscaleButtonPush() called with start value 100");
   pending_range_update = true;
 }
 
-function autoAutoscale(waitToAutoscale = false) {     // Autoscale commanded by a change other than autoscale button press
+function autoAutoscale(autoScaleCounterStart,waitToAutoscale = false) {     // Autoscale commanded by a change other than autoscale button press
   if (!onlyAutoscaleByButton) {
-    spectrum.forceAutoscale(waitToAutoscale);           
+    spectrum.forceAutoscale(autoScaleCounterStart,waitToAutoscale);           
     pending_range_update = true;
   }
 }

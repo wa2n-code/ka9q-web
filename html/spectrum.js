@@ -357,17 +357,19 @@ Spectrum.prototype.addData = function(data) {
         this.bin_copy=data;
         this.nbins=data.length;
 
-        // autoscale?
-        // newell 12/1/2024, 13:47:12
         // attempt to autoscale based on the min/max of the current spectrum
-        // or the current max hold (if it's turned on)
         // should pick reasonable scale in 5 dB increments
-        const maxAutoscaleWait = 2;
+        const maxAutoscaleWait = 20; // Do autoscale for maxAutoscaleWait iterations of data before settling on one value for min max
+
+        // this.autoscale = true; this.autoscaleWait = 100; // for testing, run it all the time with N0 as the min
+
         if (this.autoscale) {
             //if((this.autoscaleWait < maxAutoscaleWait) && !zoomControlActive) {  // Wait a maxAutoscaleWait cycles before you do the autoscale to allow spectrum to settle (agc?)
+            console.log("addData - this.autoscaleWait= ",this.autoscaleWait.toString());
             if(this.autoscaleWait < maxAutoscaleWait) {
-            this.autoscaleWait++;
-                console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive);
+                this.autoscaleWait++;
+                console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive,"this.minimum= ",this.minimum," this.maximum= ",this.maximum);
+                this.drawSpectrumWaterfall(data,true);
                 return;
             }
             else
@@ -376,17 +378,24 @@ Spectrum.prototype.addData = function(data) {
             {
                 this.autoscaleWait = 0; // Reset the flags and counters, we're going to autoscale now!
                 this.autoscale = false;
+                this.drawSpectrumWaterfall(data,true);
             }
+        }
+        this.drawSpectrumWaterfall(data,false);  // true means get new min max
+    }
+}
 
-            this.measureMinMaxSdev(data);
-            this.setRange(this.minimum,this.maximum, true,Math.round(this.std_dev * 1.5));   // since I added stde   v to the min, I need to adjust the waterfall min by that amount
+Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax) 
+{
+        if(getNewMinMax){
+            this.minimum = Math.round(noise_density_audio) + 17;
+            this.maximum = this.wholeSpectrumMax = Math.round(Math.max(...this.bin_copy));
+            this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
         }
         this.drawSpectrum(data);
         this.addWaterfallRow(data);
         this.resize();
-    }
 }
-
 Spectrum.prototype.measureMinMaxSdev = function(data) {
             var increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
@@ -458,17 +467,17 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
             // data_min is the minimum value in the range of bins we're looking at (400 bins), not smoothed, just the minimum value for this instant in time
 
             // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
-            var wholeSpectrumMax = Math.max(...this.bin_copy);      // We need to only do this once at the start or end
+            this.wholeSpectrumMax = Math.max(...this.bin_copy);      // We need to only do this once at the start or end
             
             //console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
-            if (!isNaN(wholeSpectrumMax))
+            if (!isNaN(this.wholeSpectrumMax))
             {
-                //console.log("wholeSpectrumMax is good");
-                if(wholeSpectrumMax > data_max)
+                //console.log("this.wholeSpectrumMax is good");
+                if(this.wholeSpectrumMax > data_max)
                 {
-                    //console.log("wholeSpectrumMax is bigger, use it");
-                    data_max = wholeSpectrumMax;    
+                    //console.log("this.wholeSpectrumMax is bigger, use it");
+                    data_max = this.wholeSpectrumMax;    
                 }
             }
 
@@ -480,13 +489,14 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
             //var minimum = Math.floor(data_min / increment) * increment - increment + Math.round(std_dev/2.0);
 
             // With a disconnected antenna on 10m with just "radio noise", the data_min varies less than data_stat_low, so use that for the min and bias it with the sdev
-            this.minimum = Math.round(data_min) - Math.round(this.std_dev/3.0) - 3;
+            //this.minimum = Math.round(data_min) - Math.round(this.std_dev/3.0) - 3; // local bias here wdr
+            this.minimum = data_min;    // don't bias it here, bias in the setRange function
             this.maximum = increment * Math.ceil(data_max / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
             // this.maximum = -80;  // just for by eye testing, need to remove this wdr
             const minimum_spectral_gain = -100;
             if(this.maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 this.maximum = minimum_spectral_gain;
-            console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum, " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
+            console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum.toFixed(1), " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
 }
 
 Spectrum.prototype.updateSpectrumRatio = function() {
@@ -575,7 +585,7 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     else
         this.graticuleIncrement = 5;
 
-    //console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," wf min adjust: ",wf_min_adjust," graticuleIncrement: ",this.graticuleIncrement);   
+    console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," wf min adjust: ",wf_min_adjust," graticuleIncrement: ",this.graticuleIncrement);   
 
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // min_db + stdev of the min? 
@@ -720,10 +730,10 @@ Spectrum.prototype.toggleFullscreen = function() {
     }
 }
 
-Spectrum.prototype.forceAutoscale = function(waitToAutoscale = true) {
+Spectrum.prototype.forceAutoscale = function(autoScaleCounterStart,waitToAutoscale = true) {
     this.autoscale = true;
     if(waitToAutoscale)
-        this.autoscaleWait = 0; // if it's zero, then we're gonna wait
+        this.autoscaleWait = autoScaleCounterStart; // We're gonna run live up to maxAutoscaleWait
     else
         this.autoscaleWait = 100;  // not gonna wait
     console.log("forceAutoscale(), autoscaleWait set to ", this.autoscaleWait," waitToAutoscale= ", waitToAutoscale);
