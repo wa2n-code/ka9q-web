@@ -395,13 +395,14 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
             var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
             //console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
 
+            var computeMean = false;
             var data_min = 0;   // Initialize the min and max to the first bin in the range to avoid a divide by zero
             var data_max = 0;
             var data_peak = 0;
-            var data_avg_low = 0;
+            var data_stat_low = 0;
 
-            // Find the mean value of the baseline
-            var min_mean = Infinity;
+            // Find the baseline and it's standard deviation
+            var min_baseline = Infinity;
             var min_mean_index = -1;
             this.std_dev = 0;
             for (var i = lowBin; i < highBin; i++) {
@@ -409,47 +410,55 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
                     data[i - 10], data[i - 9], data[i - 8], data[i - 7], data[i - 6],
                     data[i - 5], data[i - 4], data[i - 3], data[i - 2], data[i - 1],
                     data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10]];
-                //data_avg_low = values.reduce((a, b) => a + b, 0) / values.length;   // Average +/- N bins
-                let sorted = values.slice().sort((a, b) => a - b);  // Compute the median instead of the average
-                let mid = Math.floor(sorted.length / 2);
-                let median;
-                if (sorted.length % 2 === 0) {
-                    median = (sorted[mid - 1] + sorted[mid]) / 2;
-                } else {
-                    median = sorted[mid];
+                
+                if(computeMean)
+                    data_stat_low = values.reduce((a, b) => a + b, 0) / values.length;   // Average +/- N bins for the mean
+                else {
+                    let sorted = values.slice().sort((a, b) => a - b);  // Compute the median instead of the average
+                    let mid = Math.floor(sorted.length / 2);
+                    let median;
+                     if (sorted.length % 2 === 0) {
+                        median = (sorted[mid - 1] + sorted[mid]) / 2;
+                    } else {
+                        median = sorted[mid];
+                    }
+                    data_stat_low = median;
+                }   
+                data_peak = data[i];            // keep the peaks
+                if (data_stat_low < min_baseline) { // find the minimum baseline value for this series of bins (20 bins) 
+                    min_baseline = data_stat_low;   // If lower than the previous min, set it
+                    min_mean_index = i;         // Save the index of the bin with the minimum value
                 }
-                data_avg_low = median;
-                data_peak = data[i];                                            // keep the peaks
-
-                if (data_avg_low < min_mean) {
-                    min_mean = data_avg_low;
-                    min_mean_index = i;
-                }
-
                 if (i == lowBin) {
-                    data_max = data_peak;
-                    data_min = 0; //data_avg_low;;
+                    data_max = data_peak;       // First bin in the range gets the max value
+                    data_min = 0; //data_stat_low;;
                 } else {
-                    data_min = Math.min(data_min, data_avg_low);
-                    data_max = Math.max(data_max, data_peak);
+                    data_min = Math.min(data_min, data_stat_low);   // Find the minimum value in the range around the bins
+                    data_max = Math.max(data_max, data_peak);       // Find the maximum value in the range around the bins
                 }
             }
-            // Find the standard deviation at the minimum baseline bin we've identified doing the mean above
+
+            // We now have the min, max and statistic representing baseline in the range of bins we're looking at across the spectrum (400 bins)
+
+            // Find the standard deviation at 20 bins around the minimum baseline bin that we've identified above
             if (min_mean_index !== -1) {
                 let values = [
                     data[min_mean_index - 10], data[min_mean_index - 9], data[min_mean_index - 8], data[min_mean_index - 7], data[min_mean_index - 6],
                     data[min_mean_index - 5], data[min_mean_index - 4], data[min_mean_index - 3], data[min_mean_index - 2], data[min_mean_index - 1],
                     data[min_mean_index], data[min_mean_index + 1], data[min_mean_index + 2], data[min_mean_index + 3], data[min_mean_index + 5],
                     data[min_mean_index+6], data[min_mean_index + 7], data[min_mean_index + 8], data[min_mean_index + 9], data[min_mean_index + 10]];
-                let mean = min_mean;
+                let mean = min_baseline;
                 let variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length;
                 this.std_dev = Math.sqrt(variance);
 
                 //console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
             }
 
+            // data_stat_low is a statistically computed level for the baseline over 400 bins, the smoothed baseline for this instant in time
+            // data_min is the minimum value in the range of bins we're looking at (400 bins), not smoothed, just the minimum value for this instant in time
+
             // Find the max along the whole spectrum, outside the min_bin to max_bin range of data
-            var wholeSpectrumMax = Math.max(...this.bin_copy);
+            var wholeSpectrumMax = Math.max(...this.bin_copy);      // We need to only do this once at the start or end
             
             //console.log("data_min=", data_min.toFixed(1), " data_max=", data_max.toFixed(1),"wholeSpectrumMax=", wholeSpectrumMax.toFixed(1));
 
@@ -459,20 +468,25 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
                 if(wholeSpectrumMax > data_max)
                 {
                     //console.log("wholeSpectrumMax is bigger, use it");
-                    data_max = wholeSpectrumMax;
+                    data_max = wholeSpectrumMax;    
                 }
             }
+
+            // Now we have a data_max for the whole spectrum, a data_min, and a data_stat_low (median baselne) for the range of bins we're looking at around the tuned frequency
 
             // Update the min / max
 
             //var minimum = Math.floor(data_min / increment) * increment - increment + (Math.abs(std_dev - 5) < Math.abs(std_dev - 10) ? 5 : 10); //If std_dev is closer to 5, add 5; if closer to 10, add 10.
             //var minimum = Math.floor(data_min / increment) * increment - increment + Math.round(std_dev/2.0);
-            this.minimum = Math.round(data_min) - Math.round(this.std_dev/2.0);
+
+            // With a disconnected antenna on 10m with just "radio noise", the data_min varies less than data_stat_low, so use that for the min and bias it with the sdev
+            this.minimum = Math.round(data_min) - Math.round(this.std_dev/3.0) - 3;
             this.maximum = increment * Math.ceil(data_max / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
+            // this.maximum = -80;  // just for by eye testing, need to remove this wdr
             const minimum_spectral_gain = -100;
             if(this.maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 this.maximum = minimum_spectral_gain;
-            console.log("data_min =",data_min.toFixed(1)," minimum=", this.minimum, " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
+            console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum, " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
 }
 
 Spectrum.prototype.updateSpectrumRatio = function() {
@@ -561,7 +575,7 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     else
         this.graticuleIncrement = 5;
 
-    console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," wf min adjust: ",wf_min_adjust," graticuleIncrement: ",this.graticuleIncrement);   
+    //console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," wf min adjust: ",wf_min_adjust," graticuleIncrement: ",this.graticuleIncrement);   
 
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // min_db + stdev of the min? 
