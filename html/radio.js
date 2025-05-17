@@ -531,9 +531,9 @@ function calcFrequencies() {
         } else {
           waitToAutoscale = true;  // Autoscale if we are more than 100 kHz away
           if(frequencyDifference > 3000000) 
-            asCount = 10; // set the autoscale counter to 10 for frequencies greater than 3 MHz
+            asCount = 0; // set the autoscale counter to 10 for frequencies greater than 3 MHz
           else
-            asCount = 17; // set the autoscale counter to 17 between 100 kHz and 3 MHz
+            asCount = 3; // set the autoscale counter to 17 between 100 kHz and 3 MHz
         }
         console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
         ws.send("F:" + (f / 1000.0).toFixed(3));
@@ -604,7 +604,8 @@ function calcFrequencies() {
       ws.send("Z:+:"+document.getElementById('freq').value);
       console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
-      autoAutoscale(15,true);
+      //autoAutoscale(15,true);
+      autoAutoscale(2,true);
       saveSettings();
     }
 
@@ -612,7 +613,8 @@ function calcFrequencies() {
       ws.send("Z:-:"+document.getElementById('freq').value);
       console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
-      autoAutoscale(15,true);
+      // autoAutoscale(15,true); // 15 for n0
+      autoAutoscale(2,true);
       saveSettings();
     }
 

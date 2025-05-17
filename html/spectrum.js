@@ -359,7 +359,7 @@ Spectrum.prototype.addData = function(data) {
 
         // attempt to autoscale based on the min/max of the current spectrum
         // should pick reasonable scale in 5 dB increments
-        const maxAutoscaleWait = 20; // Do autoscale for maxAutoscaleWait iterations of data before settling on one value for min max
+        const maxAutoscaleWait = 5; // Do autoscale for maxAutoscaleWait iterations of data before settling on one value for min max
 
         // this.autoscale = true; this.autoscaleWait = 100; // for testing, run it all the time with N0 as the min
 
@@ -387,10 +387,17 @@ Spectrum.prototype.addData = function(data) {
 
 Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax) 
 {
+        const useN0 = false;
         if(getNewMinMax){
-            this.minimum = Math.round(noise_density_audio) + 17;
-            this.maximum = this.wholeSpectrumMax = Math.round(Math.max(...this.bin_copy));
-            this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
+            if(useN0) {
+                this.minimum = Math.round(noise_density_audio) + 17;
+                this.maximum = this.wholeSpectrumMax = Math.round(Math.max(...this.bin_copy));
+                this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
+            }
+            else{ 
+                this.measureMinMaxSdev(data);
+                this.setRange(Math.round(this.minimum) -10, this.maximum, true, 12); // Bias max up so peak isn't touching top of graph     
+            }
         }
         this.drawSpectrum(data);
         this.addWaterfallRow(data);
