@@ -521,12 +521,26 @@ function calcFrequencies() {
 
     function setFrequencyW(waitToAutoscale = true)
     {
+        var asCount = 0;
+        // need to see how far away we'll move in frequency to set the waitToAutoscale value wdr
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
+        let frequencyDifference = Math.abs(spectrum.frequency - f)
+        if(frequencyDifference < 100000)
+        {
+          waitToAutoscale = false;  // No autoscale if we are within 100 kHz  
+        } else {
+          waitToAutoscale = true;  // Autoscale if we are more than 100 kHz away
+          if(frequencyDifference > 3000000) 
+            asCount = 10; // set the autoscale counter to 10 for frequencies greater than 3 MHz
+          else
+            asCount = 17; // set the autoscale counter to 17 between 100 kHz and 3 MHz
+        }
+        console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
         ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
-        autoAutoscale(0,waitToAutoscale);      
+        autoAutoscale(asCount,waitToAutoscale);      
         saveSettings();
     }
 
