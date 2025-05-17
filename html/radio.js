@@ -692,7 +692,7 @@ function updateRangeValues(){
 
 function autoscaleButtonPush() {                      // autoscale button pressed, definitely do autoscale right away
   spectrum.forceAutoscale(100,false); 
-  console.log("autoscaleButtonPush() called with start value 100");
+  //console.log("autoscaleButtonPush() called with start value 100");
   pending_range_update = true;
 }
 
