@@ -1,50 +1,69 @@
 <div id="dialogOverlay"></div>
 <div id="optionsDialog">
-    <!-- Add the "X" button -->
-    <button id="closeXButton" title="Close" style="position: absolute;top: 0px; right: 5px; background: none; border: none; font-size: 22px;cursor: pointer;">&times;</button>
-    <form method="dialog">
-       <div>
-          <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
-          <label for="cksbFrequency">Switch Modes by Frequency</label>
-       </div>
-       <div style="margin-top: 5px;">
-          <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
-          <label for="ckonlyAutoscaleButton">Autoscale, manual only with button press</label>
-       </div>
-       <div style="margin-top: 5px; display: flex; align-items: center; gap: 16px;">
-          <div>
-            <label for="colormap">Colormap:</label>
-            <select name="colormap" id="colormap" onchange="spectrum.setColormap(this.value)" title="Colormap to use for spectrum and waterfall">
-               <option value="0">turbo</option>
-               <option value="1">fosphorz</option>
-               <option value="2">viridis</option>
-               <option value="3">inferno</option>
-               <option value="4">magma</option>
-               <option value="5">jet</option>
-               <option value="6">binary</option>
-               <option value="7">blue</option>
-               <option value="8">short</option>
-               <option value="9">kiwi</option>
-            </select>
-          </div>
-          <div>
-            <label for="waterfallSkipInput">Waterfall skip lines (0-3):</label>
-            <input
-               type="number"
-               id="waterfallSkipInput"
-               min="0"
-               max="3"
-               value="0"
-               style="width: 40px;"
-               title="Increase this value to slow the waterfall by skipping lines. 0 = no skipping, 3 = slowest."
-               onchange="setSkipWaterfallLines(this.value)">
-          </div>
-       </div>
-       <div style="font-size:10px;margin-top:5px">
-          <button type="button" style="font-size:10px; width:70px;height:25px" id="closeBotton">Reserved</button>
-          <button id="fft_avg_down" style="font-size:10px; width:90px;height:25px" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button>
-          <button id="fft_avg_up" style="font-size:10px; width:90px;height:25px" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
-          <button id="csv_out" style="font-size:10px; width:90px;height:25px" onclick="dumpCSV()" title="Write info file">Write info file</button>
-       </div>
-    </form>
+     <!-- Add the "X" button -->
+     <button id="closeXButton" title="Close" style="position:
+absolute;top: 0px; right: 5px; background: none; border: none;
+font-size: 22px;cursor: pointer;">&times;</button>
+     <form method="dialog">
+        <div>
+           <input type="checkbox" id="cksbFrequency"
+name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or >
+than 10 MHz">
+           <label for="cksbFrequency">Switch Modes by Frequency</label>
+        </div>
+        <div style="margin-top: 5px;">
+           <input type="checkbox" id="ckonlyAutoscaleButton"
+name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button
+is pressed">
+           <label for="ckonlyAutoscaleButton">Autoscale, manual only
+with button press</label>
+        </div>
+        <div style="margin-top: 5px; display: flex; align-items: center;
+gap: 16px;">
+           <div>
+             <label for="colormap">Colormap:</label>
+             <select name="colormap" id="colormap"
+onchange="spectrum.setColormap(this.value)" title="Colormap to use for
+spectrum and waterfall">
+                <option value="0">turbo</option>
+                <option value="1">fosphorz</option>
+                <option value="2">viridis</option>
+                <option value="3">inferno</option>
+                <option value="4">magma</option>
+                <option value="5">jet</option>
+                <option value="6">binary</option>
+                <option value="7">blue</option>
+                <option value="8">short</option>
+                <option value="9">kiwi</option>
+             </select>
+           </div>
+           <div>
+             <label for="waterfallSkipInput">Waterfall skip lines
+(0-3):</label>
+             <input
+                type="number"
+                id="waterfallSkipInput"
+                min="0"
+                max="3"
+                value="0"
+                style="width: 25px;"
+                title="Increase this value to slow the waterfall by
+skipping lines. 0 = no skipping, 3 = slowest."
+                onchange="setSkipWaterfallLines(this.value)">
+           </div>
+        </div>
+        <div style="font-size:10px;margin-top:5px">
+           <button type="button" style="font-size:10px;
+width:90px;height:25px" id="closeBotton">Reserved</button>
+           <button id="fft_avg_down" style="font-size:10px;
+width:90px;height:25px" onclick="spectrum.decrementAveraging()"
+title="Decrease FFT averaging">FFT AVG -</button>
+           <button id="fft_avg_up" style="font-size:10px;
+width:90px;height:25px" onclick="spectrum.incrementAveraging()"
+title="Increase FFT averaging">FFT AVG +</button>
+           <button id="csv_out" style="font-size:10px;
+width:90px;height:25px" onclick="dumpCSV()" title="Write info
+file">Write info file</button>
+        </div>
+     </form>
 </div>
