@@ -508,7 +508,7 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
             this.minimum = data_min;    // Pick the data_min, which is raw min over 400 bins, don't bias it here, bias in drawSpectrumWaterfall
             this.maximum = increment * Math.ceil(data_max / increment) + increment; // was using the peak inside the bin high low range, now use all visible spectral data
             // this.maximum = -80;  // just for by eye testing, need to remove this wdr
-            const minimum_spectral_gain = -100;
+            const minimum_spectral_gain = -80;
             if(this.maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 this.maximum = minimum_spectral_gain;
             //console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum.toFixed(1), " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
