@@ -300,20 +300,29 @@
       <script>
          // Load the dialog box content from optionsDialog.html
          fetch('optionsDialog.html')
-           .then(response => response.text())
-           .then(data => {
-             // Insert the fetched content into the placeholder
-             document.getElementById('dialogPlaceholder').innerHTML = data;
-         
-             // Initialize event listeners after loading the dialog content
-             initializeDialogEventListeners();
-         
-             // Call init AFTER the dialog content is loaded,  window.addEventListener('load', init, false) was removed from radio.js to be sure this is called after the dialog is loaded
-             init();
-           })
-           .catch(error => {
-             console.error('Error loading optionsDialog.html:', error);
-           });
+            .then(response => response.text())
+            .then(data => {
+               document.getElementById('dialogPlaceholder').innerHTML = data;
+
+               // Add the X button handler here
+               var closeXButton = document.getElementById('closeXButton');
+               if (closeXButton) {
+                   closeXButton.onclick = function() {
+                     document.getElementById('optionsDialog').classList.remove('open');
+                     document.getElementById('dialogOverlay').classList.remove('open');
+                  };
+               }
+               // Initialize dialog event listeners
+               initializeDialogEventListeners();
+
+               // Now that all DOM is loaded, call init()
+               if (typeof init === "function") {
+               init();
+               }
+            })
+            .catch(error => {
+               console.error('Error loading optionsDialog.html:', error);
+            });
       </script>
       <!--<input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
          <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Show live</label>

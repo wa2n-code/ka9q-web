@@ -1194,10 +1194,10 @@ function initializeDialogEventListeners() {
   const optionsButton = document.getElementById('OptionsButton'); // The launch button
   const optionsDialog = document.getElementById('optionsDialog'); // The dialog box
   const dialogOverlay = document.getElementById('dialogOverlay'); // The overlay
-  const closeButtons = [document.getElementById('closeButton'), document.getElementById('closeXButton')]; // Both close buttons
+  const closeButton = document.getElementById('closeXButton'); // The X close button
 
   // Ensure the elements exist before attaching event listeners
-  if (!optionsButton || !optionsDialog || !dialogOverlay || closeButtons.some(button => button === null)) {
+  if (!optionsButton || !optionsDialog || !dialogOverlay || !closeButton) {
     console.error('One or more elements are missing. Ensure optionsDialog.html is loaded correctly.');
     return;
   }
@@ -1218,24 +1218,20 @@ function initializeDialogEventListeners() {
     dialogOverlay.classList.add('open');
   });
 
-  // Attach the same event handler to both close buttons
-  closeButtons.forEach(button => {
-    button.addEventListener('click', function () {
-      optionsDialog.classList.remove('open');
-      dialogOverlay.classList.remove('open');
-    });
+  // Attach the event handler to the close button
+  closeButton.addEventListener('click', function () {
+    optionsDialog.classList.remove('open');
+    dialogOverlay.classList.remove('open');
   });
 
   // Add event listeners to the checkboxes
   document.getElementById('cksbFrequency').addEventListener('change', function () {
-    //console.log('cksbFrequency:', this.checked);
     switchModesByFrequency = this.checked;
     saveSettings();
   });
 
   document.getElementById('ckonlyAutoscaleButton').addEventListener('change', function () {
-    //console.log('ckonlyAutoscaleButton:', this.checked);
-    onlyAutoscaleByButton = this.checked; // Only autoscale when the autoscale button is pressed
+    onlyAutoscaleByButton = this.checked;
     saveSettings();
   });
 

@@ -376,7 +376,7 @@ Spectrum.prototype.addData = function(data) {
             //console.log("addData - this.autoscaleWait= ",this.autoscaleWait.toString());
             if(this.autoscaleWait < maxAutoscaleWait) {
                 this.autoscaleWait++;
-                console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive,"this.minimum= ",this.minimum.toFixed(1)," this.maximum= ",this.maximum.toFixed(1));
+                console.log("autoscaleWait ", this.autoscaleWait.toString()," zoomControlActive=", zoomControlActive," this.minimum= ", (typeof this.minimum === "number" ? this.minimum.toFixed(1) : this.minimum),  " this.maximum= ", (typeof this.maximum === "number" ? this.maximum.toFixed(1) : this.maximum));
                 this.drawSpectrumWaterfall(data,true);
                 return;
             }
