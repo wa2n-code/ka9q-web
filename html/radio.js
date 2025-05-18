@@ -52,6 +52,9 @@
       var switchModesByFrequency = false;
       var onlyAutoscaleByButton = false;
 
+      /** @type {number} */
+      window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
+
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -1360,4 +1363,9 @@ async function fetchZoomTableSize() {
         console.error("Error fetching zoom table size:", error);
         return null; // Return null if there was an error
     }
+}
+
+function setSkipWaterfallLines(val) {
+  val = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
+  window.skipWaterfallLines = val;
 }

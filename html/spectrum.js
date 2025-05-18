@@ -55,26 +55,34 @@ Spectrum.prototype.rowToImageData = function(bins) {
     }
 }
 
+let lineDecimation = 0;
 Spectrum.prototype.addWaterfallRow = function(bins) {
-    // Shift waterfall 1 row down
-    this.ctx_wf.drawImage(this.ctx_wf.canvas,
-        0, 0, this.wf_size, this.wf_rows - 1,
-        0, 1, this.wf_size, this.wf_rows - 1);
+    // window.skipWaterfallLines should be 0 (no skip), 1 (skip 1), 2 (skip 2), or 3 (skip 3)
+    // Only draw a new row if lineDecimation is 0
+    let skip = (window.skipWaterfallLines > 0) && (lineDecimation++ % (window.skipWaterfallLines + 1) !== 0);
+    if (!skip) {
+        //console.log("Drawing row at lineDecimation =", lineDecimation, "skipWaterfallLines =", window.skipWaterfallLines);
+        // Shift waterfall 1 row down
+        this.ctx_wf.drawImage(this.ctx_wf.canvas,
+            0, 0, this.wf_size, this.wf_rows - 1,
+            0, 1, this.wf_size, this.wf_rows - 1);
 
-    // Draw new line on waterfall canvas
-    this.rowToImageData(bins);
-    this.ctx_wf.putImageData(this.imagedata, 0, 0);
+        // Draw new line on waterfall canvas
+        this.rowToImageData(bins);
+        this.ctx_wf.putImageData(this.imagedata, 0, 0);
+    }
 
+    // Always copy the waterfall to the main canvas
     var width = this.ctx.canvas.width;
     var height = this.ctx.canvas.height;
-
-    // Copy scaled FFT canvas to screen. Only copy the number of rows that will
-    // fit in waterfall area to avoid vertical scaling.
     this.ctx.imageSmoothingEnabled = false;
     var rows = Math.min(this.wf_rows, height - this.spectrumHeight);
     this.ctx.drawImage(this.ctx_wf.canvas,
         0, 0, this.wf_size, rows,
         0, this.spectrumHeight, width, height - this.spectrumHeight);
+
+    // Reset lineDecimation to avoid overflow
+    if (lineDecimation > 1000000) lineDecimation = 0;
 }
 
 Spectrum.prototype.drawFFT = function(bins,color) {
