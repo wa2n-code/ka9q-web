@@ -538,7 +538,7 @@ function calcFrequencies() {
           else
             asCount = 3; // set the autoscale counter to 17 between 100 kHz and 3 MHz
         }
-        console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
+        //console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
         ws.send("F:" + (f / 1000.0).toFixed(3));
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
@@ -592,7 +592,7 @@ function calcFrequencies() {
           flushingTime: 250
       });
   
-      console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
+      //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
   }
 
@@ -605,7 +605,7 @@ function calcFrequencies() {
   
     function zoomin() {
       ws.send("Z:+:"+document.getElementById('freq').value);
-      console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
+      //console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
       //autoAutoscale(15,true);
       autoAutoscale(100,true);
@@ -624,18 +624,18 @@ function calcFrequencies() {
     function bumpAGCWithFM() {
       const originalMode = document.getElementById('mode').value; // Get the currently selected mode
       ws.send("M:fm"); // Switch to FM mode
-      console.log("Switched to FM mode");
+      //console.log("Switched to FM mode");
     
       // Wait for 500 ms before switching back to the original mode
       setTimeout(() => {
         ws.send("M:" + originalMode); // Switch back to the original mode
-        console.log("Switched back to original mode: " + originalMode);
+        //console.log("Switched back to original mode: " + originalMode);
       }, 100); // 100 ms delay
     }
 
     function zoomcenter() {
       ws.send("Z:c");
-      console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
+      //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
       saveSettings();
     }
@@ -646,7 +646,7 @@ function calcFrequencies() {
     function setZoom() {
       const v = document.getElementById("zoom_level").valueAsNumber;
       ws.send(`Z:${v}`);
-      console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
+      //console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
       //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
         autoAutoscale(100,false); 
       saveSettings();
@@ -662,7 +662,7 @@ function calcFrequencies() {
     let zoomControlActive = false;
     function zoomMouseDown() {
         zoomControlActive = true;
-        console.log("Zoom control is active");
+        //console.log("Zoom control is active");
     }
 
     function zoomMouseUp() {
@@ -823,12 +823,8 @@ function update_stats() {
  
   computeSUnits(power,spectrum.maxHold);
   // Update the signal bar meter and get the noise power, since it computes it
-var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
+  var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
-
-  // newell 12/1/2024, 19:16:35
-  // ugly hack to get the stats on the webpage. Formatting is terrible, but
-  // perfect is the enemy of good, right?
   document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
   document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
@@ -846,8 +842,7 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
- 
-   document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${bw.toFixed(0)} Hz BW`;
+  document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${bw.toFixed(0)} Hz BW`;
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
@@ -856,9 +851,8 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
   document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
   if (webpage_version != webserver_version)
     document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
-
-  document.getElementById("cursor_data").innerHTML = "Tune: " + level_to_string(spectrum.frequency); // clear the cursor data if it's not active
-  
+  let bin = spectrum.hz_to_bin(spectrum.frequency);
+  document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toString(); 
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
@@ -872,27 +866,7 @@ var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
     // print units in 3rd column
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
-
-  
   return;
-  /*
-  // newell 12/1/2024, 19:10:56
-  // hack to change the title when the block since last poll is changing
-  // Could this be connected to the vertical 'bouncing' that is sometimes
-  // seen on the spectrum? My current theory is that radiod integrates bin
-  // energy between the forward fft bins and the decimated spec demod bins,
-  // then scales that by number of blocks since the last time the demod was
-  // polled. But if the polling rate varies, the scaling changes and the bin
-  // amplitudes appear to bounce.
-  // Hacking radiod to not integrate and not scale seems to make the display
-  // more stable, even when the blocks_since_last_poll value is changing.
-  // But I don't know if disabling the integration is sound practice.
-  if ((last_poll > 0) && (last_poll != blocks_since_last_poll))
-    document.getElementById('heading').innerHTML = 'Bouncing';
-  else
-    document.getElementById('heading').innerHTML = 'G0ORX Web SDR + ka9q-radio';
-  last_poll = blocks_since_last_poll;
-  */
 }
 
 async function getVersion() {
@@ -1036,19 +1010,6 @@ function dumpHTML() {
   link.click();
 }
 
-async function uploadBug() {
-  if (0 == document.getElementById("note_text").value.length) {
-    if (false == window.confirm("Are you sure you want to upload without any notes in the text box?")) {
-      return;
-    }
-  }
-  // create a json object and push it to my server
-  const response = await fetch("https://www.n5tnl.com/ka9q-web/up/bug", {
-    method: "POST",
-    body: JSON.stringify({csv: buildCSV(), screenshot: buildScreenshot()}),
-  });
-}
-
 function saveSettings() {
   localStorage.setItem("tune_hz", spectrum.frequency.toString());
   localStorage.setItem("zoom_level", document.getElementById("zoom_level").valueAsNumber);
@@ -1116,7 +1077,6 @@ function setDefaultSettings() {
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
   document.getElementById("ckonlyAutoscaleButton").checked = false;
-
 }
 
 function loadSettings() {
@@ -1286,7 +1246,6 @@ function setPlayerVolume(value) {
 }
 
 let isRecording = false;
-
 function toggleAudioRecording() {
     if (!player) {
         console.error("Player object is not initialized.");

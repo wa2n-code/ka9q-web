@@ -142,7 +142,7 @@ PCMPlayer.prototype.flush = function() {
 };
 
 PCMPlayer.prototype.destroy = function() {
-    console.log("destroy PCMPlayer");
+    //console.log("destroy PCMPlayer");
     if (this.audioCtx && this.scriptNode) {
         this.scriptNode.disconnect();
         this.scriptNode = null;
@@ -177,7 +177,7 @@ PCMPlayer.prototype.startRecording = function() {
 
     // Start recording
     this.mediaRecorder.start();
-    console.log("Recording started...");
+    //console.log("Recording started...");
 };
 
 PCMPlayer.prototype.stopRecording = function(frequency, mode) {
@@ -188,26 +188,26 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
 
     // Stop the MediaRecorder
     this.mediaRecorder.stop();
-    console.log("Recording stopped...");
+    //console.log("Recording stopped...");
 
     // Save the recorded audio when recording stops
     this.mediaRecorder.onstop = () => {
-        console.log("MediaRecorder onstop event triggered.");
+        //console.log("MediaRecorder onstop event triggered.");
 
         const audioBlob = new Blob(this.recordedChunks, { type: 'audio/webm' });
-        console.log("Audio Blob created:", audioBlob);
+        //console.log("Audio Blob created:", audioBlob);
 
         // Decode the audio Blob into raw PCM data
         const reader = new FileReader();
         reader.onload = () => {
-            console.log("FileReader onload event triggered.");
+            //console.log("FileReader onload event triggered.");
 
             const arrayBuffer = reader.result;
 
             // Use AudioContext to decode the audio data
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioCtx.decodeAudioData(arrayBuffer, (audioBuffer) => {
-                console.log("Audio data decoded successfully.");
+                //console.log("Audio data decoded successfully.");
 
                 // Resample the audio to the desired sample rate
                 const targetSampleRate = this.option.sampleRate; // Use the player's sample rate (e.g., 12 kHz or 24 kHz)
@@ -223,7 +223,7 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
                 source.start(0);
 
                 offlineCtx.startRendering().then((resampledBuffer) => {
-                    console.log("Audio resampled to:", targetSampleRate);
+                    //console.log("Audio resampled to:", targetSampleRate);
 
                     // Extract PCM data from the resampled audio buffer
                     const numOfChannels = resampledBuffer.numberOfChannels;
@@ -235,11 +235,11 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
 
                     // Encode the PCM data into a valid .wav file
                     const wavBuffer = this.encodeWAV(pcmData, targetSampleRate, numOfChannels);
-                    console.log("WAV buffer created at sample rate:", targetSampleRate, "channels:", numOfChannels);
+                    //console.log("WAV buffer created at sample rate:", targetSampleRate, "channels:", numOfChannels);
 
                     // Create a Blob for the .wav file
                     const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-                    console.log("WAV Blob created:", wavBlob);
+                    //console.log("WAV Blob created:", wavBlob);
 
                     // Generate the filename in 24-hour Zulu format with underscores
                     const now = new Date();
@@ -259,12 +259,12 @@ PCMPlayer.prototype.stopRecording = function(frequency, mode) {
                     a.download = filename; // Use the generated filename
                     document.body.appendChild(a);
                     a.click();
-                    console.log(`Download link triggered for file: ${filename}`);
+                    //console.log(`Download link triggered for file: ${filename}`);
 
                     // Clean up
                     URL.revokeObjectURL(url);
                     document.body.removeChild(a);
-                    console.log("Temporary download link removed.");
+                    //console.log("Temporary download link removed.");
                 });
             }, (error) => {
                 console.error("Error decoding audio data:", error);

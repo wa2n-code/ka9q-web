@@ -376,12 +376,12 @@ Spectrum.prototype.addData = function(data) {
             //console.log("addData - this.autoscaleWait= ",this.autoscaleWait.toString());
             if(this.autoscaleWait < maxAutoscaleWait) {
                 this.autoscaleWait++;
-                console.log("autoscaleWait ", this.autoscaleWait.toString()," zoomControlActive=", zoomControlActive," this.minimum= ", (typeof this.minimum === "number" ? this.minimum.toFixed(1) : this.minimum),  " this.maximum= ", (typeof this.maximum === "number" ? this.maximum.toFixed(1) : this.maximum));
+                //console.log("autoscaleWait ", this.autoscaleWait.toString()," zoomControlActive=", zoomControlActive," this.minimum= ", (typeof this.minimum === "number" ? this.minimum.toFixed(1) : this.minimum),  " this.maximum= ", (typeof this.maximum === "number" ? this.maximum.toFixed(1) : this.maximum));
                 this.drawSpectrumWaterfall(data,true);
                 return;
             }
             else
-                console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive);
+                //console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive);
             if(this.autoscaleWait >= maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
             {
                 this.autoscaleWait = 0; // Reset the flags and counters, we're going to autoscale now!
