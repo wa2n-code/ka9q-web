@@ -655,7 +655,7 @@ function calcFrequencies() {
     function zoomReleased()
     {
       zoomControlActive = false;
-      //autoAutoscale(0,true);  // we're letting it autoscale all the time, don't need to autoscale here
+      autoAutoscale(0,true);  // we're letting it autoscale all the time, but run it a few times more
       //console.log("Zoom control is inactive");
     }
 
