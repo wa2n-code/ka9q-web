@@ -646,14 +646,16 @@ function calcFrequencies() {
     function setZoom() {
       const v = document.getElementById("zoom_level").valueAsNumber;
       ws.send(`Z:${v}`);
-      console.log("setZoom(): ",v);
+      console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
+      //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
+        autoAutoscale(100,false); 
       saveSettings();
     }
 
     function zoomReleased()
     {
       zoomControlActive = false;
-      autoAutoscale(0,true);
+      //autoAutoscale(0,true);  // we're letting it autoscale all the time, don't need to autoscale here
       //console.log("Zoom control is inactive");
     }
 
