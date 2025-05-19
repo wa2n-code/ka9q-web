@@ -608,7 +608,7 @@ function calcFrequencies() {
       console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
       //autoAutoscale(15,true);
-      autoAutoscale(2,true);
+      autoAutoscale(100,true);
       saveSettings();
     }
 
@@ -617,7 +617,7 @@ function calcFrequencies() {
       console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
       // autoAutoscale(15,true); // 15 for n0
-      autoAutoscale(2,true);
+      autoAutoscale(100,true);
       saveSettings();
     }
 
