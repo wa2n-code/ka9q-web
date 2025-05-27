@@ -42,8 +42,8 @@ function power2dB(power) {
 }   
 
 function createUpdateSMeter() {
-    let lastMax = 0; // Static variable that holds the max value for the max hold bar graph
-    let lastSNR =0;
+    let lastMax = -200; // Static variable that holds the max value for the max hold bar graph
+    let lastSNR =-100;
     let executionCount = 0;     // Static variable that counts the number of times the updateSMeter function is called
     let executionCountSNR = 0;  // Static variable that counts the number of times the updateSMeter function is called
 
@@ -174,7 +174,7 @@ function createUpdateSMeter() {
 }
 
 function createComputeSUnits() {
-    let lastMax1 = 0;
+    let lastMax1 = -200;
     let executionCount1 = 0; 
 
     return function computeSUnits(SignalLevel, maxHold) {
