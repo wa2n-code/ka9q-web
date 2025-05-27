@@ -78,9 +78,7 @@ function createUpdateSMeter() {
         if((spnovernp -1) > 0) 
             SignalToNoiseRatio = power2dB(spnovernp - 1);
         else
-            SignalToNoiseRatio = 0;  // Avoid calling power2dB with a negative number
-        if(SignalToNoiseRatio < 0)
-            SignalToNoiseRatio = 0;  
+            SignalToNoiseRatio = -100;  // Avoid calling power2dB with a negative number
 
         // clear Canvas 
         ctx.clearRect(0, 0, cWidth, cHeight);
@@ -96,7 +94,7 @@ function createUpdateSMeter() {
             }
         } else   // SNR meter
         if (meterType == 1)
-            normSig = SignalToNoiseRatio / 50; // 50dB SNR is full scale, 0 is the minimum value 
+            normSig = SignalToNoiseRatio / 50 + 0.1; // 50dB SNR is full scale, -10db is the minimum value 
         else
             normSig = Number(input_samprate) / Number(samples_since_over);
 
@@ -134,16 +132,26 @@ function createUpdateSMeter() {
             // fill bottom 2/3 with the real time bar graph
             ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
             // Display the held SNR value
-            document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(0)} dB`;
-            document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(0)}`;
+            if (lastSNR === -100) {
+                document.getElementById('snr').textContent = `SNR: -\u221E dB`;
+                document.getElementById('snr_data').textContent = `| SNR: -\u221E`;
+            } else {
+                document.getElementById('snr').textContent = `SNR: ${lastSNR.toFixed(0)} dB`;
+                document.getElementById('snr_data').textContent = `| SNR: ${lastSNR.toFixed(0)}`;
+            }
         }
-        else 
+        else // max hold is false
         {
             // Not max hold, fill the entire canvas with the real time bar graph
             ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             // Display the real-time SNR value
-            document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(0)} dB`;
-            document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(0)}`;
+            if (SignalToNoiseRatio === -100) {
+                document.getElementById('snr').textContent = `SNR: -\u221E dB`;
+                document.getElementById('snr_data').textContent = `| SNR: -\u221E`;
+            } else {
+                document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(0)} dB`;
+                document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(0)}`;
+            }        
         }   
 
         if(meterType == 1) { // SNR meter
