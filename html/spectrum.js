@@ -696,7 +696,7 @@ Spectrum.prototype.setMaxHold = function(maxhold) {
     this.maxHold = maxhold;
     //console.log(`spectrum.setmaxhold: Max Hold set to ${this.maxHold}`);
 
-//    this.binsMax = undefined;
+    this.binsMax = undefined;   // Clear the max hold bins when toggling max hold (for Glenn wdr)
     this.binsMin = undefined;
     this.saveSettings();
 }
