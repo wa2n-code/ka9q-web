@@ -1326,3 +1326,21 @@ function setSkipWaterfallLines(val) {
   val = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
   window.skipWaterfallLines = val;
 }
+
+function enableBandSelectAlwaysCallsSetBand() {
+    const bandSelect = document.getElementById('band');
+    if (!bandSelect) return;
+
+    // Listen for mousedown on the select
+    bandSelect.addEventListener('mousedown', function (e) {
+        // Only proceed if the user is clicking an option
+        if (e.target.tagName === 'OPTION' && e.target.value === bandSelect.value) {
+            // Delay to allow the dropdown to close before calling setBand
+            setTimeout(() => setBand(bandSelect.value), 0);
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  enableBandSelectAlwaysCallsSetBand();
+});
