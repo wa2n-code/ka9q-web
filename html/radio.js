@@ -1327,20 +1327,62 @@ function setSkipWaterfallLines(val) {
   window.skipWaterfallLines = val;
 }
 
-function enableBandSelectAlwaysCallsSetBand() {
+function isFirefox() {
+    return navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+}
+
+function isChrome() {
+    // Exclude Edge and Opera, which also use Chromium
+    return /chrome/i.test(navigator.userAgent) && !/edg/i.test(navigator.userAgent) && !/opr/i.test(navigator.userAgent);
+}
+
+// Firefox method: works as you described
+function enableBandSelectAlwaysCallsSetBand_Firefox() {
     const bandSelect = document.getElementById('band');
     if (!bandSelect) return;
 
-    // Listen for mousedown on the select
     bandSelect.addEventListener('mousedown', function (e) {
-        // Only proceed if the user is clicking an option
         if (e.target.tagName === 'OPTION' && e.target.value === bandSelect.value) {
-            // Delay to allow the dropdown to close before calling setBand
             setTimeout(() => setBand(bandSelect.value), 0);
         }
     });
 }
 
+// Chrome/Chromium method: best possible workaround
+function enableBandSelectAlwaysCallsSetBand_Chrome() {
+    const bandSelect = document.getElementById('band');
+    if (!bandSelect) return;
+
+    let lastValue = bandSelect.value;
+
+    // Record the value when the dropdown is opened
+    bandSelect.addEventListener('mousedown', function () {
+        lastValue = bandSelect.value;
+    });
+
+    // On change, update lastValue (normal selection)
+    bandSelect.addEventListener('change', function () {
+        lastValue = bandSelect.value;
+        // setBand is already called by the onchange attribute in HTML
+    });
+
+    // When dropdown closes, if value didn't change, call setBand
+    bandSelect.addEventListener('blur', function () {
+        if (bandSelect.value === lastValue) {
+            setBand(bandSelect.value);
+        }
+    });
+}
+
+// Main selector
+function enableBandSelectAlwaysCallsSetBand() {
+    if (isFirefox()) {
+        enableBandSelectAlwaysCallsSetBand_Firefox();
+    } else {
+        enableBandSelectAlwaysCallsSetBand_Chrome();
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-  enableBandSelectAlwaysCallsSetBand();
+    enableBandSelectAlwaysCallsSetBand();
 });
