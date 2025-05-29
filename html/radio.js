@@ -35,7 +35,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.70";
+      const webpage_version = "2.71";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
