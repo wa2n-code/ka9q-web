@@ -847,10 +847,10 @@ function update_stats() {
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
-  document.getElementById('version').innerHTML = "Web: v" + webpage_version;
-  document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
-  if (webpage_version != webserver_version)
-    document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
+  document.getElementById('version').innerHTML = "Version: v" + webpage_version;
+  //document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
+  //if (webpage_version != webserver_version)
+  //  document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toString(); 
   document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
