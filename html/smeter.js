@@ -192,6 +192,14 @@ function createUpdateSMeter() {
                 }
                 // If SNR == 0, nothing is drawn (all blank)
             } else if (meterType == 0) {
+                // RSSI meter: fill with gradient (fix for maxHold==false)
+                var gradient;
+                gradient = ctx.createLinearGradient(0, 0, cWidth, 0);
+                gradient.addColorStop(1, "rgb(128,82,0)");
+                gradient.addColorStop(s9pfs, "rgb(255,0, 0)");
+                gradient.addColorStop(.6, "green");
+                gradient.addColorStop(0, 'green');
+                ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, cWidth * normSig, cHeight);
             } else {
                 ctx.fillStyle = "orange";
