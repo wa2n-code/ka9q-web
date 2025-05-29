@@ -7,7 +7,6 @@ ctx.fillRect(0,0, cWidth, cHeight);
 const updateSMeter = createUpdateSMeter();
 const computeSUnits = createComputeSUnits();
 
-
     // Create and paint a bargraph which represents the S meter signal level
     // The S meter is a logarithmic scale that is not linear.  The S meter is defined as S0 to S9+60dBm
     // S0 = -127dBm, S9 = -73dBm, S9+60 = -13dBm    
