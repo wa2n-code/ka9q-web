@@ -43,7 +43,7 @@ function power2dB(power) {
 
 function createUpdateSMeter() {
     let lastMax = -200; // Static variable that holds the max value for the max hold bar graph
-    let lastSNR =-100;
+    let lastSNR = -100;
     let executionCount = 0;     // Static variable that counts the number of times the updateSMeter function is called
     let executionCountSNR = 0;  // Static variable that counts the number of times the updateSMeter function is called
 
@@ -51,31 +51,13 @@ function createUpdateSMeter() {
         const maxBarHeight = 0.3;  // 30% of the canvas height
         const executionCountHit = 30; // Number of times (seconds*10?) the updateSMeter function is called before the max hold bar graph is updated
 
-        if(meterType == 0) {
-            // Set the meter rectangle to a gradient with colors that approach or turn red as the signal level increases beyond S9
-            var gradient;
-            gradient = ctx.createLinearGradient(0,0,cWidth,0);
-            gradient.addColorStop(1, "rgb(128,82,0)");
-            gradient.addColorStop(s9pfs,"rgb(255,0, 0)");         // Abrupt transition from green to red at S9
-            gradient.addColorStop(.6,"green");  // S9+30            // stay green to S9 (almost) then turn red
-            gradient.addColorStop(0,'green');
-            gradient.addColorStop
-            ctx.fillStyle = gradient;
-        }
-        else {  
-            if(meterType == 1)  // SNR meter
-                ctx.fillStyle = "rgb(1, 136, 199)";  // Set the meter rectangle to blue for the SNR meter
-            else  // OVF meter, set to a default color            
-                ctx.fillStyle = "orange";  // Set the meter rectangle to blue for the SNR meter
-        }
-
         // Experimental SNR calculation and display
         var noise_power = dB2power(noiseDensity) * Bandwidth;
         var signal_plus_noise_power = dB2power(SignalLevel);
         var SignalToNoiseRatio;
 
         var spnovernp = signal_plus_noise_power / noise_power;
-        if((spnovernp -1) > 0) 
+        if ((spnovernp - 1) > 0)
             SignalToNoiseRatio = power2dB(spnovernp - 1);
         else
             SignalToNoiseRatio = -100;  // Avoid calling power2dB with a negative number
@@ -85,7 +67,7 @@ function createUpdateSMeter() {
         var adjustedSignal = SignalLevel - smallestSignal;  // Adjust the dB signal to a positive number with smallestSignal as 0, and biggestSignal as -13
         var normSig;
 
-        if(meterType == 0) {  
+        if (meterType == 0) {
             //The RSSI Meter: An S9 signal should paint to s9pfs (62%) of full scale.  Signals above S9 are scaled to paint to the upper (right) 38% of the scale.
             if (SignalLevel <= s9SignalLevel) {
                 normSig = adjustedSignal / belowS9Span * s9pfs;
@@ -105,32 +87,81 @@ function createUpdateSMeter() {
         if (normSig < 0) {
             normSig = 0;
         }
+
         if (maxHold == true) {
             executionCount++;
             executionCountSNR++;
-            if(executionCount > executionCountHit) {
+            if (executionCount > executionCountHit) {
                 // Done holding the last RSI value, get the latest one
                 executionCount = 0;
                 lastMax = normSig;
             }
-            if(executionCountSNR > executionCountHit) {
+            if (executionCountSNR > executionCountHit) {
                 // Done holding the last SNR value, get the latest one
                 executionCountSNR = 0;
                 lastSNR = SignalToNoiseRatio;
             }
-            if (normSig > lastMax) 
-            {
+            if (normSig > lastMax) {
                 lastMax = normSig;
-                executionCount = executionCountHit/2;   // Reset the upper bargraph hold counter so it is held for 15 counts
+                executionCount = executionCountHit / 2;   // Reset the upper bargraph hold counter so it is held for 15 counts
             }
-            if(SignalToNoiseRatio > lastSNR) {
+            if (SignalToNoiseRatio > lastSNR) {
                 lastSNR = SignalToNoiseRatio;
-                executionCountSNR = executionCountHit/2; // Reset the SNR hold counter so SNR text display is held for 15 counts
-            }   
-            // fILL the top 1/3 with the max hold bar graph
-            ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
-            // fill bottom 2/3 with the real time bar graph
-            ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight);
+                executionCountSNR = executionCountHit / 2; // Reset the SNR hold counter so SNR text display is held for 15 counts
+            }
+
+            // --- SNR meter custom coloring for maxHold ---
+            if (meterType == 1) {
+                // SNR spans from -10 to +50
+                const zeroPoint = cWidth * (10 / 60); // 1/6 of the width
+
+                // Top 1/3: max hold bar (color as before)
+                if (lastSNR < 0) {
+                    // Red bar: from zeroPoint leftward, proportional to SNR
+                    const redFrac = Math.min(1, Math.max(0, -lastSNR / 10)); // 0 to 1 as SNR goes 0 to -10
+                    const redWidth = zeroPoint * redFrac;
+                    ctx.fillStyle = "red";
+                    ctx.fillRect(zeroPoint - redWidth, 0, redWidth, cHeight * maxBarHeight);
+                } else if (lastSNR > 0) {
+                    // Blue bar: from zeroPoint rightward, proportional to SNR (max at +50)
+                    const blueFrac = Math.min(1, lastSNR / 50); // 0 to 1 as SNR goes 0 to +50
+                    const blueWidth = (cWidth - zeroPoint) * blueFrac;
+                    ctx.fillStyle = "rgb(1, 136, 199)";
+                    ctx.fillRect(zeroPoint, 0, blueWidth, cHeight * maxBarHeight);
+                }
+                // If SNR == 0, nothing is drawn (all blank)
+
+                // Bottom 2/3: real time bar graph, but color and position as SNR logic
+                if (SignalToNoiseRatio < 0) {
+                    const redFrac = Math.min(1, Math.max(0, -SignalToNoiseRatio / 10));
+                    const redWidth = zeroPoint * redFrac;
+                    ctx.fillStyle = "red";
+                    ctx.fillRect(zeroPoint - redWidth, cHeight * maxBarHeight, redWidth, cHeight - cHeight * maxBarHeight);
+                } else if (SignalToNoiseRatio > 0) {
+                    const blueFrac = Math.min(1, SignalToNoiseRatio / 50);
+                    const blueWidth = (cWidth - zeroPoint) * blueFrac;
+                    ctx.fillStyle = "rgb(1, 136, 199)";
+                    ctx.fillRect(zeroPoint, cHeight * maxBarHeight, blueWidth, cHeight - cHeight * maxBarHeight);
+                }
+                // If SNR == 0, nothing is drawn (all blank)
+            } else if (meterType == 0) {
+                // RSSI meter: fill with gradient
+                var gradient;
+                gradient = ctx.createLinearGradient(0, 0, cWidth, 0);
+                gradient.addColorStop(1, "rgb(128,82,0)");
+                gradient.addColorStop(s9pfs, "rgb(255,0, 0)");
+                gradient.addColorStop(.6, "green");
+                gradient.addColorStop(0, 'green');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
+                ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight - cHeight * maxBarHeight);
+            } else {
+                // OVF meter
+                ctx.fillStyle = "orange";
+                ctx.fillRect(0, 0, cWidth * lastMax, cHeight * maxBarHeight);
+                ctx.fillRect(0, cHeight * maxBarHeight, cWidth * normSig, cHeight - cHeight * maxBarHeight);
+            }
+
             // Display the held SNR value
             if (lastSNR === -100) {
                 document.getElementById('snr').textContent = `SNR: -\u221E dB`;
@@ -142,8 +173,31 @@ function createUpdateSMeter() {
         }
         else // max hold is false
         {
-            // Not max hold, fill the entire canvas with the real time bar graph
-            ctx.fillRect(0, 0, cWidth * normSig, cHeight);
+            // --- SNR meter custom coloring ---
+            if (meterType == 1) {
+                // SNR spans from -10 to +50
+                const zeroPoint = cWidth * (10 / 60); // 1/6 of the width
+
+                if (SignalToNoiseRatio < 0) {
+                    // Red bar: from zeroPoint leftward, proportional to SNR
+                    const redFrac = Math.min(1, Math.max(0, -SignalToNoiseRatio / 10)); // 0 to 1 as SNR goes 0 to -10
+                    const redWidth = zeroPoint * redFrac;
+                    ctx.fillStyle = "red";
+                    ctx.fillRect(zeroPoint - redWidth, 0, redWidth, cHeight);
+                } else if (SignalToNoiseRatio > 0) {
+                    // Blue bar: from zeroPoint rightward, proportional to SNR (max at +50)
+                    const blueFrac = Math.min(1, SignalToNoiseRatio / 50); // 0 to 1 as SNR goes 0 to +50
+                    const blueWidth = (cWidth - zeroPoint) * blueFrac;
+                    ctx.fillStyle = "rgb(1, 136, 199)";
+                    ctx.fillRect(zeroPoint, 0, blueWidth, cHeight);
+                }
+                // If SNR == 0, nothing is drawn (all blank)
+            } else if (meterType == 0) {
+                ctx.fillRect(0, 0, cWidth * normSig, cHeight);
+            } else {
+                ctx.fillStyle = "orange";
+                ctx.fillRect(0, 0, cWidth * normSig, cHeight);
+            }
             // Display the real-time SNR value
             if (SignalToNoiseRatio === -100) {
                 document.getElementById('snr').textContent = `SNR: -\u221E dB`;
@@ -151,20 +205,19 @@ function createUpdateSMeter() {
             } else {
                 document.getElementById('snr').textContent = `SNR: ${SignalToNoiseRatio.toFixed(0)} dB`;
                 document.getElementById('snr_data').textContent = `| SNR: ${SignalToNoiseRatio.toFixed(0)}`;
-            }        
-        }   
+            }
+        }
 
-        if(meterType == 1) { // SNR meter
+        if (meterType == 1) { // SNR meter
             document.getElementById('snr_units').textContent = "dB | SNR: ";
         }
         else {
-            if(meterType == 0) { // RSSI meter
+            if (meterType == 0) { // RSSI meter
                 document.getElementById('snr_units').textContent = "dB | Signal: ";
             }
             else
-                document.getElementById('snr_units').textContent = "dB | OVR:"; 
+                document.getElementById('snr_units').textContent = "dB | OVR:";
         }
-
 
         // Draw the border
         ctx.strokeRect(0, 0, cWidth, cHeight);
