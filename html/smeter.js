@@ -281,7 +281,80 @@ function createComputeSUnits() {
         }
         // Display the S units
         document.getElementById("s_data").textContent = s; 
+
+        // Call analog S-meter draw function with the current signal level (p)
+        if (typeof drawAnalogSMeter === "function") {
+            drawAnalogSMeter(p);
+        }
+
     }
 };
 
+function drawAnalogSMeter(signalStrength) {
+    const canvas = document.getElementById("sMeter");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Meter background
+    ctx.fillStyle = "#ddd";
+    ctx.beginPath();
+    ctx.arc(125, 125, 100, Math.PI, 2 * Math.PI);
+    ctx.fill();
+
+    // Outer arc
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(125, 125, 100, Math.PI, 2 * Math.PI);
+    ctx.stroke();
+
+    // Scale markings
+    ctx.fillStyle = "black";
+    ctx.font = "14px Arial";
+    const scale = ["S1", "S3", "S5", "S7", "S9", "+10", "+20", "+40", "+60"];
+    for (let i = 0; i < scale.length; i++) {
+        let angle = Math.PI + (Math.PI * (i / (scale.length - 1)));
+        let x = 125 + 85 * Math.cos(angle);
+        let y = 125 + 85 * Math.sin(angle);
+        ctx.fillText(scale[i], x - 12, y + 5);
+    }
+
+    // --- Corrected scaling for the needle ---
+    // S1 (-127 dBm) to S9 (-73 dBm): 54 dB span, 6 dB per S-unit
+    // S9 (-73 dBm) to +60 (-13 dBm): 60 dB span, 10 dB per +10
+    let fraction;
+    if (signalStrength <= -73) {
+        // Below or at S9
+        fraction = (signalStrength + 127) / 54 * 0.5; // 0 to 0.5
+    } else if (signalStrength >= -13) {
+        // At or above +60
+        fraction = 1;
+    } else {
+        // Above S9 up to +60
+        fraction = 0.5 + ((signalStrength + 73) / 60) * 0.5; // 0.5 to 1
+    }
+
+    // Clamp fraction
+    if (fraction < 0) fraction = 0;
+    if (fraction > 1) fraction = 1;
+
+    // Map fraction to angle
+    const minAngle = Math.PI;
+    const maxAngle = 2 * Math.PI;
+    const angle = minAngle + (maxAngle - minAngle) * fraction;
+
+    // Draw needle
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(125, 125);
+    ctx.lineTo(125 + 70 * Math.cos(angle), 125 + 70 * Math.sin(angle));
+    ctx.stroke();
+
+    // Value text
+    ctx.fillStyle = "black";
+    ctx.font = "16px Arial";
+    ctx.fillText(`Signal: ${signalStrength} dBm`, 60, 140);
+}
