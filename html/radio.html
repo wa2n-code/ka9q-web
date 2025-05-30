@@ -1,386 +1,367 @@
 <!DOCTYPE html>
 <html lang="en">
-   <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Web SDR + ka9q-radio</title>
-      <link rel="stylesheet" type="text/css" href="style.css" />
-      <script src="colormap.js"></script>
-      <script src="spectrum.js"></script>
-      <script src="pcm-player.js"></script>
-      <script src="radio.js"></script>
-      <script src="smeter.js" defer></script>
-   </head>
-   <body>
-      <font face="Arial">
-      <center>
-         <div style="height:5px;font-size:5px;">&nbsp;</div>
-         <h4 id="heading">Web SDR + ka9q-radio</h4>
-      </center>
-      <div style="height:5px;font-size:5px;">&nbsp;</div>
-      <audio id="audio">
-      </audio>
-      <!-- canvas needs 'tabindex' to be focusable
-         https://stackoverflow.com/questions/12886286/addeventlistener-for-keydown-on-canvas
-         -->
-      <canvas id="waterfall" tabindex="1"></canvas>
-      <div style="height:5px;font-size:5px;">&nbsp;</div>
-      <center>
-         <!-- Table for ge data, s data, snr data -->
-         <table style="border: solid;  border-color: dimgray; border-radius: 10px">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web SDR + ka9q-radio</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <script src="colormap.js"></script>
+    <script src="spectrum.js"></script>
+    <script src="pcm-player.js"></script>
+    <script src="radio.js"></script>
+    <script src="smeter.js" defer></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+    </style>
+</head>
+<body>
+    <center>
+        <div style="height:5px;font-size:5px;">&nbsp;</div>
+        <h4 id="heading">Web SDR + ka9q-radio</h4>
+    </center>
+    <div style="height:5px;font-size:5px;">&nbsp;</div>
+    <audio id="audio"></audio>
+    <!-- canvas needs 'tabindex' to be focusable -->
+    <canvas id="waterfall" tabindex="1"></canvas>
+    <div style="height:5px;font-size:5px;">&nbsp;</div>
+
+    <!-- Top table: centered -->
+    <div style="display: flex; justify-content: center; margin-top: 10px;">
+        <table style="border: solid; border-color: dimgray; border-radius: 10px">
             <tr>
-               <td><span id="ge_data"></span></td>
-               <td><span id="pwr_data" title="Signal power dBm"></span></td>
-               <td><span id="pwr_units"></span></td>
-               <td><span id="s_data" title="Signal level S Units" ></span></td>
-               <td><span id="snr_data" title="Signal to Noise Ratio"></span></td>
-               <td><span id="snr_units"></span></td>
-               <td width="102px">
-                  <canvas id="smeter" width="100" height="20" title="Signal power, SNR, or
-                     Overrange rate"></canvas>
-               </td>
+                <td><span id="ge_data"></span></td>
+                <td><span id="pwr_data" title="Signal power dBm"></span></td>
+                <td><span id="pwr_units"></span></td>
+                <td><span id="s_data" title="Signal level S Units"></span></td>
+                <td><span id="snr_data" title="Signal to Noise Ratio"></span></td>
+                <td><span id="snr_units"></span></td>
+                <td width="102px">
+                    <canvas id="smeter" width="100" height="20" title="Signal power, SNR, or Overrange rate"></canvas>
+                </td>
             </tr>
-         </table>
-         <div style="height:5px;font-size:5px;">&nbsp;</div>
-         <table style="border: solid;  border-color: dimgray; border-radius: 10px;
-            font-size:14px">
+        </table>
+    </div>
+    <div style="height:10px;font-size:10px;">&nbsp;</div>
+
+    <!-- Bottom table and analog S-meter side by side, centered as a unit -->
+    <div style="display: flex; flex-direction: row; justify-content: center; align-items: flex-start; gap: 10px;">
+        <div>
+            <table style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px">
+                <tr>
+                    <td>
+                        Spectrum gain:
+                        <button id="rangedec" style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
+                        <button id="rangeinc" style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
+                        <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
+                    </td>
+                    <td rowspan=2>
+                        <input type="text" id="freq" style="color:green; font-size:26px; height:32px;width:125px; border:solid" value="" onchange="setFrequencyW()" title="Frequency direct entry" />
+                    </td>
+                    <td rowspan=1 align="center">
+                        <label for="mode">Mode:</label>
+                        <select name="mode" id="mode" onchange="setMode(this.value)" title="Select demodulation mode">
+                            <option value="cwu">CWU</option>
+                            <option value="cwl">CWL</option>
+                            <option value="usb">USB</option>
+                            <option value="wusb">WUSB</option>
+                            <option value="lsb">LSB</option>
+                            <option value="wlsb">WLSB</option>
+                            <option value="am">AM</option>
+                            <option value="sam">SAM</option>
+                            <option value="nam">NAM</option>
+                            <option value="fm">FM</option>
+                            <option value="iq">I/Q</option>
+                            <option value="user1">USER1</option>
+                            <option value="user2">USER2</option>
+                            <option value="user3">USER3</option>
+                        </select>
+                    </td>
+                    <td rowspan=2 colspan=2>
+                        <label for="zoom_level">Zoom:</label>
+                        <input type="range" id="zoom_level" name="zoom" min="0" max="15" oninput="setZoom()" onmouseup="zoomReleased()" list="zmarkers" onmousedown="zoomMouseDown()" onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
+                        <datalist id="zmarkers">
+                            <option value="1"></option>
+                            <option value="4"></option>
+                            <option value="7"></option>
+                            <option value="10"></option>
+                            <option value="13"></option>
+                        </datalist>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        Spec Baseline:
+                        <button id="baseline_down" style="width:45px" onclick="baselineDown()" title="Decrease spectrum baseline dBm">-</button>
+                        <button id="baseline_up" style="width:45px" onclick="baselineUp()" title="Increase spectrum baseline dBm">+</button>
+                        <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
+                    </td>
+                    <td>
+                        <label for="band">Band/Chan:</label>
+                        <select name="band" id="band" onchange="setBand(this.value)" title="Select radio band or time broadcast station. On Chrome, you must click your mouse out of the select box to set the same band">
+                            <option value="" disabled selected hidden>Select Band</option>
+                            <option value="1900000">160M</option>
+                            <option value="3715000">80M</option>
+                            <option value="5406500">60M</option>
+                            <option value="7150000">40M</option>
+                            <option value="10130000">30M</option>
+                            <option value="14185000">20M</option>
+                            <option value="18111000">17M</option>
+                            <option value="21300000">15M</option>
+                            <option value="24931000">12M</option>
+                            <option value="28500000">10M</option>
+                            <option value="3330000">CHU3330</option>
+                            <option value="7850000">CHU7850</option>
+                            <option value="14670000">CHU14670</option>
+                            <option value="5000000">WWV5000</option>
+                            <option value="10000000">WWV10MHz</option>
+                            <option value="15000000">WWV15MHz</option>
+                            <option value="20000000">WWV20MHz</option>
+                            <option value="25000000">WWV25MHz</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        Spectrum size:
+                        <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
+                        <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+                    </td>
+                    <td align="center">
+                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
+                        <button style="color:green; border:solid; width:40px" onclick="setFrequencyW()" title="Set frequency">Set</button>
+                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
+                    </td>
+                    <td rowspan=1 colspan=1 align="center">
+                        <label for="meter">Meter:</label>
+                        <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or Overrange rate meter">
+                            <option value="0">Signal</option>
+                            <option value="1">SNR</option>
+                            <option value="2">OVR</option>
+                        </select>
+                    </td>
+                    <td align="center">
+                        <button id="zoomminus" onclick="zoomout()" title="Zoom out spectrum">Out</button>
+                        <button id="zoomcenter" onclick="zoomcenter()" title="Move current frequency to spectrum center">Zoom Center</button>
+                        <button id="zoomplus" onclick="zoomin()" title="Zoom in spectrum">In</button>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="zoom_level">WF ceil:&nbsp;&nbsp;&nbsp;</label>
+                        <input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
+                        <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
+                    </td>
+                    <td align="center">
+                        <label for="step">Step:</label>
+                        <select name="step" id="step" onchange="step_changed(this.value)" title="Frequency change step size">
+                            <option value="1">1Hz</option>
+                            <option value="10">10Hz</option>
+                            <option value="100">100Hz</option>
+                            <option value="250">250Hz</option>
+                            <option value="500">500Hz</option>
+                            <option value="1000">1KHz</option>
+                            <option value="5000">5KHz</option>
+                            <option value="9000">9KHz</option>
+                            <option value="10000">10KHz</option>
+                            <option value="100000">100KHz</option>
+                            <option value="1000000">1MHz</option>
+                        </select>
+                    </td>
+                    <td>
+                        <label for="max_hold">Max Hold:</label>
+                        <input type="checkbox" id="max_hold" onchange="spectrum.setMaxHold(this.checked)" title="Turn Max Hold On or Off" />
+                        <label for="decay_list">Decay:</label>
+                        <select id="decay_list" onchange="spectrum.setDecay(this.value)" title="Set how long the spectrum min / max hold lives">
+                            <option value="1">Infinite</option>
+                            <option value="1.0001">1.0001</option>
+                            <option value="1.0005">1.0005</option>
+                            <option value="1.001">1.001</option>
+                            <option value="1.005">1.005</option>
+                            <option value="1.01">1.05</option>
+                            <option value="1.05">1.01</option>
+                            <option value="1.1">1.1</option>
+                        </select>
+                    </td>
+                    <td align="center">
+                        <label for="panner_control" style="font-size:15px">Pan:</label>
+                        <input type="range" list="ticks" id="panner_control" min="-1" max="1" step="0.1" value="0" oninput="setPanner(this.value)" onwheel="adjustRange(this, event)" title="Pan audio left to right" />
+                        <datalist id="ticks">
+                            <option value="-1"></option>
+                            <option value="-0.1"></option>
+                            <option value="0"></option>
+                            <option value=".1"></option>
+                            <option value="1"></option>
+                        </datalist>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="zoom_level"> WF floor:</label>
+                        <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()" onwheel="adjustRange(this, event)" title="Adjust waterfall floor" />
+                        <input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
+                    </td>
+                    <td align="center">
+                        <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
+                    </td>
+                    <td align="center">Show: 
+                        <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Live</label>
+                        <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label for="check_max">Max</label>
+                        <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label for="check_min">Min</label>
+                    </td>
+                    <td align="center" rowspan=2>
+                        <label for="volume_control">&nbsp;Vol:&nbsp;&nbsp;</label>
+                        <input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" list="markers" oninput="setPlayerVolume(this.value)" onwheel="adjustRange(this, event)" title="Adjust volume"/>
+                        <datalist id="markers">
+                            <option value="0"></option>
+                            <option value=".25"></option>
+                            <option value=".50"></option>
+                            <option value=".75"></option>
+                            <option value="1"></option>
+                        </datalist>
+                    </td>
+                </tr>
+                <tr align="center">
+                    <td>
+                        <button id="OptionsButton" title="Additional options">Options</button>
+                        &nbsp;&nbsp;
+                        <button id="pause" style="color: blue; border:solid; width:120px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
+                    </td>
+                    <td>
+                        <button id="autoscale" style="color:brown; border:solid; width:90px;" onclick="autoscaleButtonPush()" title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
+                    </td>
+                    <td align="center">
+                        <button id="audio_button" style="color:DarkViolet; border: solid; width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
+                        &nbsp;&nbsp;
+                        <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording" style="margin-right: 10px;">Record</button>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <canvas id="sMeter" width="220" height="140"></canvas>
+        </div>
+    </div>
+    <div style="height:10px;font-size:10px;">&nbsp;</div>      
+
+    <hr>
+    <div style="height:1px;font-size:1px;"></div>
+    <div style="width: 100%;" id="stat_div">
+        <table id="stat_table">
             <tr>
-               <td>
-                  Spectrum gain:
-                  <button id="rangedec"  style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
-                  <button id="rangeinc"  style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
-                  <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
-               </td>
-               <td rowspan=2>
-                  <input type="text" id="freq" style="color:green; font-size:26px;
-                     height:32px;width:125px; border:solid" value="" onchange="setFrequencyW()" title="Frequency direct entry" />
-               </td>
-               <td rowspan=1 align="center">
-                  <label for="mode">Mode:</label>
-                  <select name="mode" id="mode" onchange="setMode(this.value)" title="Select demodulation mode">
-                     <option value="cwu">CWU</option>
-                     <option value="cwl">CWL</option>
-                     <option value="usb">USB</option>
-                     <option value="wusb">WUSB</option>
-                     <option value="lsb">LSB</option>
-                     <option value="wlsb">WLSB</option>
-                     <option value="am">AM</option>
-                     <option value="sam">SAM</option>
-                     <option value="nam">NAM</option>
-                     <option value="fm">FM</option>
-                     <option value="iq">I/Q</option>
-                     <option value="user1">USER1</option>
-                     <option value="user2">USER2</option>
-                     <option value="user3">USER3</option>
-                  </select>
-               </td>
-               <td rowspan=2 colspan=2>
-                  <label for="zoom_level">Zoom:</label><input type="range" id="zoom_level" name="zoom" min="0" max="15" 
-                     oninput="setZoom()" onmouseup="zoomReleased()" list="zmarkers" onmousedown="zoomMouseDown()" 
-                     onmouseup="zoomMouseUp()" onwheel="adjustRange(this, event)" title="Adjust spectrum zoom level" />
-                  <datalist id="zmarkers">
-                     <option value="1"></option>
-                     <option value="4"></option>
-                     <option value="7"></option>
-                     <option value="10"></option>
-                     <option value="13"></option>
-                  </datalist>
-               </td>
-            </tr>
-            <tr>
-               <td>
-                  Spec Baseline:
-                  <button id="baseline_down" style="width:45px" onclick="baselineDown()" title="Decrease spectrum baseline dBm">-</button>
-                  <button id="baseline_up" style="width:45px" onclick="baselineUp()" title="Increase spectrum baseline dBm">+</button>
-                  <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
-               </td>
-               <td>
-                  <label for="band">Band/Chan:</label>
-                  <select name="band" id="band" onchange="setBand(this.value)" title="Select radio band or time broadcast station. On Chrome, you must click your mouse out of the select box to set the same band">
-                     <option value="" disabled selected hidden>Select Band</option>
-                     <option value="1900000">160M</option>
-                     <option value="3715000">80M</option>
-                     <option value="5406500">60M</option>
-                     <option value="7150000">40M</option>
-                     <option value="10130000">30M</option>
-                     <option value="14185000">20M</option>
-                     <option value="18111000">17M</option>
-                     <option value="21300000">15M</option>
-                     <option value="24931000">12M</option>
-                     <option value="28500000">10M</option>
-                     <option value="3330000">CHU3330</option>
-                     <option value="7850000">CHU7850</option>
-                     <option value="14670000">CHU14670</option>
-                     <option value="5000000">WWV5000</option>
-                     <option value="10000000">WWV10MHz</option>
-                     <option value="15000000">WWV15MHz</option>
-                     <option value="20000000">WWV20MHz</option>
-                     <option value="25000000">WWV25MHz</option>
-                  </select>
-               </td>
-            </tr>
-            <tr>
-               <td>
-                  Spectrum size:
-                  <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
-                  <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
-               </td>
-               <td align="center">
-                  <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
-                  <button style="color:green; border:solid; width:40px" onclick="setFrequencyW()" title="Set frequency">Set</button>
-                  <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
-               </td>
-               <td rowspan=1 colspan=1 align="center">
-                  <label for="meter">Meter:</label>
-                  <select name="meter" id="meter" onchange="meterType = this.value" title="Signal strength, Signal To Noise Ratio, or
-                     Overrange rate meter">
-                     <option value="0">Signal</option>
-                     <option value="1">SNR</option>
-                     <option value="2">OVR</option>
-                  </select>
-               </td>
-               <td align="center">
-                  <button id="zoomminus" onclick="zoomout()" title="Zoom out spectrum">Out</button>
-                  <button id="zoomcenter" onclick="zoomcenter()" title="Move current frequency to spectrum
-                     center">Zoom Center</button>
-                  <button id="zoomplus" " onclick=" zoomin()" title="Zoom in spectrum">In</button>
-               </td>
-            </tr>
-            <tr>
-               <td>
-                  <label for="zoom_level">WF ceil:&nbsp;&nbsp;&nbsp;</label><input type="range" id="waterfall_max_range" 
-                     min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
-                  <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" 
-                     title="Max waterfall dBm level (signal color intensity)" />
-               </td>
-               <td align="center">
-                  <label for="step">Step:</label>
-                  <select name="step" id="step" onchange="step_changed(this.value)" title="Frequency change step size">
-                     <option value="1">1Hz</option>
-                     <option value="10">10Hz</option>
-                     <option value="100">100Hz</option>
-                     <option value="250">250Hz</option>
-                     <option value="500">500Hz</option>
-                     <option value="1000">1KHz</option>
-                     <option value="5000">5KHz</option>
-                     <option value="9000">9KHz</option>
-                     <option value="10000">10KHz</option>
-                     <option value="100000">100KHz</option>
-                     <option value="1000000">1MHz</option>
-                  </select>
-               </td>
-               <td>
-                  <label for="max_hold">Max Hold:</label>
-                  <input type="checkbox" id="max_hold" onchange="spectrum.setMaxHold(this.checked)" title="Turn Max Hold On or Off" />
-                  <label for="decay_list" >Decay:</label>
-                  <select id="decay_list" onchange="spectrum.setDecay(this.value)" title="Set how long the spectrum min / max hold lives">
-                     <option value="1">Infinite</option>
-                     <option value="1.0001">1.0001</option>
-                     <option value="1.0005">1.0005</option>
-                     <option value="1.001">1.001</option>
-                     <option value="1.005">1.005</option>
-                     <option value="1.01">1.05</option>
-                     <option value="1.05">1.01</option>
-                     <option value="1.1">1.1</option>
-                  </select>
-               </td>
-               <td align="center">
-                  <label for="panner_control" style="font-size:15px">Pan:</label>  
-                  <input type="range" list="ticks" id="panner_control" min="-1" max="1" step="0.1" value="0" 
-                     oninput="setPanner(this.value)" onwheel="adjustRange(this, event)" title="Pan audio left to right" />
-                  <datalist id="ticks">
-                     <option value="-1"></option>
-                     <option value="-0.1"></option>
-                     <option value="0"></option>
-                     <option value=".1"></option>
-                     <option value="1"></option>
-                  </datalist>
-               </td>
-            </tr>
-            <tr>
-               <td>
-                  <label for="zoom_level"> WF floor:</label>
-                  <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()"  
-                     onwheel="adjustRange(this, event)" title="Adjust waterfall floor" />
-                  <input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" 
-                     title="Minimum waterfall dBm level (background brightness)" />
-               </td>
-               <td align="center">
-                  <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
-               </td>
-               <td align="center">Show: 
-                  <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label
-                     for="check_live">Live</label>
-                  <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label
-                     for="check_max">Max</label>
-                  <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label
-                     for="check_min">Min</label>
-               </td>
-               <td align="center" rowspan=2>
-                  <label for="volume_control">&nbsp;Vol:&nbsp;&nbsp;</label><input type="range" id="volume_control" min="0" max="1" step="0.01" value="1.0" list="markers" oninput="setPlayerVolume(this.value)" onwheel="adjustRange(this, event)" title="Adjust volume"/>
-                  <datalist id="markers">
-                     <option value="0"></option>
-                     <option value=".25"></option>
-                     <option value=".50"></option>
-                     <option value=".75"></option>
-                     <option value="1"></option>
-                  </datalist>
-               </td>
-            </tr>
-            <tr align="center">
-               <td>
-                  <button id="OptionsButton" title="Additional options">Options</button>
-                  &nbsp;&nbsp;
-                  <button id="pause" style="color: blue; border:solid;
-                     width:120px" onclick="spectrum.togglePaused()" title="Pause or resume spectrum">Pause</button>
-               </td>
-               <td>
-                  <button id="autoscale" style="color:brown; border:solid;
-                     width:90px;" onclick="autoscaleButtonPush()" 
-                     title="Autoscale the spectrum baseline and maximum dBm">Autoscale</button>
-               </td>
-               <td align="center">
-                  <button id="audio_button" style="color:DarkViolet; border: solid;
-                     width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
-                  &nbsp;&nbsp;
-                  <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording" style="margin-right: 10px;">Record</button>
-               </td>
-            </tr>
-         </table>
-      </center>
-      <hr>
-      <div style="height:1px;font-size:1px;"></div>
-      <div style="width: 100%;" id="stat_div">
-         <table id="stat_table">
-            <tr>
-               <td><span id="rf_gain"></span></td>
-               <td><span id="snr"></span></td>
-               <td><span id="gps_time"></span></td>
+                <td><span id="rf_gain"></span></td>
+                <td><span id="snr"></span></td>
+                <td><span id="gps_time"></span></td>
             </tr>
             <tr>
-               <td><span id="rf_attn"></span></td>
-               <td><span id="hz_per_bin"></span></td>
-               <td><span id="uptime"></span></td>
+                <td><span id="rf_attn"></span></td>
+                <td><span id="hz_per_bin"></span></td>
+                <td><span id="uptime"></span></td>
             </tr>
             <tr>
-               <td><span id="rf_cal"></span></td>
-               <td><span id="bins"></span></td>
-               <td><span id="adc_overs"></span></td>
+                <td><span id="rf_cal"></span></td>
+                <td><span id="bins"></span></td>
+                <td><span id="adc_overs"></span></td>
             </tr>
             <tr>
-               <td><span id="rf_agc"></span></td>
-               <td><span id="ssrc"></span></td>
-               <td><span id="adc_last_over"></span></td>
+                <td><span id="rf_agc"></span></td>
+                <td><span id="ssrc"></span></td>
+                <td><span id="adc_last_over"></span></td>
             </tr>
             <tr>
-               <td><span id="if_power"></span></td>
-               <td><span id="fft_avg"></span></td>
-               <td><span id="blocks"></span></td>
+                <td><span id="if_power"></span></td>
+                <td><span id="fft_avg"></span></td>
+                <td><span id="blocks"></span></td>
             </tr>
             <tr>
-               <td><span id="noise_density"></span></td>
-               <td><span id="decay"></span></td>
-               <td><span id="adc_samples"></span></td>
+                <td><span id="noise_density"></span></td>
+                <td><span id="decay"></span></td>
+                <td><span id="adc_samples"></span></td>
             </tr>
             <tr>
-               <td><span id="spare2"></span></td>
-               <td><span id="adc_samp_rate"></span></td>
-               <td><span id="rx_rate"></span></td>
+                <td><span id="spare2"></span></td>
+                <td><span id="adc_samp_rate"></span></td>
+                <td><span id="rx_rate"></span></td>
             </tr>
-         </table>
-      </div>
-      <!-- Placeholder for the dialog box -->
-      <div id="dialogPlaceholder"></div>
-      <script>
-         // Load the dialog box content from optionsDialog.html
-         fetch('optionsDialog.html')
+        </table>
+    </div>
+    <!-- Placeholder for the dialog box -->
+    <div id="dialogPlaceholder"></div>
+    <script>
+        // Load the dialog box content from optionsDialog.html
+        fetch('optionsDialog.html')
             .then(response => response.text())
             .then(data => {
-               document.getElementById('dialogPlaceholder').innerHTML = data;
+                document.getElementById('dialogPlaceholder').innerHTML = data;
 
-               // Add the X button handler here
-               var closeXButton = document.getElementById('closeXButton');
-               if (closeXButton) {
-                   closeXButton.onclick = function() {
-                     document.getElementById('optionsDialog').classList.remove('open');
-                     document.getElementById('dialogOverlay').classList.remove('open');
-                  };
-               }
-               // Initialize dialog event listeners
-               initializeDialogEventListeners();
-
-               // Now that all DOM is loaded, call init()
-               if (typeof init === "function") {
-               init();
-               }
+                // Add the X button handler here
+                var closeXButton = document.getElementById('closeXButton');
+                if (closeXButton) {
+                    closeXButton.onclick = function() {
+                        document.getElementById('optionsDialog').classList.remove('open');
+                        document.getElementById('dialogOverlay').classList.remove('open');
+                    };
+                }
+                // Initialize dialog event listeners
+                if (typeof initializeDialogEventListeners === "function") {
+                    initializeDialogEventListeners();
+                }
+                // Now that all DOM is loaded, call init()
+                if (typeof init === "function") {
+                    init();
+                }
             })
             .catch(error => {
-               console.error('Error loading optionsDialog.html:', error);
+                console.error('Error loading optionsDialog.html:', error);
             });
-      </script>
-      <!--<input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
-         <input type="checkbox" id="check_live" checked title="Show live spectrum" /> <label for="check_live">Show live</label>
-         <input type="checkbox" id="check_max" onclick="checkMaxMinChanged()" title="Show peak spectrum line" /> <label for="check_max">Show max</label>
-         <input type="checkbox" id="check_min" onclick="checkMaxMinChanged()" title="Show min spectrum line" /> <label for="check_min">Show min</label>
-         -->
-      <span id="cursor_data"></span>
-      <span id="info"> </span>
-      <span id="audiospan"> </span>
-      <br><br>
-      <div id="note_div">Notes (free-form entry):&nbsp;<textarea id="note_text" class="no-scrollbars" title="Adds note to the file created by the [write info file] button"></textarea></div>
-      <br>
-      Help:      
-      <ul>
-         <li>Use mouse to click to a frequency.</li>
-         <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
-         <li>Enter frequency in kHz and hit Return or press <b>Set Frequency (kHz)</b>.</li>
-         <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
-         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
-         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
-      </ul>
-      <ul>
-         If the spectrum display/waterfall is focused, keyboard shortcuts are active:
-         <li>Press space to toggle pause/run mode</li>
-         <li>'f' to toggle fullscreen mode</li>
-         <li>'c' to step through the colormap options</li>
-         <li>up/down arrow shifts the spectrum trace up/down</li>
-         <li>left/right arrow increases/decreases amplitude range</li>
-         <li>'s'/'w' to increase/decrease size of spectrum display</li>
-         <li>'+'/'-' to increase/decrease FFT averaging</li>
-         <li>'m' to toggle max hold mode</li>
-         <li>'z' to center spectrum</li>
-         <li>'i' to zoom in spectrum</li>
-         <li>'o' to zoom out spectrum</li>
-      </ul>
-      <font size="-1">
-      Current 
-      <tr><td><span id="version"></span></td></tr>
-      <ul>
-         <li>v2.71: Added analog S Meter, Band change to same band resets frequency, SNR shows negative values, SNR meter is red if SNR is < 0</li>
-         <li>v2.70: Improved autoscale, added option to slow the waterfall, added tighter zoom levels</li>
-         <li>v2.69: Major UI update</li>
-         <li>v2.68: Bugfix: RTP header offset was wrong</li>
-      </ul>
-      Credits:
-      <i>
-      <ul>
-         <li>Web Server by John Melton, G0ORX (https://github.com/g0orx/ka9q-radio)
-         <li>ka9q-radio by Phil Karn, KA9Q (https://github.com/ka9q/ka9q-radio)
-         <li>Onion Web Framework by David Moreno (https://github.com/davidmoreno/onion)
-         <li>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (https://github.com/jledet/waterfall)
-         <li>Low-level code updates by Scott Newell, K5TNL
-         <li>UI added features and updates: Wayne Roth, WA2N and Jim Lill,
-            WA2ZKD 
-      </ul>
-      <hr>
-      <br>
-
-      <!-- Analog S-Meter (minimal, safe, standalone) -->
-      <hr>
-      <div style="text-align:center;">
-         <h3>Analog S-Meter</h3>
-         <canvas id="sMeter" width="220" height="140"></canvas>
-      </div>
-      <!-- End Analog S-Meter -->
+    </script>
+    <span id="cursor_data"></span>
+    <span id="info"> </span>
+    <span id="audiospan"> </span>
+    <br><br>
+    <div id="note_div">Notes (free-form entry):&nbsp;<textarea id="note_text" class="no-scrollbars" title="Adds note to the file created by the [write info file] button"></textarea></div>
+    <br>
+    <h4>Help:</h4>
+    <ul>
+        <li>Use mouse to click to a frequency.</li>
+        <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
+        <li>Enter frequency in kHz and hit Return or press <b>Set Frequency (kHz)</b>.</li>
+        <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
+        <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
+        <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
+    </ul>
+   <p><b>If the spectrum display/waterfall is focused, keyboard shortcuts are active:</b></p>
+   <ul>
+      <li>Press space to toggle pause/run mode</li>
+      <li>'f' to toggle fullscreen mode</li>
+      <li>'c' to step through the colormap options</li>
+      <li>up/down arrow shifts the spectrum trace up/down</li>
+      <li>left/right arrow increases/decreases amplitude range</li>
+      <li>'s'/'w' to increase/decrease size of spectrum display</li>
+      <li>'+'/'-' to increase/decrease FFT averaging</li>
+      <li>'m' to toggle max hold mode</li>
+      <li>'z' to center spectrum</li>
+      <li>'i' to zoom in spectrum</li>
+      <li>'o' to zoom out spectrum</li>
+   </ul>    
+   <div style="font-size:small;">
+        <b>Current:</b> <span id="version"></span>
+        <ul>
+            <li>v2.71: Added analog S Meter, Band change to same band resets frequency, SNR shows negative values, SNR meter is red if SNR is &lt; 0</li>
+            <li>v2.70: Improved autoscale, added option to slow the waterfall, added tighter zoom levels</li>
+            <li>v2.69: Major UI update</li>
+            <li>v2.68: Bugfix: RTP header offset was wrong</li>
+        </ul>
+        <b>Credits:</b>
+        <ul>
+            <li>Web Server by John Melton, G0ORX (<a href="https://github.com/g0orx/ka9q-radio">github</a>)</li>
+            <li>ka9q-radio by Phil Karn, KA9Q (<a href="https://github.com/ka9q/ka9q-radio">github</a>)</li>
+            <li>Onion Web Framework by David Moreno (<a href="https://github.com/davidmoreno/onion">github</a>)</li>
+            <li>Spectrum/Waterfall Display by Jeppe Ledet-Pedersen (<a href="https://github.com/jledet/waterfall">github</a>)</li>
+            <li>Low-level code updates by Scott Newell, K5TNL</li>
+            <li>UI added features and updates: Wayne Roth, WA2N and Jim Lill, WA2ZKD</li>
+        </ul>
+    </div>
+    <hr>
+    <br>
 </body>
 </html>
