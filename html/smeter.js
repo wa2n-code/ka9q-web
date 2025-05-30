@@ -252,7 +252,7 @@ function createComputeSUnits() {
                 lastMax1 = SignalLevel;
             }
             p = Math.round(lastMax1);       // Use the max hold value
-            document.getElementById("pwr_data").textContent = ` Power: ${lastMax1.toFixed(0)}`;
+            document.getElementById("pwr_data").textContent = ` Power: ${lastMax1.toFixed()}`;
         }
         else {
             p = Math.round(SignalLevel);    // Use the real time value
@@ -263,7 +263,7 @@ function createComputeSUnits() {
         var s;
         var sm1;
         if (p <= -73) {     
-            sm1 = Math.floor((p + 127) / 6);       // S0 to S9
+            sm1 = Math.round((p + 127) / 6);       // S0 to S9
             if (sm1 < 0) sm1 = 0;                // S0 is the lowest value
             s = 'S' +  sm1;    // S0 to S9
         } 
@@ -310,27 +310,27 @@ function drawAnalogSMeter(signalStrength) {
     ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
     ctx.fill();
 
-    // Outer arc in dimgray
-    ctx.strokeStyle = "dimgray";
+    // Outer arc in
+    ctx.strokeStyle = "#000000";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
     ctx.stroke();
 
-    // Scale markings with correct calibration, in dimgray
-    ctx.fillStyle = "dimgray";
+    // Scale markings with correct calibration
+    ctx.fillStyle = "#000000"
     ctx.font = "14px Arial";
     const scale = [
-        { label: "S1",   fraction: 0.0 },
-        { label: "S3",   fraction: (2/9) * 0.5 },   // S1 to S9 is 9 steps, S3 is step 2
-        { label: "S5",   fraction: (4/9) * 0.5 },
-        { label: "S7",   fraction: (6/9) * 0.5 },
-        { label: "S9",   fraction: 0.5 },
-        //{ label: "+10",  fraction: 0.5 + (10/60)*0.5 },
-        { label: "+20",  fraction: 0.5 + (20/60)*0.5 },
-        { label: "+40",  fraction: 0.5 + (40/60)*0.5 },
-        { label: "+60",  fraction: 1.0 }
-    ];
+    { label: "S1",   fraction: 0.0 },
+    { label: "S3",   fraction: 0.125 },
+    { label: "S5",   fraction: 0.25 },
+    { label: "S7",   fraction: 0.375 },
+    { label: "S9",   fraction: 0.5 },
+    // ...right side unchanged...
+    { label: "+20",  fraction: 0.5 + (20/60)*0.5 },
+    { label: "+40",  fraction: 0.5 + (40/60)*0.5 },
+    { label: "+60",  fraction: 1.0 }
+    ];  
     for (let i = 0; i < scale.length; i++) {
         let angle = Math.PI + (Math.PI * scale[i].fraction);
         let x = centerX + 85 * Math.cos(angle);
@@ -343,8 +343,11 @@ function drawAnalogSMeter(signalStrength) {
     // S9 (-73 dBm) to +60 (-13 dBm): 60 dB span, 1 dB per fraction of arc
     let fraction;
     if (signalStrength <= -73) {
-        // S1 to S9: left half of arc
-        fraction = (signalStrength + 127) / 54 * 0.5; // 0 to 0.5
+        // S1 to S9: left half of arc, 8 steps (S1=0, S9=8)
+        let s_unit = (signalStrength + 127) / 6 - 1;
+        if (s_unit < 0) s_unit = 0;
+        if (s_unit > 8) s_unit = 8;
+        fraction = (s_unit / 8) * 0.5;
     } else if (signalStrength >= -13) {
         // At or above +60: rightmost
         fraction = 1;
@@ -367,8 +370,8 @@ function drawAnalogSMeter(signalStrength) {
     ctx.lineTo(centerX + 70 * Math.cos(angle), centerY + 70 * Math.sin(angle));
     ctx.stroke();
 
-    // Value text in dimgray
-    ctx.fillStyle = "dimgray";
+    // Value text
+    ctx.fillStyle = "#000000"
     ctx.font = "16px Arial";
     ctx.fillText(`Signal: ${signalStrength} dBm`, 60, 130);
 }
