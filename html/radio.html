@@ -283,13 +283,8 @@
                <td><span id="adc_samples"></span></td>
             </tr>
             <tr>
-               <td><span id="baseband_power"></span></td>
-               <td><span id="adc_samp_rate"></span></td>
                <td><span id="spare2"></span></td>
-            </tr>
-            <tr>
-               <td><span id="version"></span></td>
-               <td><span id="webserver_version"></span></td>
+               <td><span id="adc_samp_rate"></span></td>
                <td><span id="rx_rate"></span></td>
             </tr>
          </table>
@@ -358,7 +353,8 @@
          <li>'o' to zoom out spectrum</li>
       </ul>
       <font size="-1">
-      Recent changes:
+      Current 
+      <tr><td><span id="version"></span></td></tr>
       <ul>
          <li>v2.71: Band change to same band resets frequency, SNR shows negative values, SNR meter is red if SNR is below 0</li>
          <li>v2.70: Improved autoscale, added option to slow the waterfall, added tighter zoom levels</li>
@@ -383,7 +379,7 @@
       <hr>
       <div style="text-align:center;">
          <h3>Analog S-Meter</h3>
-         <canvas id="sMeter" width="250" height="150"></canvas>
+         <canvas id="sMeter" width="220" height="140"></canvas>
       </div>
       <!-- End Analog S-Meter -->
 </body>

@@ -842,7 +842,6 @@ function update_stats() {
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
-  document.getElementById('baseband_power').textContent = `Baseband/S-meter: ${power.toFixed(1)} dBm @ ${(spectrum.frequency / 1e3).toFixed(0)} kHz, ${bw.toFixed(0)} Hz BW`;
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
@@ -853,7 +852,7 @@ function update_stats() {
   //  document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toString(); 
-  document.getElementById("spare2").textContent = `low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
+  document.getElementById("spare2").textContent = `Span: low: ${lowHz / 1000.0} kHz, high: ${highHz / 1000.0} kHz, span: ${(highHz - lowHz)/1000} kHz, center: ${centerHz / 1000.0} kHz`;
 
   // Show reordered info into ge_data left table column 1
 
