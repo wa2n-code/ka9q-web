@@ -316,25 +316,40 @@ function drawAnalogSMeter(signalStrength) {
     ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
     ctx.stroke();
 
-    // Scale markings
+    // Scale markings with correct calibration
     ctx.fillStyle = "black";
     ctx.font = "14px Arial";
-    const scale = ["S1", "S3", "S5", "S7", "S9", "+10", "+20", "+40", "+60"];
+    const scale = [
+        { label: "S1",   fraction: 0.0 },
+        { label: "S3",   fraction: (2/9) * 0.5 },   // S1 to S9 is 9 steps, S3 is step 2
+        { label: "S5",   fraction: (4/9) * 0.5 },
+        { label: "S7",   fraction: (6/9) * 0.5 },
+        { label: "S9",   fraction: 0.5 },
+        //{ label: "+10",  fraction: 0.5 + (10/60)*0.5 },
+        { label: "+20",  fraction: 0.5 + (20/60)*0.5 },
+        { label: "+40",  fraction: 0.5 + (40/60)*0.5 },
+        { label: "+60",  fraction: 1.0 }
+    ];
     for (let i = 0; i < scale.length; i++) {
-        let angle = Math.PI + (Math.PI * (i / (scale.length - 1)));
+        let angle = Math.PI + (Math.PI * scale[i].fraction);
         let x = centerX + 85 * Math.cos(angle);
         let y = centerY + 85 * Math.sin(angle);
-        ctx.fillText(scale[i], x - 12, y + 5);
+        ctx.fillText(scale[i].label, x - 12, y + 5);
     }
 
     // --- Corrected scaling for the needle ---
+    // S1 (-127 dBm) to S9 (-73 dBm): 54 dB span, 6 dB per S-unit
+    // S9 (-73 dBm) to +60 (-13 dBm): 60 dB span, 1 dB per fraction of arc
     let fraction;
     if (signalStrength <= -73) {
-        fraction = (signalStrength + 127) / 54 * 0.5;
+        // S1 to S9: left half of arc
+        fraction = (signalStrength + 127) / 54 * 0.5; // 0 to 0.5
     } else if (signalStrength >= -13) {
+        // At or above +60: rightmost
         fraction = 1;
     } else {
-        fraction = 0.5 + ((signalStrength + 73) / 60) * 0.5;
+        // Above S9: right half of arc, linear in dB
+        fraction = 0.5 + ((signalStrength + 73) / 60) * 0.5; // 0.5 to 1, linear in dB
     }
     if (fraction < 0) fraction = 0;
     if (fraction > 1) fraction = 1;
