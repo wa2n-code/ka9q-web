@@ -282,11 +282,10 @@ function createComputeSUnits() {
         // Display the S units
         document.getElementById("s_data").textContent = s; 
 
-        // Call analog S-meter draw function with the current signal level (p)
-        if (typeof drawAnalogSMeter === "function") {
+        // Call analog S-meter draw function with the current signal level (p) if enabled
+        if (typeof drawAnalogSMeter === "function" && typeof enableAnalogSMeter !== "undefined" && enableAnalogSMeter) {
             drawAnalogSMeter(p);
         }
-
     }
 };
 
@@ -368,6 +367,30 @@ function drawAnalogSMeter(signalStrength) {
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
     ctx.lineTo(centerX + 70 * Math.cos(angle), centerY + 70 * Math.sin(angle));
+    ctx.stroke();
+
+    // Draw arrowhead at the tip of the needle
+    const tipX = centerX + 70 * Math.cos(angle);
+    const tipY = centerY + 70 * Math.sin(angle);
+    const arrowLength = 12; // length of the arrowhead sides
+    const arrowAngle = Math.PI / 12; // angle between needle and arrowhead sides
+
+    // Left side of arrowhead
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(
+        tipX - arrowLength * Math.cos(angle - arrowAngle),
+        tipY - arrowLength * Math.sin(angle - arrowAngle)
+    );
+    ctx.stroke();
+
+    // Right side of arrowhead
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(
+        tipX - arrowLength * Math.cos(angle + arrowAngle),
+        tipY - arrowLength * Math.sin(angle + arrowAngle)
+    );
     ctx.stroke();
 
     // Value text
