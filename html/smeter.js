@@ -373,5 +373,5 @@ function drawAnalogSMeter(signalStrength) {
     // Value text
     ctx.fillStyle = "#000000"
     ctx.font = "16px Arial";
-    ctx.fillText(`Signal: ${signalStrength} dBm`, 60, 130);
+    ctx.fillText(`Signal Power: ${signalStrength} dBm`, 25, 135);
 }
