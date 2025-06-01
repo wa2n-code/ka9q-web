@@ -51,6 +51,7 @@
       var target_zoom_level = 14;
       var switchModesByFrequency = false;
       var onlyAutoscaleByButton = false;
+      var enableAnalogSMeter = false;
 
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
@@ -1032,6 +1033,7 @@ function saveSettings() {
   localStorage.setItem("check_min", document.getElementById("check_min").checked.toString());
   localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
+  localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -1076,11 +1078,13 @@ function setDefaultSettings() {
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
   document.getElementById("ckonlyAutoscaleButton").checked = false;
+  enableAnalogSMeter = false; // Default to digital S-Meter
+  document.getElementById("ckAnalogSMeter").checked = false;
 }
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 22) {
+  if ((localStorage.length == 0) || localStorage.length != 23) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1125,6 +1129,9 @@ function loadSettings() {
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = (localStorage.getItem("onlyAutoscaleByButton") == "true");
   document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton;
+  enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
+  document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
+  setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
   return true;
 }
 
@@ -1385,3 +1392,22 @@ function enableBandSelectAlwaysCallsSetBand() {
 document.addEventListener('DOMContentLoaded', function() {
     enableBandSelectAlwaysCallsSetBand();
 });
+
+function setAnalogMeterVisible(visible) {
+    console.log(`Setting analog S-Meter visibility to: ${visible}`);
+    const meter = document.getElementById("sMeter");
+    if (meter) {
+        meter.style.display = visible ? "" : "none";
+    }
+    // Adjust the top table's margin-left based on S meter visibility
+    const topTableDiv = document.querySelector('div[style*="justify-content: center"][style*="margin-top: 10px"]');
+    if (topTableDiv) {
+        if (visible) {
+            topTableDiv.style.marginLeft = "-164px";
+        } else {
+            topTableDiv.style.marginLeft = "0px";
+        }
+    }
+    enableAnalogSMeter = visible; // Update the global variable
+    saveSettings();
+}
