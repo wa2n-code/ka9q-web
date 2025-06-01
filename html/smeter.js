@@ -364,7 +364,7 @@ function drawAnalogSMeter(signalStrength) {
 
     // Draw needle
     ctx.strokeStyle = "red";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
     ctx.lineTo(centerX + 70 * Math.cos(angle), centerY + 70 * Math.sin(angle));

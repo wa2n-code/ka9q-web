@@ -1041,6 +1041,7 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
 }
 
 function setDefaultSettings() {
+  console.log("Setting default settings");
   spectrum.averaging = 4;
   spectrum.frequency = 10000000;
   frequencyHz = 10000000;
@@ -1080,6 +1081,7 @@ function setDefaultSettings() {
   document.getElementById("ckonlyAutoscaleButton").checked = false;
   enableAnalogSMeter = false; // Default to digital S-Meter
   document.getElementById("ckAnalogSMeter").checked = false;
+  setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the default setting
 }
 
 function loadSettings() {
@@ -1394,7 +1396,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function setAnalogMeterVisible(visible) {
-    console.log(`Setting analog S-Meter visibility to: ${visible}`);
+    //console.log(`Setting analog S-Meter visibility to: ${visible}`);
     const meter = document.getElementById("sMeter");
     if (meter) {
         meter.style.display = visible ? "" : "none";
