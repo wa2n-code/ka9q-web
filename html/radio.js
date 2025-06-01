@@ -549,19 +549,26 @@ function calcFrequencies() {
     }
 
     function setBand(freq) {
-        f=parseInt(freq);
+        f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
-        if(switchModesByFrequency ) {
-          if (f < 10000000) {
-            setMode('lsb');
+
+        // Set mode based on frequency
+       if(switchModesByFrequency ) {
+          if (f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 ||f === 25000000) {
+              setMode('am');
+          } else if (f === 3330000 || f === 7850000) {
+              setMode('usb');
+          } else if (f < 10000000) {
+              setMode('lsb');
           } else {
-            setMode('usb');
+              setMode('usb');
           }
       }
-      ws.send("F:" + (freq / 1000).toFixed(3));
-      autoAutoscale(0,true);  // wait for autoscale
-      saveSettings();
+
+        ws.send("F:" + (freq / 1000).toFixed(3));
+        autoAutoscale(0, true);  // wait for autoscale
+        saveSettings();
     }
 
     function setMode(selected_mode) {
