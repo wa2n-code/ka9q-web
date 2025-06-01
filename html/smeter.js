@@ -299,8 +299,6 @@ function drawAnalogSMeter(signalStrength) {
     const centerY = 110;
     const radius = 100;
 
-    // Fill the entire background with #ddd first
-    //ctx.fillStyle = "#ddd";
     ctx.fillStyle = getComputedStyle(document.body).backgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -310,14 +308,14 @@ function drawAnalogSMeter(signalStrength) {
     ctx.fill();
 
     // Outer arc in
-    ctx.strokeStyle = "#000000";
+    ctx.strokeStyle = getComputedStyle(document.body).color;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, Math.PI, 2 * Math.PI);
     ctx.stroke();
 
     // Scale markings with correct calibration
-    ctx.fillStyle = "#000000"
+    ctx.fillStyle = getComputedStyle(document.body).color;
     ctx.font = "14px Arial";
     const scale = [
     { label: "S1",   fraction: 0.0 },
@@ -394,7 +392,7 @@ function drawAnalogSMeter(signalStrength) {
     ctx.stroke();
 
     // Value text
-    ctx.fillStyle = "#000000"
+    ctx.fillStyle = getComputedStyle(document.body).color;
     ctx.font = "16px Arial";
     ctx.fillText(`Signal Power: ${signalStrength} dBm`, 25, 135);
 }
