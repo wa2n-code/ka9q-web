@@ -1393,9 +1393,11 @@ function enableBandSelectAlwaysCallsSetBand_Chrome() {
 function enableBandSelectAlwaysCallsSetBand() {
     if (isFirefox()) {
         enableBandSelectAlwaysCallsSetBand_Firefox();
-    } else {
+    } 
+    /* else {
         enableBandSelectAlwaysCallsSetBand_Chrome();
     }
+*/
 }
 
 document.addEventListener('DOMContentLoaded', function() {
