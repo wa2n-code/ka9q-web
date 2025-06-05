@@ -909,8 +909,8 @@ function Spectrum(id, options) {
             const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
             let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
             let freq_khz = clickedHz / 1000;
-            let step = 0.5;
-            let snapped_khz = Math.ceil(freq_khz / step) * step;
+            let step = increment / 1000; 
+            let snapped_khz = Math.round(freq_khz / step) * step;
             document.getElementById("freq").value = snapped_khz.toFixed(3);
             ws.send("F:" + snapped_khz.toFixed(3));
             spectrum.frequency = snapped_khz * 1000;
@@ -971,7 +971,7 @@ function Spectrum(id, options) {
             if (pendingCenterHz !== null && dragStarted) {
                 // Snap centerHz to next 0.500 kHz step
                 let freq_khz = pendingCenterHz / 1000;
-                let step = increment / 1000  //0.5;  // read step size here... wdr
+                let step = increment / 1000  
                 let snapped_center = Math.round(freq_khz / step) * step * 1000;
                 spectrum.setCenterHz(snapped_center);
 
