@@ -890,4 +890,101 @@ function Spectrum(id, options) {
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+
+    // Drag spectrum with right mouse button
+
+    let isDragging = false;
+    let dragStarted = false;
+    let dragThreshold = 4; // pixels
+    let startX = 0;
+    let startY = 0;
+    let startCenterHz = 0;
+    let pendingCenterHz = null;
+    const spectrum = this;
+
+    this.canvas.addEventListener('mousedown', function(e) {
+        if (e.button === 0) { // Left mouse button: tune instantly
+            const rect = spectrum.canvas.getBoundingClientRect();
+            const mouseX = e.offsetX;
+            const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+            let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
+            let freq_khz = clickedHz / 1000;
+            let step = 0.5;
+            let snapped_khz = Math.ceil(freq_khz / step) * step;
+            document.getElementById("freq").value = snapped_khz.toFixed(3);
+            ws.send("F:" + snapped_khz.toFixed(3));
+            spectrum.frequency = snapped_khz * 1000;
+            if (spectrum.bin_copy) {
+                spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+            }
+        } else if (e.button === 2) { // Right mouse button: start drag, move cursor to center
+            isDragging = true;
+            dragStarted = false;
+            startX = e.offsetX;
+            startY = e.offsetY;
+            startCenterHz = spectrum.centerHz;
+            pendingCenterHz = null;
+            // Move cursor to center immediately
+            spectrum.frequency = spectrum.centerHz;
+            document.getElementById("freq").value = (spectrum.centerHz / 1000).toFixed(3);
+            ws.send("F:" + (spectrum.centerHz / 1000).toFixed(3));
+            ws.send("Z:c");
+            spectrum.canvas.style.cursor = "grabbing";
+            e.preventDefault(); // Prevent context menu
+        }
+    });
+
+    // Prevent context menu on right click
+    this.canvas.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function(e) {
+        // Only process if right mouse button is being dragged
+        if (!isDragging || (e.buttons & 2) === 0) return;
+        const rect = spectrum.canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const dx = mouseX - startX;
+        if (!dragStarted && Math.abs(dx) > dragThreshold) {
+            dragStarted = true;
+        }
+        if (!dragStarted) return; // Don't start drag logic until threshold passed
+
+        const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+        pendingCenterHz = startCenterHz - dx * hzPerPixel;
+        spectrum.setCenterHz(pendingCenterHz);
+
+        // Keep cursor at center
+        spectrum.frequency = pendingCenterHz;
+        document.getElementById("freq").value = (pendingCenterHz / 1000).toFixed(3);
+        ws.send("F:" + (pendingCenterHz / 1000).toFixed(3));
+        ws.send("Z:c");
+
+        if (spectrum.bin_copy) {
+            spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+        }
+    });
+
+    window.addEventListener('mouseup', function(e) {
+        if (isDragging && e.button === 2) {
+            spectrum.canvas.style.cursor = "";
+            if (pendingCenterHz !== null && dragStarted) {
+                // Snap centerHz to next 0.500 kHz step
+                let freq_khz = pendingCenterHz / 1000;
+                let step = 0.5;
+                let snapped_center = Math.ceil(freq_khz / step) * step * 1000;
+                spectrum.setCenterHz(snapped_center);
+
+                // Keep cursor at center
+                spectrum.frequency = snapped_center;
+                document.getElementById("freq").value = (snapped_center / 1000).toFixed(3);
+                ws.send("F:" + (snapped_center / 1000).toFixed(3));
+                ws.send("Z:c");
+            }
+            isDragging = false;
+            dragStarted = false;
+            pendingCenterHz = null;
+        }
+    });
+
 }

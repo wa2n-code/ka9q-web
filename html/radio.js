@@ -367,18 +367,7 @@ function calcFrequencies() {
         ws.onerror = on_ws_error;
 
 
-//        if(is_touch_enabled()) {
-//console.log("touch enabled");
-//          document.getElementById('waterfall').addEventListener("touchstart", onMouseDown, false);
-//          document.getElementById('waterfall').addEventListener("touchend", onMouseUp, false);
-//          document.getElementById('waterfall').addEventListener("touchmove", onMouseMove, false);
-//        } else {
-//console.log("touch NOT enabled");
-          //document.getElementById('waterfall').addEventListener("click", onClick, false);
-          document.getElementById('waterfall').addEventListener("mousedown", onClick, false);
-          //document.getElementById('waterfall').addEventListener("mousedown", onMouseDown, false);
-          //document.getElementById('waterfall').addEventListener("mouseup", onMouseUp, false);
-          //document.getElementById('waterfall').addEventListener("mousemove", onMouseMove, false);
+          // disable wdrdocument.getElementById('waterfall').addEventListener("mousedown", onClick, false);
           document.getElementById('waterfall').addEventListener("wheel", onWheel, false);
           document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
 //        }
