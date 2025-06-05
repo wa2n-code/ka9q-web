@@ -1022,6 +1022,7 @@ function saveSettings() {
   localStorage.setItem("zoom_level", document.getElementById("zoom_level").valueAsNumber);
   localStorage.setItem("min_db", spectrum.min_db.toString())
   localStorage.setItem("max_db", spectrum.max_db.toString())
+  localStorage.setItem("graticuleIncrement", spectrum.graticuleIncrement.toString())
   localStorage.setItem("wf_min_db", spectrum.wf_min_db.toString())
   localStorage.setItem("wf_max_db", spectrum.wf_max_db.toString())
   localStorage.setItem("spectrum_percent", spectrum.spectrumPercent.toString());
@@ -1058,6 +1059,7 @@ function setDefaultSettings() {
   spectrum.max_db = -35;
   document.getElementById("spectrum_max").value = spectrum.max_db;
   spectrum.wf_min_db = -115;
+  spectrum.graticuleIncrement = 10;
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   spectrum.wf_max_db = -35;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
@@ -1093,7 +1095,7 @@ function setDefaultSettings() {
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 23) {
+  if ((localStorage.length == 0) || localStorage.length != 24) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1105,6 +1107,7 @@ function loadSettings() {
   spectrum.max_db = parseFloat(localStorage.getItem("max_db"));
   document.getElementById("spectrum_max").value = spectrum.max_db;
   spectrum.wf_min_db = parseFloat(localStorage.getItem("wf_min_db"));
+  spectrum.graticuleIncrement = parseFloat(localStorage.getItem("graticuleIncrement"));
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   spectrum.wf_max_db = parseFloat(localStorage.getItem("wf_max_db"));
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
