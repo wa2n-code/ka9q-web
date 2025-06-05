@@ -971,8 +971,8 @@ function Spectrum(id, options) {
             if (pendingCenterHz !== null && dragStarted) {
                 // Snap centerHz to next 0.500 kHz step
                 let freq_khz = pendingCenterHz / 1000;
-                let step = 0.5;
-                let snapped_center = Math.ceil(freq_khz / step) * step * 1000;
+                let step = increment / 1000  //0.5;  // read step size here... wdr
+                let snapped_center = Math.round(freq_khz / step) * step * 1000;
                 spectrum.setCenterHz(snapped_center);
 
                 // Keep cursor at center
