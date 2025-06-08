@@ -35,7 +35,7 @@
       var noise_density_audio = 0;
       var blocks_since_last_poll = 0;
       var last_poll = -1;
-      const webpage_version = "2.71";
+      //const webpage_version = "2.72";
       var webserver_version = "";
       var player = new PCMPlayer({
         encoding: '16bitInt',
@@ -843,10 +843,7 @@ function update_stats() {
   if (typeof ssrc !== 'undefined') {
     document.getElementById('ssrc').innerHTML = "SSRC: " + ssrc.toString();
   }
-  document.getElementById('version').innerHTML = "Version: v" + webpage_version;
-  //document.getElementById('webserver_version').innerHTML = "Server: v" + webserver_version.toString();
-  //if (webpage_version != webserver_version)
-  //  document.getElementById('webserver_version').innerHTML += " <b>Warning: version mismatch!</b>";
+  document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toString(); 
   document.getElementById("spare2").textContent = `Span (kHz): ${lowHz / 1000.0} to ${highHz / 1000.0}, width: ${(highHz - lowHz)/1000}, center: ${centerHz / 1000.0}`;
@@ -907,7 +904,6 @@ function buildCSV() {
     ["decay", spectrum.decay.toString()],
     ["baseband_power", power.toFixed(1)],
     ["ssrc", ssrc.toString()],
-    ["version", webpage_version],
     ["webserver_version", webserver_version.toString()],
     ["tune_hz", spectrum.frequency],
     ["tune_level", `"${level_to_string(spectrum.frequency)}"`],
