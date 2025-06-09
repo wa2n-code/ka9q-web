@@ -439,6 +439,19 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
         this.addWaterfallRow(data);
         this.resize();
 }
+
+/**
+ * Analyze a region of the spectrum data to determine the minimum (noise floor) and maximum (peak) dB values.
+ * 
+ * - The function examines a window of bins centered around the current tuned frequency.
+ * - For each bin in this window, it computes a smoothed minimum using either the mean or median of neighboring bins.
+ * - The maximum is taken as the highest value found in the window, but can be overridden by the global spectrum maximum.
+ * - The results are used to set the display range for the spectrum and waterfall.
+ * 
+ * This helps autoscale the display so that the noise floor and peaks are always visible and well-framed.
+ *
+ * @param {Array<number>} data - Array of dB values for each FFT bin.
+ */
 Spectrum.prototype.measureMinMax = function(data) {
             var range_scale_increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
