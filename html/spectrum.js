@@ -15,6 +15,21 @@ Spectrum.prototype.setFilter = function(low,high) {
     this.filter_high=high;
 }
 
+
+/*The `squeeze` function maps a dB value (signal level) to a vertical pixel position on the spectrum display, based on the current dB range.
+- **Inputs:**
+  - `value`: The dB value to map (e.g., a signal level).
+  - `out_min`: The minimum output (usually the bottom pixel of the axis).
+  - `out_max`: The maximum output (usually the top pixel of the axis).
+- **Behavior:**
+  - If `value` is below the minimum dB (`min_db`), it returns `out_min`.
+  - If `value` is above the maximum dB (`max_db`), it returns `out_max`.
+  - Otherwise, it linearly maps `value` from the range `[min_db, max_db]` to `[out_min, out_max]`.
+
+- Used to convert a dB value to a y-pixel position for drawing spectrum lines, labels, or other graphics on the canvas.
+
+`squeeze` converts a dB value to a vertical pixel position on the spectrum display, respecting the current dB range.
+*/
 Spectrum.prototype.squeeze = function(value, out_min, out_max) {
     if (value <= this.min_db)
         return out_min;
@@ -263,8 +278,8 @@ Spectrum.prototype.updateAxes = function() {
     // Clear axes canvas
     this.ctx_axes.clearRect(0, 0, width, height);
 
-    this.start_freq=this.centerHz-(this.spanHz/2);
-    var hz_per_pixel = this.spanHz/width;
+    this.start_freq = this.centerHz - (this.spanHz / 2);
+    var hz_per_pixel = this.spanHz / width;
 
     // Draw axes
     this.ctx_axes.font = "12px sans-serif";
@@ -272,12 +287,24 @@ Spectrum.prototype.updateAxes = function() {
     this.ctx_axes.textBaseline = "middle";
 
     this.ctx_axes.textAlign = "left";
-    var step = this.graticuleIncrement; // 5 or 10 dB depending on range of the spectrum
-    // Start at the nearest lower multiple of step (e.g., -120, -110, etc.)
+    var step = this.graticuleIncrement;
     var firstLine = Math.ceil(this.min_db / step) * step;
-    for (var i = firstLine; i <= this.max_db - step; i += step) {
-        var y = height - this.squeeze(i, 0, height);
-        this.ctx_axes.fillText(i, 5, y);
+
+    // --- Calculate frequency label area at the top ---
+    // Assume frequency text is drawn at y = 2, height ~ font size (12px)
+    const freqLabelY = 2;
+    const freqLabelHeight = 12; // px, adjust if your font size changes
+    const freqLabelBottom = freqLabelY + freqLabelHeight;
+
+    for (var i = firstLine; i <= this.max_db; i += step) {
+        var sqz = this.squeeze(i, 0, height);
+        var y = height - sqz;
+
+        // Only draw dB label if it won't overlap the frequency label area at the top
+        if (y > freqLabelBottom + 2) { // +2px margin
+            this.ctx_axes.fillText(i, 5, y);
+        }
+        // Always draw the horizontal line
         this.ctx_axes.beginPath();
         this.ctx_axes.moveTo(20, y);
         this.ctx_axes.lineTo(width, y);
@@ -350,7 +377,6 @@ Spectrum.prototype.updateAxes = function() {
         this.ctx_axes.stroke();
         freq=freq+inc;
     }
-
 }
 
 Spectrum.prototype.addData = function(data) {
@@ -434,7 +460,6 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
                     data[i - 10], data[i - 9], data[i - 8], data[i - 7], data[i - 6],
                     data[i - 5], data[i - 4], data[i - 3], data[i - 2], data[i - 1],
                     data[i], data[i + 1], data[i + 2], data[i + 3], data[i + 5], data[i + 6], data[i + 7], data[i + 8], data[i + 9], data[i + 10]];
-                
                 if(computeMean)
                     data_stat_low = values.reduce((a, b) => a + b, 0) / values.length;   // Average +/- N bins for the mean
                 else {
@@ -447,7 +472,8 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
                         median = sorted[mid];
                     }
                     data_stat_low = median;
-                }   
+                } 
+                  
                 data_peak = data[i];            // keep the peaks
                 if (data_stat_low < min_baseline) { // find the minimum baseline value for this series of bins (20 bins) 
                     min_baseline = data_stat_low;   // If lower than the previous min, set it
@@ -465,6 +491,7 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
             // We now have the min, max and statistic representing baseline in the range of bins we're looking at across the spectrum (400 bins)
 
             // Find the standard deviation at 20 bins around the minimum baseline bin that we've identified above
+            /*
             if (min_mean_index !== -1) {
                 let values = [
                     data[min_mean_index - 10], data[min_mean_index - 9], data[min_mean_index - 8], data[min_mean_index - 7], data[min_mean_index - 6],
@@ -477,7 +504,7 @@ Spectrum.prototype.measureMinMaxSdev = function(data) {
 
                 //console.log("Standard Deviation: ", std_dev.toFixed(2)," at min bin: ",min_mean_index);
             }
-
+            */
             // data_stat_low is a statistically computed level for the baseline over 400 bins, the smoothed baseline for this instant in time
             // data_min is the minimum value in the range of bins we're looking at (400 bins), not smoothed, just the minimum value for this instant in time
 
