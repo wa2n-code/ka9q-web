@@ -1080,7 +1080,7 @@ function setDefaultSettings() {
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 24) {
+  if ((localStorage.length == 0) || localStorage.length != 25) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1402,7 +1402,7 @@ function setAnalogMeterVisible(visible) {
     const topTableDiv = document.querySelector('div[style*="justify-content: center"][style*="margin-top: 10px"]');
     if (topTableDiv) {
         if (visible) {
-            topTableDiv.style.marginLeft = "-164px";
+            topTableDiv.style.marginLeft = "0px"; //"-164px";
         } else {
             topTableDiv.style.marginLeft = "0px";
         }
@@ -1410,3 +1410,69 @@ function setAnalogMeterVisible(visible) {
     enableAnalogSMeter = visible; // Update the global variable
     saveSettings();
 }
+
+// Frequency Memories logic
+(function() {
+    const MEMORY_KEY = 'frequency_memories';
+    let memories = Array(10).fill("");
+
+    // Load from localStorage if available
+    function loadMemories() {
+        const saved = localStorage.getItem(MEMORY_KEY);
+        if (saved) {
+            try {
+                const arr = JSON.parse(saved);
+                if (Array.isArray(arr) && arr.length === 10) {
+                    memories = arr;
+                }
+            } catch (e) {}
+        }
+    }
+
+    function saveMemories() {
+        localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+    }
+
+    function updateDropdownLabels() {
+        const sel = document.getElementById('memory_select');
+        for (let i = 0; i < 10; i++) {
+            let label = (i+1) + ':';
+            if (memories[i]) label += ' ' + memories[i];
+            sel.options[i].text = label;
+        }
+    }
+
+    function saveCurrentToMemory() {
+        const idx = parseInt(document.getElementById('memory_select').value, 10);
+        const freq = document.getElementById('freq').value.trim();
+        if (freq) {
+            memories[idx] = freq;
+            saveMemories();
+            updateDropdownLabels();
+        }
+    }
+
+    function recallMemory() {
+        const idx = parseInt(document.getElementById('memory_select').value, 10);
+        const freq = memories[idx];
+        if (freq) {
+            document.getElementById('freq').value = freq;
+            if (typeof setFrequencyW === 'function') setFrequencyW();
+        }
+    }
+
+    function deleteMemory() {
+        const idx = parseInt(document.getElementById('memory_select').value, 10);
+        memories[idx] = "";
+        saveMemories();
+        updateDropdownLabels();
+    }
+
+    window.addEventListener('DOMContentLoaded', function() {
+        loadMemories();
+        updateDropdownLabels();
+        document.getElementById('save_memory').onclick = saveCurrentToMemory;
+        document.getElementById('recall_memory').onclick = recallMemory;
+        document.getElementById('delete_memory').onclick = deleteMemory;
+    });
+})();
