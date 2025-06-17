@@ -1055,11 +1055,11 @@ function setDefaultSettings() {
   spectrum.maxHold = true;
   document.getElementById("max_hold").checked = spectrum.maxHold;
   spectrum.paused = false;
-  spectrum.decay = 1.05;
+  spectrum.decay = 1;
   spectrum.cursor_active = false;
   document.getElementById("mode").value = "am";
   target_preset = "usb";
-  increment = 500;
+  increment = 1000;
   document.getElementById("colormap").value = 9;
   spectrum.colorIndex = 9;
   document.getElementById("meter").value = 0;
