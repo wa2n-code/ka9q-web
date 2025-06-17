@@ -822,7 +822,8 @@ function update_stats() {
   // Update the signal bar meter and get the noise power, since it computes it
   var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
-  document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
+  document.getElementById('gps_time').innerHTML = (new Date()).toTimeString(); // delete the need to pull this from the server
+  //document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
   document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();
