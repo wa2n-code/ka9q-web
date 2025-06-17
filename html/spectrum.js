@@ -424,15 +424,17 @@ Spectrum.prototype.addData = function(data) {
 Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax) 
 {
         const useN0 = false;
+        const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
+        const waterfallBias = 8;    // Further bias the waterfall range by this amount
         if(getNewMinMax){
-            if(useN0) {
+            if(useN0) { // N0 took too long to settle...
                 this.minimum = Math.round(noise_density_audio) + 17;
                 this.maximum = this.wholeSpectrumMax = Math.round(Math.max(...this.bin_copy));
                 this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
             }
             else{ 
                 this.measureMinMax(data);
-                this.setRange(Math.round(this.minimum) -7, this.maximum, true, 13); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
             }
         }
         this.drawSpectrum(data);
@@ -455,7 +457,7 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
 Spectrum.prototype.measureMinMax = function(data) {
             var range_scale_increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
-            var binsToBracket = 200;  // Math.floor(this.bins / this.spanHz * frequencyToBracket);
+            var binsToBracket = 1600;  // look at the whole spectrum   // Math.floor(this.bins / this.spanHz * frequencyToBracket);
             var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
             var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
             //console.log("currentFreqBin=",currentFreqBin," binsToBracket=", binsToBracket," lowBin=", lowBin, " highBin=", highBin);
@@ -517,7 +519,7 @@ Spectrum.prototype.measureMinMax = function(data) {
             // Now we have a data_max for the whole spectrum, and a data_min that's the smoothed min over 20 bins around the tuned frequency
 
             // Update the min / max
-            this.minimum = data_min;    // Pick the data_min, which is 20-bin smoothed min over 400 bin span, don't bias it here, bias in drawSpectrumWaterfall
+            this.minimum = data_min;    // Pick the data_min, which is 20-bin smoothed min over N bin span, don't bias it here, bias in drawSpectrumWaterfall
             this.maximum = range_scale_increment * Math.ceil(data_max / range_scale_increment) + range_scale_increment; // was using the peak inside the bin high low range, now use all visible spectral data
             // this.maximum = -80;  // just for by eye testing, need to remove this wdr
             const minimum_spectral_gain = -80;
@@ -751,7 +753,7 @@ Spectrum.prototype.forceAutoscale = function(autoScaleCounterStart,waitToAutosca
         this.autoscaleWait = autoScaleCounterStart; // We're gonna run live up to maxAutoscaleWait
     else
         this.autoscaleWait = 100;  // not gonna wait
-    // console.log("forceAutoscale(), autoscaleWait set to ", this.autoscaleWait," waitToAutoscale= ", waitToAutoscale);
+    //console.log("forceAutoscale(), autoscaleWait set to ", this.autoscaleWait," waitToAutoscale= ", waitToAutoscale);
 }
 
 Spectrum.prototype.onKeypress = function(e) {

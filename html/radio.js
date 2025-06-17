@@ -1076,6 +1076,9 @@ function setDefaultSettings() {
   enableAnalogSMeter = false; // Default to digital S-Meter
   document.getElementById("ckAnalogSMeter").checked = false;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the default setting
+  const MEMORY_KEY = 'frequency_memories';
+  let memories = Array(20).fill("");
+  localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
 }
 
 function loadSettings() {
