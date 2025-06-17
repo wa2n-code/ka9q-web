@@ -1414,7 +1414,7 @@ function setAnalogMeterVisible(visible) {
 // Frequency Memories logic
 (function() {
     const MEMORY_KEY = 'frequency_memories';
-    let memories = Array(10).fill("");
+    let memories = Array(20).fill("");
 
     // Load from localStorage if available
     function loadMemories() {
@@ -1422,7 +1422,7 @@ function setAnalogMeterVisible(visible) {
         if (saved) {
             try {
                 const arr = JSON.parse(saved);
-                if (Array.isArray(arr) && arr.length === 10) {
+                if (Array.isArray(arr) && arr.length === 20) {
                     memories = arr;
                 }
             } catch (e) {}
@@ -1435,7 +1435,7 @@ function setAnalogMeterVisible(visible) {
 
     function updateDropdownLabels() {
         const sel = document.getElementById('memory_select');
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 20; i++) {
             let label = (i+1) + ':';
             if (memories[i]) label += ' ' + memories[i];
             sel.options[i].text = label;
