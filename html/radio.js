@@ -1457,10 +1457,25 @@ function setAnalogMeterVisible(visible) {
         const freq = memories[idx];
         if (freq) {
             document.getElementById('freq').value = freq;
+            let f = parseInt(parseFloat(freq) * 1000.0); // freq is in kHz, convert to Hz
+
+            // Set mode based on frequency if option is enabled
+            if (switchModesByFrequency) {
+                if (f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
+                    setMode('am');
+                } else if (f === 3330000 || f === 7850000) {
+                    setMode('usb');
+                } else if (f < 10000000) {
+                    setMode('lsb');
+                } else {
+                    setMode('usb');
+                }
+            }
+
             if (typeof setFrequencyW === 'function') setFrequencyW();
         }
     }
-
+    
     function deleteMemory() {
         const idx = parseInt(document.getElementById('memory_select').value, 10);
         memories[idx] = "";
