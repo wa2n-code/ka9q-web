@@ -1063,7 +1063,7 @@ function Spectrum(id, options) {
     const spectrum = this;
 
     this.canvas.addEventListener('mousedown', function(e) {
-        if (e.button === 0) { // Left mouse button: tune instantly
+        if (e.button === 0) { // Left mouse button: tune instantly or set cursor
             const rect = spectrum.canvas.getBoundingClientRect();
             const mouseX = e.offsetX;
             const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
@@ -1071,11 +1071,20 @@ function Spectrum(id, options) {
             let freq_khz = clickedHz / 1000;
             let step = increment / 1000; 
             let snapped_khz = Math.round(freq_khz / step) * step;
-            document.getElementById("freq").value = snapped_khz.toFixed(3);
-            ws.send("F:" + snapped_khz.toFixed(3));
-            spectrum.frequency = snapped_khz * 1000;
-            if (spectrum.bin_copy) {
-                spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+
+            if (spectrum.cursor_active) {
+                // Set the cursor frequency instead of tuning
+                spectrum.cursor_freq = clickedHz;
+                if (spectrum.bin_copy) {
+                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                }
+            } else {
+                document.getElementById("freq").value = snapped_khz.toFixed(3);
+                ws.send("F:" + snapped_khz.toFixed(3));
+                spectrum.frequency = snapped_khz * 1000;
+                if (spectrum.bin_copy) {
+                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                }
             }
         } else if (e.button === 2) { // Right mouse button: start drag, move cursor to center
             isDragging = true;
@@ -1093,7 +1102,7 @@ function Spectrum(id, options) {
             e.preventDefault(); // Prevent context menu
         }
     });
-
+   
     // Prevent context menu on right click
     this.canvas.addEventListener('contextmenu', function(e) {
         e.preventDefault();
