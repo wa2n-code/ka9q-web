@@ -1347,7 +1347,7 @@ int init_demod(struct channel *channel){
   channel->tune.freq = channel->tune.shift = NAN;
   channel->filter.min_IF = channel->filter.max_IF = channel->filter.kaiser_beta = NAN;
   channel->output.headroom = channel->linear.hangtime = channel->linear.recovery_rate = NAN;
-  channel->sig.bb_power = channel->sig.snr = channel->sig.foffset = NAN;
+  channel->sig.bb_power = channel->sig.foffset = NAN;
   channel->fm.pdeviation = channel->pll.cphase = NAN;
   channel->output.gain = NAN;
   channel->tp1 = channel->tp2 = NAN;
