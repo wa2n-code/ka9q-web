@@ -518,7 +518,7 @@
     }
 
     function setBand(freq) {
-        f = parseInt(freq);
+        var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
 
