@@ -809,6 +809,10 @@ function update_stats() {
   if (spectrum.paused)
     return;
 
+// GPS time isn't UTC
+  var t = Number(gps_time) / 1e9;
+  t+=315964800;
+  t-=18;
   var smp = Number(input_samples) / Number(input_samprate);
 
   // Compute filter bandwidth
@@ -875,10 +879,13 @@ async function getVersion() {
 }
 
 function buildCSV() {
+   var t = Number(gps_time) / 1e9;
+  t += 315964800;
+  t -= 18;
   const smp = Number(input_samples) / Number(input_samprate);
   const data = [
     ["description", `"${document.title}"`],
-    ["gps_time", (new Date()).toTimeString()],
+    ["gps_time", (new Date(t * 1000)).toTimeString()],
     ["adc_samples", (Number(input_samples)).toFixed(0)],
     ["adc_samp_rate", (input_samprate).toFixed(0)],
     ["adc_overs", ad_over.toString()],
