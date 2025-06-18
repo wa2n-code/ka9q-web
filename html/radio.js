@@ -2,11 +2,12 @@
 // G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
 //
-
+'use strict';
       var ssrc;
-
+      var page_title;
       var band;
-    let ws = null; // Declare WebSocket as a global variable
+      let arr_low;
+      let ws = null; // Declare WebSocket as a global variable
       let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
       let binWidthHz = 20000; // 20000 Hz per bin
@@ -16,11 +17,10 @@
       var highHz=32400000;
       let binCount = 1620;
       let spanHz = binCount * binWidthHz;
-
+      var counter = 0;
       var filter_low = -5000;
       var filter_high = 5000;
       var power = -120;
-
       var gps_time = 0;
       var input_samples = 0;
       var input_samprate = 0;
@@ -69,16 +69,16 @@
 
       function ntohf(value) {
         const buffer = new ArrayBuffer(4);
-        view = new DataView(buffer);
+        let view = new DataView(buffer);
         view.setFloat32(0, value);
 
         const byteArray = new Uint8Array(buffer);
         const result = (byteArray[0] << 24) | (byteArray[1] << 16) | (byteArray[2] << 8) | byteArray[3];
 
-        b0=byteArray[0];
-        b1=byteArray[1];
-        b2=byteArray[2];
-        b3=byteArray[3];
+        let b0=byteArray[0];
+        let b1=byteArray[1];
+        let b2=byteArray[2];
+        let b3=byteArray[3];
 
         byteArray[0]=b3;
         byteArray[1]=b2;
@@ -99,11 +99,11 @@
         return result;
       }
 
-function calcFrequencies() {
-  lowHz = centerHz - ((binWidthHz * binCount) / 2);
-  highHz = centerHz + ((binWidthHz * binCount) / 2);
-  spanHz = binCount * binWidthHz;
-}
+      function calcFrequencies() {
+        lowHz = centerHz - ((binWidthHz * binCount) / 2);
+        highHz = centerHz + ((binWidthHz * binCount) / 2);
+        spanHz = binCount * binWidthHz;
+      }
 
       function on_ws_open() {
         // get the SSRC
@@ -126,8 +126,8 @@ function calcFrequencies() {
         if(typeof evt.data === 'string') {
           // text data
           //console.log(evt.data);
-          temp=evt.data.toString();
-          args=temp.split(":");
+          let temp=evt.data.toString();
+          let args=temp.split(":");
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
@@ -286,7 +286,7 @@ function calcFrequencies() {
                     break;
                   case 40: // HIGH_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
-                    arr_high = new Float32Array(dataBuffer);
+                    let arr_high = new Float32Array(dataBuffer);
                     filter_high=ntohf(arr_high[0]);
                     i=i+l;
                     break;
@@ -318,14 +318,17 @@ function calcFrequencies() {
           }
         }
       }
+
       function on_ws_error() {
       }
+
       function is_touch_enabled() {
         return ( 'ontouchstart' in window ) ||
                ( navigator.maxTouchPoints > 0 ) ||
                ( navigator.msMaxTouchPoints > 0 );
       }
-      init = function(){
+      
+      var init = function(){
         frequencyHz = 10000000;
         centerHz = 10000000;
         binWidthHz = 20000;
@@ -333,23 +336,6 @@ function calcFrequencies() {
         if (!loadSettings()) {
           console.log("loadSettings() returned false, setting defaults");
           setDefaultSettings(); 
-/*          spectrum.setSpectrumPercent(50);
-          spectrum.setFrequency(frequencyHz);
-          spectrum.setCenterHz(centerHz);
-          spectrum.setSpanHz(binWidthHz * binCount);
-          lowHz = centerHz - ((binWidthHz * binCount) / 2);
-          spectrum.setLowHz(lowHz);
-          highHz = centerHz + ((binWidthHz * binCount) / 2);
-          spectrum.setHighHz(highHz);
-          spectrum.averaging = 0;
-          spectrum.maxHold = false;
-          spectrum.paused = false;
-          spectrum.colorIndex = 9;  // Default to kiwi color map
-          spectrum.decay = 1.0;
-          spectrum.cursor_active = false;
-          spectrum.bins = binCount;
-          document.getElementById('mode').value = "am";
-*/
         }
         spectrum.radio_pointer = this;
         page_title = "";
@@ -365,13 +351,8 @@ function calcFrequencies() {
         ws.onclose=on_ws_close;
         ws.binaryType = "arraybuffer";
         ws.onerror = on_ws_error;
-
-
-          // disable wdrdocument.getElementById('waterfall').addEventListener("mousedown", onClick, false);
-          document.getElementById('waterfall').addEventListener("wheel", onWheel, false);
-          document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
-//        }
-
+        document.getElementById('waterfall').addEventListener("wheel", onWheel, false);
+        document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
         document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
         document.getElementById('step').value = increment.toString();
         document.getElementById('colormap').value = spectrum.colorIndex;
@@ -392,7 +373,6 @@ function calcFrequencies() {
     // window.addEventListener('load', init, false);
 
     var increment=1000;
-
     function onClick(e) {   // click on waterfall or spectrum
       var span = binWidthHz * binCount;
       width=document.getElementById('waterfall').width;
@@ -416,6 +396,7 @@ function calcFrequencies() {
       pressed=true;
       startX=e.pageX;
     }
+
     function onMouseUp(e) {
       if(!moved) {
         width=document.getElementById('waterfall').width;
@@ -428,6 +409,7 @@ function calcFrequencies() {
       saveSettings();
       pressed=false;
     }
+
     function onMouseMove(e) {
       if(pressed) {
         moved=true;
@@ -460,8 +442,6 @@ function calcFrequencies() {
       }
       saveSettings();
     }
-
-    var counter;
 
     function step_changed(value) {
         increment = parseInt(value);
@@ -822,7 +802,7 @@ function update_stats() {
   // Update the signal bar meter and get the noise power, since it computes it
   var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
-  document.getElementById('gps_time').innerHTML = (new Date()).toTimeString(); // delete the need to pull this from the server
+  document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
   document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();

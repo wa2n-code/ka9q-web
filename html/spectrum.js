@@ -39,6 +39,20 @@ Spectrum.prototype.squeeze = function(value, out_min, out_max) {
         return Math.round((value - this.min_db) / (this.max_db - this.min_db) * out_max);
 }
 
+/**
+ * Converts an array of FFT bin dB values into color-mapped image data for a single row of the waterfall display.
+ *
+ * @function
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ *
+ * @description
+ * For each FFT bin value in the input array, this function:
+ * - Scales the dB value to a normalized range based on the current waterfall min/max dB settings.
+ * - Maps the scaled value to a color index in the current colormap.
+ * - Sets the corresponding RGBA values in the `imagedata` buffer for the waterfall row.
+ * Handles out-of-range and colormap errors gracefully by using the last color in the colormap.
+ * The resulting `imagedata` can be rendered onto the waterfall canvas to visualize signal intensity.
+ */
 Spectrum.prototype.rowToImageData = function(bins) {
     for(var i = 0; i < this.imagedata.data.length; i += 4) {
         try {
@@ -70,6 +84,20 @@ Spectrum.prototype.rowToImageData = function(bins) {
     }
 }
 
+/**
+ * Adds a new row of FFT bin data to the waterfall display and updates the main canvas.
+ *
+ * @function
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ *
+ * @description
+ * This function manages the scrolling waterfall display:
+ * - Optionally skips rows for decimation, based on the global `window.skipWaterfallLines` setting.
+ * - Shifts the existing waterfall image down by one row.
+ * - Converts the new FFT bin data into color-mapped image data and draws it as the top row of the waterfall.
+ * - Copies the updated waterfall image to the main spectrum canvas, scaling as needed.
+ * - Resets the internal line decimation counter to avoid overflow.
+ */
 let lineDecimation = 0;
 Spectrum.prototype.addWaterfallRow = function(bins) {
     // window.skipWaterfallLines should be 0 (no skip), 1 (skip 1), 2 (skip 2), or 3 (skip 3)
@@ -100,6 +128,21 @@ Spectrum.prototype.addWaterfallRow = function(bins) {
     if (lineDecimation > 1000000) lineDecimation = 0;
 }
 
+/**
+ * Draws the FFT (Fast Fourier Transform) trace on the spectrum display canvas.
+ *
+ * @function
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ * @param {string} color - The color to use for the FFT trace (CSS color string).
+ *
+ * @description
+ * This function renders the spectrum trace as a polyline on the main canvas:
+ * - Converts dB values to vertical pixel positions based on the current dB range and spectrum height.
+ * - Draws the trace from left to right, connecting each FFT bin value.
+ * - Fills the area under the trace to the bottom of the spectrum display.
+ * - Sets the stroke style to the specified color for the trace.
+ * The function is used to display the live spectrum, max hold, and min hold traces.
+ */
 Spectrum.prototype.drawFFT = function(bins,color) {
     var hz_per_pixel = this.spanHz/bins.length;
     var dbm_per_line=this.spectrumHeight/(this.max_db-this.min_db);
@@ -133,6 +176,18 @@ Spectrum.prototype.drawFFT = function(bins,color) {
     this.ctx.stroke();
 }
 
+/**
+ * Draws the filter region on the spectrum display.
+ *
+ * @function
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ *
+ * @description
+ * This function highlights the frequency range between the filter's low and high cutoff values
+ * by drawing a filled rectangle on the spectrum display. The filter region is calculated based
+ * on the current center frequency, span, and filter settings, and is rendered as a shaded area
+ * to visually indicate the active filter bandwidth.
+ */
 Spectrum.prototype.drawFilter = function(bins) {
     var hz_per_pixel = this.spanHz/bins.length;
 
@@ -147,6 +202,20 @@ Spectrum.prototype.drawFilter = function(bins) {
 //  this.ctx.fillStyle = "black";
 }
 
+/**
+ * Draws a vertical cursor line at the specified frequency on the spectrum display.
+ *
+ * @function
+ * @param {number} f - The frequency (in Hz) at which to draw the cursor.
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ * @param {string} color - The color to use for the cursor line (CSS color string).
+ * @param {number} [amp] - Optional. The amplitude (dB) at the cursor frequency. If provided, a horizontal tick mark is drawn at this amplitude.
+ *
+ * @description
+ * This function draws a vertical line at the specified frequency to indicate the current tuning or cursor position.
+ * If the amplitude (`amp`) is provided, it also draws a horizontal tick mark at the corresponding dB level.
+ * The cursor is rendered using the specified color for clear visual distinction.
+ */
 Spectrum.prototype.drawCursor = function(f, bins, color, amp) {
     var hz_per_pixel = this.spanHz/bins.length;
 
@@ -167,6 +236,21 @@ Spectrum.prototype.drawCursor = function(f, bins, color, amp) {
     this.ctx.stroke();
 }
 
+/**
+ * Draws the spectrum display on the main canvas using the provided FFT bin data.
+ *
+ * @function
+ * @param {Array<number>} bins - Array of dB values for each FFT bin (spectrum data).
+ *
+ * @description
+ * This function renders the spectrum trace and overlays on the main canvas:
+ * - Fills the background with black.
+ * - Applies FFT averaging and max/min hold if enabled.
+ * - Draws the filter region, main frequency cursor, and optional user cursor.
+ * - Renders the live spectrum trace, max hold, and min hold traces as enabled.
+ * - Applies a color gradient fill under the spectrum trace.
+ * - Copies the axes from the offscreen axes canvas onto the main canvas.
+ */
 Spectrum.prototype.drawSpectrum = function(bins) {
     var width = this.ctx.canvas.width;
     var height = this.ctx.canvas.height;
@@ -235,34 +319,31 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // draw pointer
     this.drawCursor(this.frequency, bins, "#ff0000", bins[this.hz_to_bin(this.frequency)]);
 
-//    console.log("drawCursor: frequency=",this.frequency," bin=",this.hz_to_bin(this.frequency)," amp=",bins[this.hz_to_bin(this.frequency)]);
-    
-
+    // console.log("drawCursor: frequency=",this.frequency," bin=",this.hz_to_bin(this.frequency)," amp=",bins[this.hz_to_bin(this.frequency)]);
     // draw cursor
     if (this.cursor_active)
         this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
 
     // Draw maxhold
-  if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
-    this.ctx.fillStyle = "none";
-    this.drawFFT(this.binsMax,"#ffff00");
-  }
+    if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMax,"#ffff00");
+    }
 
-  if (true == document.getElementById("check_live").checked){
-    // Draw FFT bins
-    this.drawFFT(bins,"#ffffff");
-    // Fill scaled path
-    this.ctx.fillStyle = this.gradient;
-    this.ctx.fill();
-  }
+    if (true == document.getElementById("check_live").checked){
+        // Draw FFT bins
+        this.drawFFT(bins,"#ffffff");
+        // Fill scaled path
+        this.ctx.fillStyle = this.gradient;
+        this.ctx.fill();
+    }
 
-
-  // Draw minhold
-  if ((this.maxHold) && (true == document.getElementById("check_min").checked)) {
-    this.ctx.fillStyle = "none";
-    this.drawFFT(this.binsMin,"#ff0000");
-    //console.log("Min hold bin ", this.binsMin.length/2, "= ", this.binsMin[this.binsMin.length/2]);
-  }
+    // Draw minhold
+    if ((this.maxHold) && (true == document.getElementById("check_min").checked)) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMin,"#ff0000");
+        //console.log("Min hold bin ", this.binsMin.length/2, "= ", this.binsMin[this.binsMin.length/2]);
+    }
 
     // Restore scale
     this.ctx.restore();
@@ -271,6 +352,18 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
 }
 
+/**
+ * Updates and redraws the axes for the spectrum display.
+ *
+ * @function
+ *
+ * @description
+ * Clears and redraws the axes canvas, including:
+ * - Horizontal dB grid lines and labels, spaced according to the current dB range and graticule increment.
+ * - Vertical frequency grid lines and labels, spaced according to the current frequency span and bin width.
+ * - Frequency labels are placed at the top; dB labels are placed along the left, avoiding overlap with frequency labels.
+ * This function ensures the axes reflect the current frequency span, dB range, and canvas size.
+ */
 Spectrum.prototype.updateAxes = function() {
     var width = this.ctx_axes.canvas.width;
     var height = this.ctx_axes.canvas.height;
@@ -381,6 +474,21 @@ Spectrum.prototype.updateAxes = function() {
     }
 }
 
+
+
+/**
+ * Adds new FFT bin data to the spectrum display and updates the visualization.
+ *
+ * @function
+ * @param {Array<number>} data - Array of dB values for each FFT bin (spectrum data).
+ *
+ * @description
+ * This function is called whenever new spectrum data is available. It:
+ * - Checks if the spectrum display is paused; if so, does nothing.
+ * - Stores a copy of the latest bin data and updates the number of bins.
+ * - If autoscaling is enabled, may wait a few cycles for the spectrum to settle before applying autoscale.
+ * - Calls `drawSpectrumWaterfall()` to update the spectrum and waterfall displays, optionally triggering autoscale.
+ */
 Spectrum.prototype.addData = function(data) {
     if (!this.paused) {
         if ((data.length) != this.wf_size) {
@@ -421,11 +529,26 @@ Spectrum.prototype.addData = function(data) {
     }
 }
 
+/**
+ * Renders the spectrum and waterfall displays using the provided FFT bin data.
+ *
+ * @function
+ * @param {Array<number>} data - Array of dB values for each FFT bin (spectrum data).
+ * @param {boolean} getNewMinMax - If true, measure and update the min/max dB values for autoscaling.
+ *
+ * @description
+ * This function draws both the spectrum and waterfall displays:
+ * - If `getNewMinMax` is true, it measures the minimum and maximum dB values in the data and updates the display range for autoscaling.
+ * - Calls `drawSpectrum` to render the spectrum trace.
+ * - Calls `addWaterfallRow` to add a new row to the waterfall display.
+ * - Calls `resize` to ensure the display is properly sized.
+ * The function applies optional biases to the spectrum and waterfall ranges for optimal visual presentation.
+ */
 Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax) 
 {
         const useN0 = false;
         const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
-        const waterfallBias = 8;    // Further bias the waterfall range by this amount
+        const waterfallBias = 11;    // Further bias the waterfall range by this amount
         if(getNewMinMax){
             if(useN0) { // N0 took too long to settle...
                 this.minimum = Math.round(noise_density_audio) + 17;
@@ -602,22 +725,34 @@ Spectrum.prototype.toggleColor = function() {
     this.saveSettings();
 }
 
+/**
+ * Sets the dB range for the spectrum and waterfall displays, updates UI controls, and redraws axes.
+ *
+ * @function
+ * @param {number} min_db - The minimum dB value for the spectrum display (baseline).
+ * @param {number} max_db - The maximum dB value for the spectrum display (top).
+ * @param {boolean} adjust_waterfall - If true, also adjust the waterfall dB range.
+ * @param {number} wf_min_adjust - Amount to bias the waterfall minimum dB (darken or lighten the waterfall).
+ *
+ * @description
+ * Updates the minimum and maximum dB values for the spectrum display and, optionally, the waterfall display.
+ * Also updates the corresponding input fields in the UI, sets the graticule (grid line) spacing,
+ * and redraws the axes. If `adjust_waterfall` is true, the waterfall's dB range is set based on
+ * the spectrum range plus the provided adjustment. Finally, saves the new settings to the radio pointer if available.
+ */
 Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_adjust) {
     //console.log("spectum.setRange min_db: ",min_db," max_db",max_db);
     this.min_db = min_db;
     this.max_db = max_db;
     document.getElementById("spectrum_min").value = min_db;
     document.getElementById("spectrum_max").value = max_db;
-    
     if(this.max_db > (this.min_db) + 50) // set the number of graticule lines based on the range
         this.graticuleIncrement = 10;
     else
         this.graticuleIncrement = 5;
-
     // console.log("spectrum.setRange min_db: ",this.min_db," max_db: ",this.max_db," wf min adjust: ",wf_min_adjust," graticuleIncrement: ",this.graticuleIncrement);   
-
     if (adjust_waterfall) {
-        this.wf_min_db = min_db + wf_min_adjust;    // min_db + stdev of the min? 
+        this.wf_min_db = min_db + wf_min_adjust;    // min_db + some bias to darken the waterfall 
         this.wf_max_db = max_db;
         //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
@@ -831,6 +966,29 @@ Spectrum.prototype.cursorDown = function() {
     this.cursorUpdate(this.cursor_freq);
 }
 
+
+/**
+ * Spectrum constructor function.
+ *
+ * Creates a new Spectrum display instance, initializing all state, canvases, and event handlers for spectrum and waterfall visualization.
+ *
+ * @constructor
+ * @param {string} id - The DOM element ID of the main canvas to use for the spectrum display.
+ * @param {Object} [options] - Optional configuration object.
+ * @param {number} [options.centerHz=0] - Initial center frequency in Hz.
+ * @param {number} [options.spanHz=0] - Initial frequency span in Hz.
+ * @param {number} [options.wf_size=0] - Number of FFT bins (width of the waterfall).
+ * @param {number} [options.wf_rows=256] - Number of rows in the waterfall display.
+ * @param {number} [options.spectrumPercent=50] - Percentage of the canvas height used for the spectrum display.
+ * @param {number} [options.spectrumPercentStep=5] - Step size for changing spectrum height percentage.
+ * @param {number} [options.averaging=0] - FFT averaging factor.
+ * @param {boolean} [options.maxHold=false] - Whether max hold is enabled initially.
+ * @param {number} [options.bins=false] - Number of FFT bins.
+ *
+ * @description
+ * Initializes the spectrum and waterfall canvases, sets up default display parameters, and attaches mouse and keyboard event handlers for user interaction.
+ * Handles spectrum display, waterfall rendering, autoscaling, color maps, and user controls for tuning and zooming.
+ */
 function Spectrum(id, options) {
     // Handle options
     this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
