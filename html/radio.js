@@ -1493,3 +1493,49 @@ function setAnalogMeterVisible(visible) {
         document.getElementById('delete_memory').onclick = deleteMemory;
     });
 })();
+
+// Linked band and subband selectors
+const bandOptions = {
+    ham: [
+        { label: "160M", freq: 1900000 },
+        { label: "80M", freq: 3715000 },
+        { label: "60M", freq: 5406500 },
+        { label: "40M", freq: 7150000 },
+        { label: "30M", freq: 10130000 },
+        { label: "20M", freq: 14185000 },
+        { label: "17M", freq: 18111000 },
+        { label: "15M", freq: 21300000 },
+        { label: "12M", freq: 24931000 },
+        { label: "10M", freq: 28500000 }
+    ],
+    time: [
+        { label: "CHU3330", freq: 3330000 },
+        { label: "CHU7850", freq: 7850000 },
+        { label: "CHU14670", freq: 14670000 },
+        { label: "WWV5000", freq: 5000000 },
+        { label: "WWV10MHz", freq: 10000000 },
+        { label: "WWV15MHz", freq: 15000000 },
+        { label: "WWV20MHz", freq: 20000000 },
+        { label: "WWV25MHz", freq: 25000000 }
+    ]
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const bandCategory = document.getElementById('band_category');
+    const band = document.getElementById('band');
+    if (bandCategory && band) {
+        bandCategory.addEventListener('change', function() {
+            band.innerHTML = '<option value="" disabled selected hidden>Select Band</option>';
+            const opts = bandOptions[this.value] || [];
+            opts.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt.freq;
+                o.textContent = opt.label;
+                band.appendChild(o);
+            });
+        });
+        band.addEventListener('change', function() {
+            if (this.value) setBand(this.value);
+        });
+    }
+});

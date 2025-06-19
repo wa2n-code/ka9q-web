@@ -127,27 +127,15 @@
                         <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
                     </td>
                     <td>
+                        <label for="band_category">Band Category:</label>
+                        <select name="band_category" id="band_category" title="Select band category.">
+                            <option value="" disabled selected hidden>Select Category</option>
+                            <option value="ham">Ham Bands</option>
+                            <option value="time">Time Stations</option>
+                        </select>
                         <label for="band">Band/Chan:</label>
-                        <select name="band" id="band" onchange="setBand(this.value)" title="Select radio band or time broadcast station.">
+                        <select name="band" id="band" title="Select radio band or time broadcast station.">
                             <option value="" disabled selected hidden>Select Band</option>
-                            <option value="1900000">160M</option>
-                            <option value="3715000">80M</option>
-                            <option value="5406500">60M</option>
-                            <option value="7150000">40M</option>
-                            <option value="10130000">30M</option>
-                            <option value="14185000">20M</option>
-                            <option value="18111000">17M</option>
-                            <option value="21300000">15M</option>
-                            <option value="24931000">12M</option>
-                            <option value="28500000">10M</option>
-                            <option value="3330000">CHU3330</option>
-                            <option value="7850000">CHU7850</option>
-                            <option value="14670000">CHU14670</option>
-                            <option value="5000000">WWV5000</option>
-                            <option value="10000000">WWV10MHz</option>
-                            <option value="15000000">WWV15MHz</option>
-                            <option value="20000000">WWV20MHz</option>
-                            <option value="25000000">WWV25MHz</option>
                         </select>
                     </td>
                 </tr>
