@@ -1496,7 +1496,7 @@ function setAnalogMeterVisible(visible) {
 
 // Linked band and subband selectors
 const bandOptions = {
-    ham: [
+    amateur: [
         { label: "160M", freq: 1900000 },
         { label: "80M", freq: 3715000 },
         { label: "60M", freq: 5406500 },
@@ -1508,7 +1508,11 @@ const bandOptions = {
         { label: "12M", freq: 24931000 },
         { label: "10M", freq: 28500000 }
     ],
-    time: [
+    broadcast: [
+        { label: "wham", freq: 1180000 },
+        { label: "wxxi", freq: 1370000 }
+    ],
+    utility: [
         { label: "CHU3330", freq: 3330000 },
         { label: "CHU7850", freq: 7850000 },
         { label: "CHU14670", freq: 14670000 },
@@ -1525,7 +1529,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const band = document.getElementById('band');
     if (bandCategory && band) {
         bandCategory.addEventListener('change', function() {
-            band.innerHTML = '<option value="" disabled selected hidden>Select Band</option>';
+            band.innerHTML = '';
             const opts = bandOptions[this.value] || [];
             opts.forEach(opt => {
                 const o = document.createElement('option');
@@ -1533,9 +1537,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 o.textContent = opt.label;
                 band.appendChild(o);
             });
+            // Select the first entry by default, but do NOT trigger change
+            if (opts.length > 0) {
+                band.selectedIndex = 0;
+            }
         });
         band.addEventListener('change', function() {
             if (this.value) setBand(this.value);
         });
+        // Trigger initial population and selection (no band change)
+        bandCategory.dispatchEvent(new Event('change'));
     }
 });
