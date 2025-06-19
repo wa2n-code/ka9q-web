@@ -1509,18 +1509,30 @@ const bandOptions = {
         { label: "10M", freq: 28500000 }
     ],
     broadcast: [
-        { label: "wham", freq: 1180000 },
-        { label: "wxxi", freq: 1370000 }
+        { label: "120M", freq:2397500 },
+        { label: "90M", freq: 3300000 },
+        { label: "75M", freq: 3950000 },
+        { label: "60M", freq: 4905000 },
+        { label: "49M", freq: 6050000 },
+        { label: "41M", freq: 7375000 },
+        { label: "31M", freq: 9650000 },
+        { label: "25M", freq: 11850000 },
+        { label: "22M", freq: 13720000 },
+        { label: "19M", freq: 15450000 },
+        { label: "16M", freq: 17690000 },
+        { label: "15M", freq: 18960000 },
+        { label: "13M", freq: 21650000 },
+        { label: "11M", freq: 25850000 }
     ],
     utility: [
         { label: "CHU3330", freq: 3330000 },
         { label: "CHU7850", freq: 7850000 },
-        { label: "CHU14670", freq: 14670000 },
-        { label: "WWV5000", freq: 5000000 },
-        { label: "WWV10MHz", freq: 10000000 },
-        { label: "WWV15MHz", freq: 15000000 },
-        { label: "WWV20MHz", freq: 20000000 },
-        { label: "WWV25MHz", freq: 25000000 }
+        { label: "CHU14.6", freq: 14670000 },
+        { label: "WWV5", freq: 5000000 },
+        { label: "WWV10", freq: 10000000 },
+        { label: "WWV15", freq: 15000000 },
+        { label: "WWV20", freq: 20000000 },
+        { label: "WWV25", freq: 25000000 }
     ]
 };
 
