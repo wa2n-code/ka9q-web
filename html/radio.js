@@ -774,7 +774,7 @@ function level_to_string(f) {
 
   f /= 1e6;
   //s = "bin " + bin.toString() + ", " + f.toFixed(3) + " MHz: " + amp.toFixed(1) + " dB";
-  s = f.toFixed(3) + " MHz: " + amp.toFixed(1) + " dBm";
+  s = f.toFixed(4) + " MHz: " + amp.toFixed(1) + " dBm";
   /* deep six the maxhold stuff for now
   var max_amp = -120.0;
   if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
