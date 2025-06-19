@@ -785,6 +785,24 @@ function level_to_string(f) {
   return s;
 }
 
+function formatUptimeDHMS(seconds) {
+    seconds = Math.floor(seconds);
+    const days = Math.floor(seconds / 86400);
+    seconds = seconds % 86400;
+    const hours = Math.floor(seconds / 3600);
+    seconds = seconds % 3600;
+    const minutes = Math.floor(seconds / 60);
+    seconds = seconds % 60;
+    let str = "";
+    if (days > 0) {
+        str += days + "d ";
+    }
+    str += String(hours).padStart(2, '0') + ":"
+        + String(minutes).padStart(2, '0') + ":"
+        + String(seconds).padStart(2, '0');
+    return str;
+}
+
 function update_stats() {
   if (spectrum.paused)
     return;
@@ -803,19 +821,19 @@ function update_stats() {
   var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
 
   document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
-  document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
+  //document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();
   document.getElementById('adc_last_over').innerHTML = "Last overrange: " + (samples_since_over / BigInt(input_samprate)).toString() + " s";
-  document.getElementById('uptime').innerHTML =  "Uptime: " + smp.toFixed(1) + " s";
+  document.getElementById('uptime').innerHTML = "Uptime: " + formatUptimeDHMS(smp);
   document.getElementById('rf_gain').innerHTML = "RF Gain: " + rf_gain.toFixed(1) + " dB";
   document.getElementById('rf_attn').innerHTML = "RF Atten: " + rf_atten.toFixed(1) + " dB";
   document.getElementById('rf_cal').innerHTML = "RF lev cal: " + rf_level_cal.toFixed(1) + " dB";
   document.getElementById('rf_agc').innerHTML = (rf_agc==1 ? "RF AGC: enabled" : "RF AGC: disabled");
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
   document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_audio.toFixed(1)} dBmJ, Noise power at BW ${bw}: ${noisePower.toFixed(1)} dBm`;
-  document.getElementById('bins').textContent = `Bins: ${binCount}`;
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz} Hz`;
+  document.getElementById('bins').textContent = `Bins: ${binCount.toLocaleString()}`;
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz`;
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
@@ -825,8 +843,8 @@ function update_stats() {
   }
   document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
-  document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toString(); 
-  document.getElementById("spare2").textContent = `Span (kHz): ${lowHz / 1000.0} to ${highHz / 1000.0}, width: ${(highHz - lowHz)/1000}, center: ${centerHz / 1000.0}`;
+  document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
+  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${(centerHz / 1000.0).toLocaleString()}`;
 
   // Show reordered info into ge_data left table column 1
 
