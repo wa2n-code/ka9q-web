@@ -823,8 +823,9 @@ function update_stats() {
   document.getElementById('gps_time').innerHTML = (new Date(t * 1000)).toTimeString();
   //document.getElementById('adc_samples').innerHTML = "ADC samples: " + (Number(input_samples) / 1e9).toFixed(3) + " G";
   document.getElementById('adc_samp_rate').innerHTML = "Fs in: " + (input_samprate / 1e6).toFixed(3) + " MHz";
-  document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toString();
-  document.getElementById('adc_last_over').innerHTML = "Last overrange: " + (samples_since_over / BigInt(input_samprate)).toString() + " s";
+  document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toLocaleString();
+  let seconds_since_over = Number(samples_since_over) / Number(input_samprate);
+  document.getElementById('adc_last_over').innerHTML = "Last overrange: " + formatUptimeDHMS(Number(seconds_since_over));
   document.getElementById('uptime').innerHTML = "Uptime: " + formatUptimeDHMS(smp);
   document.getElementById('rf_gain').innerHTML = "RF Gain: " + rf_gain.toFixed(1) + " dB";
   document.getElementById('rf_attn').innerHTML = "RF Atten: " + rf_atten.toFixed(1) + " dB";
@@ -844,12 +845,12 @@ function update_stats() {
   document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
-  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${(centerHz / 1000.0).toLocaleString()}`;
+  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${(centerHz / 1000.0).toLocaleString(1)}`;
 
   // Show reordered info into ge_data left table column 1
 
   if(!spectrum.cursor_active)
-    document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toFixed(3)} kHz | BW: ${Math.abs(filter_high - filter_low).toFixed(0)} Hz |`;
+    document.getElementById("ge_data").textContent = `Channel Frequency: ${(spectrum.frequency / 1e3).toLocaleString(3)} kHz | BW: ${Math.abs(filter_high - filter_low).toLocaleString(0)} Hz |`;
   else
   {
     document.getElementById("ge_data").textContent =  "Cursor: " + level_to_string(spectrum.cursor_freq) + " | ";
