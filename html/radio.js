@@ -524,7 +524,7 @@
 
         // Set mode based on frequency
        if(switchModesByFrequency ) {
-          if (f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 ||f === 25000000) {
+          if (f === 2500000 || f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 ||f === 25000000) {
               setMode('am');
           } else if (f === 3330000 || f === 7850000) {
               setMode('usb');
@@ -1463,7 +1463,7 @@ function setAnalogMeterVisible(visible) {
 
             // Set mode based on frequency if option is enabled
             if (switchModesByFrequency) {
-                if (f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
+                if (f === 2500000 ||f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
                     setMode('am');
                 } else if (f === 3330000 || f === 7850000) {
                     setMode('usb');
@@ -1528,6 +1528,7 @@ const bandOptions = {
         { label: "CHU3330", freq: 3330000 },
         { label: "CHU7850", freq: 7850000 },
         { label: "CHU14.6", freq: 14670000 },
+        { label: "WWV2.5", freq: 2500000 },
         { label: "WWV5", freq: 5000000 },
         { label: "WWV10", freq: 10000000 },
         { label: "WWV15", freq: 15000000 },
