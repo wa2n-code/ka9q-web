@@ -1416,14 +1416,14 @@ function setAnalogMeterVisible(visible) {
 // Frequency Memories logic
 (function() {
     const MEMORY_KEY = 'frequency_memories';
-    let memories = Array(20).fill("");
+    let memories = Array(50).fill("");
 
     function loadMemories() {
         const saved = localStorage.getItem(MEMORY_KEY);
         if (saved) {
             try {
                 const arr = JSON.parse(saved);
-                if (Array.isArray(arr) && arr.length === 20) {
+                if (Array.isArray(arr) && arr.length === 50) {
                     memories = arr;
                     window.memories = memories; // keep global reference in sync
                 }
@@ -1440,16 +1440,16 @@ function setAnalogMeterVisible(visible) {
 
     function updateDropdownLabels() {
         const sel = document.getElementById('memory_select');
-        // Ensure there are 20 options
-        if (sel.options.length !== 20) {
+        // Ensure there are 50 options
+        if (sel.options.length !== 50) {
             sel.innerHTML = '';
-            for (let i = 0; i < 20; i++) {
+            for (let i = 0; i < 50; i++) {
                 const opt = document.createElement('option');
                 opt.value = i;
                 sel.appendChild(opt);
             }
         }
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 50; i++) {
             let label = (i+1) + ':';
             if (memories[i]) label += ' ' + memories[i];
             sel.options[i].text = label;
@@ -1536,10 +1536,10 @@ window.addEventListener('DOMContentLoaded', function() {
         reader.onload = function(e) {
             try {
                 const arr = JSON.parse(e.target.result);
-                if (Array.isArray(arr) && arr.length === 20) {
+                if (Array.isArray(arr) && arr.length === 50) {
                     window.memories = arr;
                     localStorage.setItem('frequency_memories', JSON.stringify(arr));
-                    if (typeof loadMemories === 'function') loadMemories(); // <-- ensure closure and global are in sync
+                    if (typeof loadMemories === 'function') loadMemories(); // ensure closure and global are in sync
                     if (typeof updateDropdownLabels === 'function') updateDropdownLabels();
                     alert('Channel memories imported!');
                 } else {
