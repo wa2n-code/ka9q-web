@@ -1542,6 +1542,14 @@ document.addEventListener('DOMContentLoaded', function() {
     if (bandCategory && band) {
         bandCategory.addEventListener('change', function() {
             band.innerHTML = '';
+            // Add dummy entry
+            const dummy = document.createElement('option');
+            dummy.value = '';
+            dummy.textContent = 'Select:';
+            dummy.disabled = true;
+            dummy.selected = true;
+            band.appendChild(dummy);
+
             const opts = bandOptions[this.value] || [];
             opts.forEach(opt => {
                 const o = document.createElement('option');
@@ -1549,14 +1557,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 o.textContent = opt.label;
                 band.appendChild(o);
             });
-            // Select the first entry by default, but do NOT trigger change
-            if (opts.length > 0) {
-                band.selectedIndex = 0;
-            }
         });
+
         band.addEventListener('change', function() {
             if (this.value) setBand(this.value);
         });
+
         // Trigger initial population and selection (no band change)
         bandCategory.dispatchEvent(new Event('change'));
     }
