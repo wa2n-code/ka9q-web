@@ -46,9 +46,9 @@
     <!-- Frequency memory, bottom table and analog S-meter side by side, centered as a unit -->
     <div style="display: flex; flex-direction: row; justify-content: center; align-items: flex-start; gap: 2px;">
         <!-- Memory selector bounding box -->
-        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 10px 2px; margin-right: 10px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;">
-            <label for="memory_select" style="margin-bottom: 5px;">Channel Memories</label>
-            <select id="memory_select" style="width: 120px; margin-bottom: 8px;">
+        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 2px; margin-right: 4px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;">
+            <label for="memory_select" style="margin-bottom: 3px;">Channel Memories</label>
+            <select id="memory_select" style="width: 120px; margin-bottom: 4px;">
                 <option value="0">1</option>
                 <option value="1">2</option>
                 <option value="2">3</option>
@@ -70,10 +70,15 @@
                 <option value="18">19</option>
                 <option value="19">20</option>
             </select>
-            <div style="display: flex; gap: 5px;">
-                <button id="save_memory" style="width: 50px;" title="Save current frequency to selected memory">Save</button>
-                <button id="recall_memory" style="width: 50px;" title="Recall frequency from selected memory">Recall</button>
-                <button id="delete_memory" style="width: 50px;" title="Delete frequency from selected memory">Del</button>
+            <div style="display: flex; gap: 2px; margin-bottom: 2px;">
+                <button id="save_memory" style="width: 54px; padding: 2px 2px;" title="Save current frequency to selected memory">Save</button>
+                <button id="recall_memory" style="width: 54px; padding: 2px 2px;" title="Recall frequency from selected memory">Recall</button>
+                <button id="delete_memory" style="width: 54px; padding: 2px 2px;" title="Delete frequency from selected memory">Del</button>
+            </div>
+            <div style="display: flex; gap: 2px;">
+                <button id="export_memories" style="width: 68px; padding: 2px 2px;" title="Export channel memories to file">Export</button>
+                <input type="file" id="import_memories" style="display:none" accept="application/json">
+                <button id="import_memories_btn" style="width: 68px; padding: 2px 2px;" title="Import channel memories from file">Import</button>
             </div>
         </div>
         <div>

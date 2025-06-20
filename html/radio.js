@@ -1418,7 +1418,6 @@ function setAnalogMeterVisible(visible) {
     const MEMORY_KEY = 'frequency_memories';
     let memories = Array(20).fill("");
 
-    // Load from localStorage if available
     function loadMemories() {
         const saved = localStorage.getItem(MEMORY_KEY);
         if (saved) {
@@ -1426,17 +1425,30 @@ function setAnalogMeterVisible(visible) {
                 const arr = JSON.parse(saved);
                 if (Array.isArray(arr) && arr.length === 20) {
                     memories = arr;
+                    window.memories = memories; // keep global reference in sync
                 }
-            } catch (e) {}
+            } catch (e) {
+                // ignore
+            }
         }
     }
 
     function saveMemories() {
         localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+        window.memories = memories; // keep global reference in sync
     }
 
     function updateDropdownLabels() {
         const sel = document.getElementById('memory_select');
+        // Ensure there are 20 options
+        if (sel.options.length !== 20) {
+            sel.innerHTML = '';
+            for (let i = 0; i < 20; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                sel.appendChild(opt);
+            }
+        }
         for (let i = 0; i < 20; i++) {
             let label = (i+1) + ':';
             if (memories[i]) label += ' ' + memories[i];
@@ -1445,6 +1457,7 @@ function setAnalogMeterVisible(visible) {
     }
 
     function saveCurrentToMemory() {
+        loadMemories(); // always sync before change
         const idx = parseInt(document.getElementById('memory_select').value, 10);
         const freq = document.getElementById('freq').value.trim();
         if (freq) {
@@ -1455,15 +1468,14 @@ function setAnalogMeterVisible(visible) {
     }
 
     function recallMemory() {
+        loadMemories(); // always sync before use
         const idx = parseInt(document.getElementById('memory_select').value, 10);
         const freq = memories[idx];
         if (freq) {
             document.getElementById('freq').value = freq;
-            let f = parseInt(parseFloat(freq) * 1000.0); // freq is in kHz, convert to Hz
-
-            // Set mode based on frequency if option is enabled
+            let f = parseInt(parseFloat(freq) * 1000.0);
             if (switchModesByFrequency) {
-                if (f === 2500000 ||f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
+                if (f === 2500000 || f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
                     setMode('am');
                 } else if (f === 3330000 || f === 7850000) {
                     setMode('usb');
@@ -1473,12 +1485,12 @@ function setAnalogMeterVisible(visible) {
                     setMode('usb');
                 }
             }
-
             if (typeof setFrequencyW === 'function') setFrequencyW();
         }
     }
-    
+
     function deleteMemory() {
+        loadMemories(); // always sync before change
         const idx = parseInt(document.getElementById('memory_select').value, 10);
         memories[idx] = "";
         saveMemories();
@@ -1492,7 +1504,54 @@ function setAnalogMeterVisible(visible) {
         document.getElementById('recall_memory').onclick = recallMemory;
         document.getElementById('delete_memory').onclick = deleteMemory;
     });
+
+    // Expose to global scope for import/export handlers
+    window.memories = memories;
+    window.saveMemories = saveMemories;
+    window.updateDropdownLabels = updateDropdownLabels;
+    window.loadMemories = loadMemories;
 })();
+
+// --- Import/Export Channel Memories ---
+window.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('export_memories').onclick = function() {
+        if (typeof loadMemories === 'function') loadMemories();
+        const blob = new Blob([JSON.stringify(window.memories, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'channel_memories.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+    document.getElementById('import_memories_btn').onclick = function() {
+        document.getElementById('import_memories').click();
+    };
+    document.getElementById('import_memories').onchange = function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const arr = JSON.parse(e.target.result);
+                if (Array.isArray(arr) && arr.length === 20) {
+                    window.memories = arr;
+                    localStorage.setItem('frequency_memories', JSON.stringify(arr));
+                    if (typeof loadMemories === 'function') loadMemories(); // <-- ensure closure and global are in sync
+                    if (typeof updateDropdownLabels === 'function') updateDropdownLabels();
+                    alert('Channel memories imported!');
+                } else {
+                    alert('Invalid memories file.');
+                }
+            } catch (err) {
+                alert('Error reading file: ' + err);
+            }
+        };
+        reader.readAsText(file);
+    };
+});
 
 // Linked band and subband selectors
 const bandOptions = {
