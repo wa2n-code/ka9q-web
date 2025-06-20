@@ -2,7 +2,7 @@
 // G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
 //
-'use strict';
+//'use strict'; kills save to local storage with Max Hold among other things
       var ssrc;
       var page_title;
       var band;
