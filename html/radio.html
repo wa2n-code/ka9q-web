@@ -47,68 +47,25 @@
     <div style="display: flex; flex-direction: row; justify-content: center; align-items: flex-start; gap: 2px;">
         <!-- Memory selector bounding box -->
         <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 2px; margin-right: 4px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;">
-            <label for="memory_select" style="margin-bottom: 3px;">Channel Memories</label>
-            <select id="memory_select" style="width: 120px; margin-bottom: 4px;">
-                <option value="0">1</option>
-                <option value="1">2</option>
-                <option value="2">3</option>
-                <option value="3">4</option>
-                <option value="4">5</option>
-                <option value="5">6</option>
-                <option value="6">7</option>
-                <option value="7">8</option>
-                <option value="8">9</option>
-                <option value="9">10</option>
-                <option value="10">11</option>
-                <option value="11">12</option>
-                <option value="12">13</option>
-                <option value="13">14</option>
-                <option value="14">15</option>
-                <option value="15">16</option>
-                <option value="16">17</option>
-                <option value="17">18</option>
-                <option value="18">19</option>
-                <option value="19">20</option>
-                <option value="20">21</option>
-                <option value="21">22</option>
-                <option value="22">23</option>
-                <option value="23">24</option>
-                <option value="24">25</option>
-                <option value="25">26</option>
-                <option value="26">27</option>
-                <option value="27">28</option>
-                <option value="28">29</option>
-                <option value="29">30</option>
-                <option value="30">31</option>
-                <option value="31">32</option>
-                <option value="32">33</option>
-                <option value="33">34</option>
-                <option value="34">35</option>
-                <option value="35">36</option>
-                <option value="36">37</option>
-                <option value="37">38</option>
-                <option value="38">39</option>
-                <option value="39">40</option>
-                <option value="40">41</option>
-                <option value="41">42</option>
-                <option value="42">43</option>
-                <option value="43">44</option>
-                <option value="44">45</option>
-                <option value="45">46</option>
-                <option value="46">47</option>
-                <option value="47">48</option>
-                <option value="48">49</option>
-                <option value="49">50</option>
-            </select>
-            <div style="display: flex; gap: 2px; margin-bottom: 2px;">
-                <button id="save_memory" style="width: 54px; padding: 2px 2px;" title="Save current frequency to selected memory">Save</button>
-                <button id="recall_memory" style="width: 54px; padding: 2px 2px;" title="Recall frequency from selected memory">Recall</button>
-                <button id="delete_memory" style="width: 54px; padding: 2px 2px;" title="Delete frequency from selected memory">Del</button>
-            </div>
-            <div style="display: flex; gap: 2px;">
-                <button id="export_memories" style="width: 68px; padding: 2px 2px;" title="Export channel memories to file">Export</button>
-                <input type="file" id="import_memories" style="display:none" accept="application/json">
-                <button id="import_memories_btn" style="width: 68px; padding: 2px 2px;" title="Import channel memories from file">Import</button>
+            <div id="memories_box" style="display: flex; flex-direction: column; align-items: stretch; padding: 4px 6px 2px 6px; margin-right: 0; min-width: 170px;">
+              <!-- Row 1: Centered label -->
+              <div style="display: flex; flex-direction: row; justify-content: center; align-items: center; width: 100%; margin-bottom: 2px;">
+                <label for="memory_select" style="margin: 0 auto; font-weight: bold; font-size: 15px;">Channel Memories</label>
+              </div>
+              <!-- Row 2: Selector and description textbox side by side -->
+              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
+                <select id="memory_select" style="width: 110px; min-width: 110px; max-width: 110px; padding: 1px 2px;"></select>
+                <input id="memory_desc" type="text" maxlength="20" placeholder="Description" style="width: 110px; min-width: 110px; max-width: 110px; font-size: 12px; margin: 0 auto;" autocomplete="off" />
+              </div>
+              <!-- Row 3: All five buttons in order -->
+              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
+                <button id="save_memory" title="Save current frequency to selected memory">Save</button>
+                <button id="recall_memory" title="Recall frequency from selected memory">Recall</button>
+                <button id="delete_memory" title="Delete selected memory">Del</button>
+                <button id="export_memories" title="Export all channel memories to file">Export</button>
+                <input type="file" id="import_memories" accept="application/json" style="display: none;" />
+                <button id="import_memories_btn" title="Import channel memories from file">Import</button>
+              </div>
             </div>
         </div>
         <div>
@@ -341,34 +298,7 @@
     </div>
     <!-- Placeholder for the dialog box -->
     <div id="dialogPlaceholder"></div>
-    <script>
-        // Load the dialog box content from optionsDialog.html
-        fetch('optionsDialog.html')
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('dialogPlaceholder').innerHTML = data;
-
-                // Add the X button handler here
-                var closeXButton = document.getElementById('closeXButton');
-                if (closeXButton) {
-                    closeXButton.onclick = function() {
-                        document.getElementById('optionsDialog').classList.remove('open');
-                        document.getElementById('dialogOverlay').classList.remove('open');
-                    };
-                }
-                // Initialize dialog event listeners
-                if (typeof initializeDialogEventListeners === "function") {
-                    initializeDialogEventListeners();
-                }
-                // Now that all DOM is loaded, call init()
-                if (typeof init === "function") {
-                    init();
-                }
-            })
-            .catch(error => {
-                console.error('Error loading optionsDialog.html:', error);
-            });
-    </script>
+   
     <span id="info"> </span>
     <span id="audiospan"> </span>
     <br><br>

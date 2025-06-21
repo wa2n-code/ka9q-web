@@ -1147,6 +1147,130 @@ function rx(x) {
   }
 }
 
+// --- Band Options: must be defined before use ---
+const bandOptions = {
+    amateur: [
+        { label: "160M", freq: 1900000 },
+        { label: "80M", freq: 3715000 },
+        { label: "60M", freq: 5406500 },
+        { label: "40M", freq: 7150000 },
+        { label: "30M", freq: 10130000 },
+        { label: "20M", freq: 14185000 },
+        { label: "17M", freq: 18111000 },
+        { label: "15M", freq: 21300000 },
+        { label: "12M", freq: 24931000 },
+        { label: "10M", freq: 28500000 }
+    ],
+    broadcast: [
+        { label: "120M", freq:2397500 },
+        { label: "90M", freq: 3300000 },
+        { label: "75M", freq: 3950000 },
+        { label: "60M", freq: 4905000 },
+        { label: "49M", freq: 6050000 },
+        { label: "41M", freq: 7375000 },
+        { label: "31M", freq: 9650000 },
+        { label: "25M", freq: 11850000 },
+        { label: "22M", freq: 13720000 },
+        { label: "19M", freq: 15450000 },
+        { label: "16M", freq: 17690000 },
+        { label: "15M", freq: 18960000 },
+        { label: "13M", freq: 21650000 },
+        { label: "11M", freq: 25850000 }
+    ],
+    utility: [
+        { label: "CHU3330", freq: 3330000 },
+        { label: "CHU7850", freq: 7850000 },
+        { label: "CHU14.6", freq: 14670000 },
+        { label: "WWV2.5", freq: 2500000 },
+        { label: "WWV5", freq: 5000000 },
+        { label: "WWV10", freq: 10000000 },
+        { label: "WWV15", freq: 15000000 },
+        { label: "WWV20", freq: 20000000 },
+        { label: "WWV25", freq: 25000000 }
+    ]
+};
+
+// --- Ensure setAnalogMeterVisible is defined before use ---
+function setAnalogMeterVisible(visible) {
+    //console.log(`Setting analog S-Meter visibility to: ${visible}`);
+    const meter = document.getElementById("sMeter");
+    if (meter) {
+        meter.style.display = visible ? "" : "none";
+    }
+    // Adjust the top table's margin-left based on S meter visibility
+    const topTableDiv = document.querySelector('div[style*="justify-content: center"][style*="margin-top: 10px"]');
+    if (topTableDiv) {
+        if (visible) {
+            topTableDiv.style.marginLeft = "0px"; //"-164px";
+        } else {
+            topTableDiv.style.marginLeft = "0px";
+        }
+    }
+    enableAnalogSMeter = visible; // Update the global variable
+    saveSettings();
+}
+
+// --- Frequency Memories logic: must be defined before use ---
+(function() {
+    const MEMORY_KEY = 'frequency_memories';
+    // Each memory is now an object: { freq: string, desc: string }
+    let memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+
+    function loadMemories() {
+        const saved = localStorage.getItem(MEMORY_KEY);
+        if (saved) {
+            try {
+                const arr = JSON.parse(saved);
+                // Backward compatibility: upgrade from string array to object array
+                if (Array.isArray(arr) && arr.length === 50) {
+                    if (typeof arr[0] === 'string') {
+                        memories = arr.map(f => ({ freq: f, desc: '' }));
+                    } else {
+                        memories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '' }));
+                    }
+                }
+            } catch (e) {
+                memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+            }
+        } else {
+            memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+        }
+        window.memories = memories;
+    }
+
+    function saveMemories() {
+        localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+        window.memories = memories;
+    }
+
+    function updateDropdownLabels() {
+        const sel = document.getElementById('memory_select');
+        if (!sel) return;
+        if (sel.options.length !== 50) {
+            sel.innerHTML = '';
+            for (let i = 0; i < 50; i++) {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.text = `${i+1}: ---`;
+                sel.appendChild(opt);
+            }
+        }
+        for (let i = 0; i < 50; i++) {
+            const m = memories[i];
+            let label = m.freq ? `${i+1}: ${m.freq}` : `${i+1}: ---`;
+            if (m.desc) label += ` (${m.desc})`;
+            sel.options[i].text = label;
+            sel.options[i].value = i; // Ensure value is always the index
+        }
+    }
+
+    // Expose for import/export and UI
+    window.memories = memories;
+    window.loadMemories = loadMemories;
+    window.saveMemories = saveMemories;
+    window.updateDropdownLabels = updateDropdownLabels;
+})();
+
 // Event handlers for new Spectrum Options Dialog box
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1390,226 +1514,163 @@ function enableBandSelectAlwaysCallsSetBand() {
 */
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    enableBandSelectAlwaysCallsSetBand();
-});
-
-function setAnalogMeterVisible(visible) {
-    //console.log(`Setting analog S-Meter visibility to: ${visible}`);
-    const meter = document.getElementById("sMeter");
-    if (meter) {
-        meter.style.display = visible ? "" : "none";
-    }
-    // Adjust the top table's margin-left based on S meter visibility
-    const topTableDiv = document.querySelector('div[style*="justify-content: center"][style*="margin-top: 10px"]');
-    if (topTableDiv) {
-        if (visible) {
-            topTableDiv.style.marginLeft = "0px"; //"-164px";
-        } else {
-            topTableDiv.style.marginLeft = "0px";
-        }
-    }
-    enableAnalogSMeter = visible; // Update the global variable
-    saveSettings();
-}
-
-// Frequency Memories logic
-(function() {
-    const MEMORY_KEY = 'frequency_memories';
-    let memories = Array(50).fill("");
-
-    function loadMemories() {
-        const saved = localStorage.getItem(MEMORY_KEY);
-        if (saved) {
-            try {
-                const arr = JSON.parse(saved);
-                if (Array.isArray(arr) && arr.length === 50) {
-                    memories = arr;
-                    window.memories = memories; // keep global reference in sync
-                }
-            } catch (e) {
-                // ignore
-            }
-        }
-    }
-
-    function saveMemories() {
-        localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
-        window.memories = memories; // keep global reference in sync
-    }
-
-    function updateDropdownLabels() {
-        const sel = document.getElementById('memory_select');
-        // Ensure there are 50 options
-        if (sel.options.length !== 50) {
-            sel.innerHTML = '';
-            for (let i = 0; i < 50; i++) {
-                const opt = document.createElement('option');
-                opt.value = i;
-                sel.appendChild(opt);
-            }
-        }
-        for (let i = 0; i < 50; i++) {
-            let label = (i+1) + ':';
-            if (memories[i]) label += ' ' + memories[i];
-            sel.options[i].text = label;
-        }
-    }
-
-    function saveCurrentToMemory() {
-        loadMemories(); // always sync before change
-        const idx = parseInt(document.getElementById('memory_select').value, 10);
-        const freq = document.getElementById('freq').value.trim();
-        if (freq) {
-            memories[idx] = freq;
-            saveMemories();
-            updateDropdownLabels();
-        }
-    }
-
-    function recallMemory() {
-        loadMemories(); // always sync before use
-        const idx = parseInt(document.getElementById('memory_select').value, 10);
-        const freq = memories[idx];
-        if (freq) {
-            document.getElementById('freq').value = freq;
-            let f = parseInt(parseFloat(freq) * 1000.0);
-            if (switchModesByFrequency) {
-                if (f === 2500000 || f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 || f === 25000000) {
-                    setMode('am');
-                } else if (f === 3330000 || f === 7850000) {
-                    setMode('usb');
-                } else if (f < 10000000) {
-                    setMode('lsb');
-                } else {
-                    setMode('usb');
-                }
-            }
-            if (typeof setFrequencyW === 'function') setFrequencyW();
-        }
-    }
-
-    function deleteMemory() {
-        loadMemories(); // always sync before change
-        const idx = parseInt(document.getElementById('memory_select').value, 10);
-        memories[idx] = "";
-        saveMemories();
-        updateDropdownLabels();
-    }
-
-    window.addEventListener('DOMContentLoaded', function() {
-        loadMemories();
-        updateDropdownLabels();
-        document.getElementById('save_memory').onclick = saveCurrentToMemory;
-        document.getElementById('recall_memory').onclick = recallMemory;
-        document.getElementById('delete_memory').onclick = deleteMemory;
-    });
-
-    // Expose to global scope for import/export handlers
-    window.memories = memories;
-    window.saveMemories = saveMemories;
-    window.updateDropdownLabels = updateDropdownLabels;
-    window.loadMemories = loadMemories;
-})();
-
-// --- Import/Export Channel Memories ---
+// --- Unified Initialization ---
 window.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('export_memories').onclick = function() {
-        if (typeof loadMemories === 'function') loadMemories();
-        const blob = new Blob([JSON.stringify(window.memories, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'channel_memories.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-    document.getElementById('import_memories_btn').onclick = function() {
-        document.getElementById('import_memories').click();
-    };
-    document.getElementById('import_memories').onchange = function(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                const arr = JSON.parse(e.target.result);
-                if (Array.isArray(arr) && arr.length === 50) {
-                    window.memories = arr;
-                    localStorage.setItem('frequency_memories', JSON.stringify(arr));
-                    if (typeof loadMemories === 'function') loadMemories(); // ensure closure and global are in sync
-                    if (typeof updateDropdownLabels === 'function') updateDropdownLabels();
-                    alert('Channel memories imported!');
-                } else {
-                    alert('Invalid memories file.');
-                }
-            } catch (err) {
-                alert('Error reading file: ' + err);
+    // Defensive: check for dialogPlaceholder
+    var dialogPlaceholder = document.getElementById('dialogPlaceholder');
+    if (!dialogPlaceholder) {
+        console.error('dialogPlaceholder element missing in HTML.');
+        return;
+    }
+    // Load the dialog box content from optionsDialog.html
+    fetch('optionsDialog.html')
+        .then(response => response.text())
+        .then(data => {
+            dialogPlaceholder.innerHTML = data;
+
+            // Defensive: check for required dialog elements
+            var closeXButton = document.getElementById('closeXButton');
+            var optionsDialog = document.getElementById('optionsDialog');
+            var dialogOverlay = document.getElementById('dialogOverlay');
+            if (closeXButton && optionsDialog && dialogOverlay) {
+                closeXButton.onclick = function() {
+                    optionsDialog.classList.remove('open');
+                    dialogOverlay.classList.remove('open');
+                };
+            } else {
+                console.error('Dialog elements missing after loading optionsDialog.html');
             }
-        };
-        reader.readAsText(file);
-    };
-});
+            // Initialize dialog event listeners
+            if (typeof initializeDialogEventListeners === "function") {
+                initializeDialogEventListeners();
+            }
+            // Now that all DOM is loaded, call init()
+            if (typeof init === "function") {
+                init();
+            }
 
-// Linked band and subband selectors
-const bandOptions = {
-    amateur: [
-        { label: "160M", freq: 1900000 },
-        { label: "80M", freq: 3715000 },
-        { label: "60M", freq: 5406500 },
-        { label: "40M", freq: 7150000 },
-        { label: "30M", freq: 10130000 },
-        { label: "20M", freq: 14185000 },
-        { label: "17M", freq: 18111000 },
-        { label: "15M", freq: 21300000 },
-        { label: "12M", freq: 24931000 },
-        { label: "10M", freq: 28500000 }
-    ],
-    broadcast: [
-        { label: "120M", freq:2397500 },
-        { label: "90M", freq: 3300000 },
-        { label: "75M", freq: 3950000 },
-        { label: "60M", freq: 4905000 },
-        { label: "49M", freq: 6050000 },
-        { label: "41M", freq: 7375000 },
-        { label: "31M", freq: 9650000 },
-        { label: "25M", freq: 11850000 },
-        { label: "22M", freq: 13720000 },
-        { label: "19M", freq: 15450000 },
-        { label: "16M", freq: 17690000 },
-        { label: "15M", freq: 18960000 },
-        { label: "13M", freq: 21650000 },
-        { label: "11M", freq: 25850000 }
-    ],
-    utility: [
-        { label: "CHU3330", freq: 3330000 },
-        { label: "CHU7850", freq: 7850000 },
-        { label: "CHU14.6", freq: 14670000 },
-        { label: "WWV2.5", freq: 2500000 },
-        { label: "WWV5", freq: 5000000 },
-        { label: "WWV10", freq: 10000000 },
-        { label: "WWV15", freq: 15000000 },
-        { label: "WWV20", freq: 20000000 },
-        { label: "WWV25", freq: 25000000 }
-    ]
-};
+            // --- Memories UI Setup ---
+            // Defensive: check for required memory elements
+            var sel = document.getElementById('memory_select');
+            var descBox = document.getElementById('memory_desc');
+            var saveBtn = document.getElementById('save_memory');
+            var recallBtn = document.getElementById('recall_memory');
+            var deleteBtn = document.getElementById('delete_memory');
+            var exportBtn = document.getElementById('export_memories');
+            var importBtn = document.getElementById('import_memories_btn');
+            var importInput = document.getElementById('import_memories');
+            if (!sel || !descBox || !saveBtn || !recallBtn || !deleteBtn || !exportBtn || !importBtn || !importInput) {
+                console.error('One or more memory UI elements are missing in HTML.');
+                return;
+            }
+            window.loadMemories();
+            window.updateDropdownLabels();
+            sel.onchange = function() { window.loadMemories(); window.updateDropdownLabels(); descBox.value = window.memories[parseInt(sel.value, 10)].desc || ''; };
+            descBox.oninput = function() {
+                window.loadMemories();
+                var idx = parseInt(sel.value, 10);
+                if (!window.memories[idx]) window.memories[idx] = { freq: '', desc: '' };
+                window.memories[idx].desc = descBox.value.slice(0, 20);
+                window.saveMemories();
+                window.updateDropdownLabels();
+            };
+            saveBtn.onclick = function() {
+                window.loadMemories();
+                var idx = parseInt(sel.value, 10);
+                var freq = document.getElementById('freq').value.trim();
+                var desc = descBox.value.trim().slice(0, 20);
+                if (freq) {
+                    window.memories[idx] = { freq, desc };
+                    window.saveMemories();
+                    window.updateDropdownLabels();
+                }
+            };
+            recallBtn.onclick = function() {
+                window.loadMemories();
+                var idx = parseInt(sel.value, 10);
+                var m = window.memories[idx];
+                if (m && m.freq) {
+                    document.getElementById('freq').value = m.freq;
+                    descBox.value = m.desc || '';
+                    setFrequencyW(false);
+                } else {
+                    descBox.value = '';
+                }
+            };
+            deleteBtn.onclick = function() {
+                window.loadMemories();
+                var idx = parseInt(sel.value, 10);
+                window.memories[idx] = { freq: '', desc: '' };
+                window.saveMemories();
+                window.updateDropdownLabels();
+                descBox.value = '';
+            };
+            exportBtn.onclick = function() {
+                window.loadMemories();
+                var data = JSON.stringify(window.memories, null, 2);
+                var blob = new Blob([data], { type: 'application/json' });
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'channel_memories.json';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            };
+            importBtn.onclick = function() { importInput.click(); };
+            importInput.onchange = function(e) {
+                var file = e.target.files[0];
+                if (!file) return;
+                var reader = new FileReader();
+                reader.onload = function(evt) {
+                    try {
+                        var arr = JSON.parse(evt.target.result);
+                        if (Array.isArray(arr) && arr.length === 50) {
+                            var newMemories;
+                            if (typeof arr[0] === 'string') {
+                                newMemories = arr.map(f => ({ freq: f, desc: '' }));
+                            } else {
+                                newMemories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '' }));
+                            }
+                            for (let i = 0; i < 50; i++) {
+                                window.memories[i] = newMemories[i];
+                            }
+                            window.saveMemories();
+                            window.updateDropdownLabels();
+                            var idx = parseInt(sel.value, 10);
+                            var m = window.memories[idx];
+                            descBox.value = m && m.desc ? m.desc : '';
+                        } else {
+                            alert('Invalid channel memories file.');
+                        }
+                    } catch (e) {
+                        alert('Failed to import channel memories: ' + e.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            // Initialize desc box for first memory
+            descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
+        })
+        .catch(error => {
+            console.error('Error loading optionsDialog.html:', error);
+        });
 
-document.addEventListener('DOMContentLoaded', function() {
+    // --- Band Selectors ---
     const bandCategory = document.getElementById('band_category');
     const band = document.getElementById('band');
     if (bandCategory && band) {
         bandCategory.addEventListener('change', function() {
             band.innerHTML = '';
-            // Add dummy entry
             const dummy = document.createElement('option');
             dummy.value = '';
             dummy.textContent = 'Select:';
             dummy.disabled = true;
             dummy.selected = true;
             band.appendChild(dummy);
-
             const opts = bandOptions[this.value] || [];
             opts.forEach(opt => {
                 const o = document.createElement('option');
@@ -1618,12 +1679,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 band.appendChild(o);
             });
         });
-
         band.addEventListener('change', function() {
             if (this.value) setBand(this.value);
         });
-
-        // Trigger initial population and selection (no band change)
         bandCategory.dispatchEvent(new Event('change'));
     }
 });
