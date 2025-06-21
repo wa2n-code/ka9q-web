@@ -1219,8 +1219,8 @@ function setAnalogMeterVisible(visible) {
 // --- Frequency Memories logic: must be defined before use ---
 (function() {
     const MEMORY_KEY = 'frequency_memories';
-    // Each memory is now an object: { freq: string, desc: string }
-    let memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+    // Each memory is now an object: { freq: string, desc: string, mode: string }
+    let memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
 
     function loadMemories() {
         const saved = localStorage.getItem(MEMORY_KEY);
@@ -1230,16 +1230,20 @@ function setAnalogMeterVisible(visible) {
                 // Backward compatibility: upgrade from string array to object array
                 if (Array.isArray(arr) && arr.length === 50) {
                     if (typeof arr[0] === 'string') {
-                        memories = arr.map(f => ({ freq: f, desc: '' }));
+                        memories = arr.map(f => ({ freq: f, desc: '', mode: '' }));
                     } else {
-                        memories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '' }));
+                        memories = arr.map(m => ({
+                            freq: m.freq || '',
+                            desc: m.desc || '',
+                            mode: m.mode || ''
+                        }));
                     }
                 }
             } catch (e) {
-                memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+                memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
             }
         } else {
-            memories = Array(50).fill(null).map(() => ({ freq: '', desc: '' }));
+            memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
         }
         window.memories = memories;
     }
@@ -1581,7 +1585,7 @@ window.addEventListener('DOMContentLoaded', function() {
             descBox.oninput = function() {
                 window.loadMemories();
                 var idx = parseInt(sel.value, 10);
-                if (!window.memories[idx]) window.memories[idx] = { freq: '', desc: '' };
+                if (!window.memories[idx]) window.memories[idx] = { freq: '', desc: '', mode: '' };
                 window.memories[idx].desc = descBox.value.slice(0, 20);
                 window.saveMemories();
                 // Do NOT updateDropdownLabels here; only update on save
@@ -1591,8 +1595,9 @@ window.addEventListener('DOMContentLoaded', function() {
                 var idx = parseInt(sel.value, 10);
                 var freq = document.getElementById('freq').value.trim();
                 var desc = descBox.value.trim().slice(0, 20);
+                var mode = document.getElementById('mode').value;
                 if (freq) {
-                    window.memories[idx] = { freq, desc };
+                    window.memories[idx] = { freq, desc, mode };
                     window.saveMemories();
                     window.updateDropdownLabels();
                 }
@@ -1605,7 +1610,10 @@ window.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('freq').value = m.freq;
                     descBox.value = m.desc || '';
                     setFrequencyW(false);
-                    setModeBasedOnFrequencyIfAllowed(m.freq * 1000);
+                    if (m.mode) {
+                        document.getElementById('mode').value = m.mode;
+                        setMode(m.mode);
+                    }
                 } else {
                     descBox.value = '';
                 }
@@ -1613,7 +1621,7 @@ window.addEventListener('DOMContentLoaded', function() {
             deleteBtn.onclick = function() {
                 window.loadMemories();
                 var idx = parseInt(sel.value, 10);
-                window.memories[idx] = { freq: '', desc: '' };
+                window.memories[idx] = { freq: '', desc: '', mode: '' };
                 window.saveMemories();
                 window.updateDropdownLabels();
                 descBox.value = '';
@@ -1644,9 +1652,9 @@ window.addEventListener('DOMContentLoaded', function() {
                         if (Array.isArray(arr) && arr.length === 50) {
                             var newMemories;
                             if (typeof arr[0] === 'string') {
-                                newMemories = arr.map(f => ({ freq: f, desc: '' }));
+                                newMemories = arr.map(f => ({ freq: f, desc: '', mode: '' }));
                             } else {
-                                newMemories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '' }));
+                                newMemories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '', mode: m.mode || '' }));
                             }
                             for (let i = 0; i < 50; i++) {
                                 window.memories[i] = newMemories[i];
