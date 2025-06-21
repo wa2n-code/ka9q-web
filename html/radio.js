@@ -1572,7 +1572,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (!window.memories[idx]) window.memories[idx] = { freq: '', desc: '' };
                 window.memories[idx].desc = descBox.value.slice(0, 20);
                 window.saveMemories();
-                window.updateDropdownLabels();
+                // Do NOT updateDropdownLabels here; only update on save
             };
             saveBtn.onclick = function() {
                 window.loadMemories();
