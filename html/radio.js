@@ -518,7 +518,7 @@
     }
 
     function setBand(freq) {
-        console.log("setBand() called with freq=",freq);
+        //console.log("setBand() called with freq=",freq);
         var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
@@ -530,7 +530,7 @@
 
     function setModeBasedOnFrequencyIfAllowed(f) {
         // Set mode based on frequency
-        console.log("setModeBasedOnFrequencyIfAllowed() called with freq=",f," switchModesByFrequency=",switchModesByFrequency);
+        //console.log("setModeBasedOnFrequencyIfAllowed() called with freq=",f," switchModesByFrequency=",switchModesByFrequency);
         if(switchModesByFrequency ) {
           if (f == 2500000 || f == 5000000 || f == 10000000 || f == 15000000 || f == 20000000 ||f == 25000000) {
               setMode('am');
@@ -546,7 +546,7 @@
     }
 
     function setMode(selected_mode) {
-      console.log("setMode() called with selected_mode=", selected_mode);
+      //console.log("setMode() called with selected_mode=", selected_mode);
       document.getElementById('mode').value = selected_mode;
       ws.send("M:" + selected_mode);
   
@@ -597,7 +597,7 @@
 
     function zoomout() {
       ws.send("Z:-:"+document.getElementById('freq').value);
-      console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
+      //console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
       // autoAutoscale(15,true); // 15 for n0
       autoAutoscale(100,true);
@@ -1448,7 +1448,7 @@ async function fetchZoomTableSize() {
     try {
         const size = await getZoomTableSize(); // Fetch the zoom table size
         zoomTableSize = size; // Store it in the global variable
-        console.log("Zoom table size fetched and stored:", zoomTableSize);
+        //console.log("Zoom table size fetched and stored:", zoomTableSize);
 
         // Update the max attribute of the zoom_level range control
         const zoomLevelControl = document.getElementById("zoom_level");
