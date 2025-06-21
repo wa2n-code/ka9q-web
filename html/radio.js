@@ -518,15 +518,23 @@
     }
 
     function setBand(freq) {
+        console.log("setBand() called with freq=",freq);
         var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
+        setModeBasedOnFrequencyIfAllowed(freq);
+        ws.send("F:" + (freq / 1000).toFixed(3));
+        autoAutoscale(0, true);  // wait for autoscale
+        saveSettings();
+    }
 
+    function setModeBasedOnFrequencyIfAllowed(f) {
         // Set mode based on frequency
-       if(switchModesByFrequency ) {
-          if (f === 2500000 || f === 5000000 || f === 10000000 || f === 15000000 || f === 20000000 ||f === 25000000) {
+        console.log("setModeBasedOnFrequencyIfAllowed() called with freq=",f," switchModesByFrequency=",switchModesByFrequency);
+        if(switchModesByFrequency ) {
+          if (f == 2500000 || f == 5000000 || f == 10000000 || f == 15000000 || f == 20000000 ||f == 25000000) {
               setMode('am');
-          } else if (f === 3330000 || f === 7850000) {
+          } else if (f == 3330000 || f == 7850000) {
               setMode('usb');
           } else if (f < 10000000) {
               setMode('lsb');
@@ -534,13 +542,11 @@
               setMode('usb');
           }
       }
-
-        ws.send("F:" + (freq / 1000).toFixed(3));
-        autoAutoscale(0, true);  // wait for autoscale
-        saveSettings();
+    
     }
 
     function setMode(selected_mode) {
+      console.log("setMode() called with selected_mode=", selected_mode);
       document.getElementById('mode').value = selected_mode;
       ws.send("M:" + selected_mode);
   
@@ -1255,9 +1261,15 @@ function setAnalogMeterVisible(visible) {
                 sel.appendChild(opt);
             }
         }
+        // Determine the max width for frequency (e.g., 13 chars for extra padding)
+        const PAD_WIDTH = 13;
         for (let i = 0; i < 50; i++) {
             const m = memories[i];
-            let label = m.freq ? `${i+1}: ${m.freq}` : `${i+1}: ---`;
+            let freqStr = m.freq ? m.freq : '---';
+            // Pad freqStr with non-breaking spaces to PAD_WIDTH
+            let padLen = Math.max(0, PAD_WIDTH - freqStr.length);
+            let paddedFreq = freqStr + '\u00A0'.repeat(padLen);
+            let label = m.freq ? `${i+1}: ${paddedFreq}` : `${i+1}: ---`;
             if (m.desc) label += ` (${m.desc})`;
             sel.options[i].text = label;
             sel.options[i].value = i; // Ensure value is always the index
@@ -1593,6 +1605,7 @@ window.addEventListener('DOMContentLoaded', function() {
                     document.getElementById('freq').value = m.freq;
                     descBox.value = m.desc || '';
                     setFrequencyW(false);
+                    setModeBasedOnFrequencyIfAllowed(m.freq * 1000);
                 } else {
                     descBox.value = '';
                 }
