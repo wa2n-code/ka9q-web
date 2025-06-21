@@ -1631,9 +1631,14 @@ window.addEventListener('DOMContentLoaded', function() {
                 var data = JSON.stringify(window.memories, null, 2);
                 var blob = new Blob([data], { type: 'application/json' });
                 var url = URL.createObjectURL(blob);
+
+                // Use only the IP address (no port) in the filename
+                var serverIP = window.location.hostname.replace(/:/g, '_');
+                var filename = `channel_memories_${serverIP}.json`;
+
                 var a = document.createElement('a');
                 a.href = url;
-                a.download = 'channel_memories.json';
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 setTimeout(() => {
