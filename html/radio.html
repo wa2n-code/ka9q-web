@@ -46,11 +46,11 @@
     <!-- Frequency memory, bottom table and analog S-meter side by side, centered as a unit -->
     <div style="display: flex; flex-direction: row; justify-content: center; align-items: flex-start; gap: 2px;">
         <!-- Memory selector bounding box -->
-        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 2px; margin-right: 4px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;">
+        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 2px; margin-right: 4px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;" title="Channel Memories: Save, recall, and manage frequency/mode memories.">
             <div id="memories_box" style="display: flex; flex-direction: column; align-items: stretch; padding: 4px 6px 2px 6px; margin-right: 0; min-width: 170px;">
               <!-- Row 1: Centered label -->
               <div style="display: flex; flex-direction: row; justify-content: center; align-items: center; width: 100%; margin-bottom: 2px;">
-                <label for="memory_select" style="margin: 0 auto; font-weight: bold; font-size: 15px;">Channel Memories</label>
+                <label for="memory_select" style="margin: 0 auto; font-weight: bold; font-size: 15px;" title="Channel Memories: Save, recall, and manage frequency/mode memories.">Channel Memories</label>
               </div>
               <!-- Row 2: Selector and description textbox side by side -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
@@ -313,6 +313,7 @@
         <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
+        <li>The Channel Memory box saves / restores up to 50 current frequencies and modes with descriptions.</li>
     </ul>
    <p><b>If the spectrum display/waterfall is focused, keyboard shortcuts are active:</b></p>
    <ul>
