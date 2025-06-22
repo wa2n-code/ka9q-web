@@ -1272,7 +1272,7 @@ function setAnalogMeterVisible(visible) {
             }
         }
         // Determine the max width for frequency (e.g., 13 chars for extra padding)
-        const PAD_WIDTH = 14;
+        const PAD_WIDTH = 15;
         for (let i = 0; i < 50; i++) {
             const m = memories[i];
             let freqStr = m.freq ? m.freq : '---';
