@@ -513,6 +513,7 @@
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
+        setModeBasedOnFrequencyIfAllowed(f);
         autoAutoscale(asCount,waitToAutoscale);      
         saveSettings();
     }
