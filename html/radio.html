@@ -46,22 +46,28 @@
     <!-- Frequency memory, bottom table and analog S-meter side by side, centered as a unit -->
     <div style="display: flex; flex-direction: row; justify-content: center; align-items: flex-start; gap: 2px;">
         <!-- Memory selector bounding box -->
-        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 2px; margin-right: 4px; background: transparent; min-width: 180px; display: flex; flex-direction: column; align-items: center;" title="Channel Memories: Save, recall, and manage frequency/mode memories.">
-            <div id="memories_box" style="display: flex; flex-direction: column; align-items: stretch; padding: 4px 6px 2px 6px; margin-right: 0; min-width: 170px;">
+        <div style="border: solid; border-color: dimgray; border-radius: 10px; font-size:14px; padding: 4px 4px; margin-right: 4px; background: transparent; min-width: 0; display: flex; flex-direction: column; align-items: center;" title="Channel Memories: Save, recall, and manage frequency/mode memories.">
+            <div id="memories_box" style="display: flex; flex-direction: column; align-items: stretch; padding: 4px 4px 2px 4px; margin-right: 0; min-width: 0; width: 100%;">
               <!-- Row 1: Centered label -->
               <div style="display: flex; flex-direction: row; justify-content: center; align-items: center; width: 100%; margin-bottom: 2px;">
                 <label for="memory_select" style="margin: 0 auto; font-weight: bold; font-size: 15px;" title="Channel Memories: Save, recall, and manage frequency/mode memories.">Channel Memories</label>
               </div>
-              <!-- Row 2: Selector and description textbox side by side -->
-              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
-                <select id="memory_select" title="Select memory channel" style="width: 110px; min-width: 110px; max-width: 110px; padding: 1px 2px;"></select>
-                <input id="memory_desc" title="Memory channel description" type="text" maxlength="20" placeholder="Description" style="width: 110px; min-width: 110px; max-width: 110px; font-size: 12px; margin: 0 auto;" autocomplete="off" />
+              <!-- Row 2: Selector -->
+              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
+                <select id="memory_select" title="Select memory channel" style="width: 120px; min-width: 120px; max-width: 120px; padding: 1px 2px;"></select>
               </div>
-              <!-- Row 3: All five buttons in order -->
+              <!-- Row 3: Description textbox below selector, matching width -->
+              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
+                <input id="memory_desc" title="Memory channel description" type="text" maxlength="20" placeholder="Description" style="width: 120px; min-width: 120px; max-width: 120px; font-size: 13px; margin: 0 auto;" autocomplete="off" />
+              </div>
+              <!-- Row 4: Save/Recall/Delete buttons -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
                 <button id="save_memory" title="Save current frequency to selected memory">Save</button>
                 <button id="recall_memory" title="Recall frequency from selected memory">Recall</button>
                 <button id="delete_memory" title="Delete selected memory">Del</button>
+              </div>
+              <!-- Row 5: Export/Import buttons -->
+              <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%;">
                 <button id="export_memories" title="Export all channel memories to file">Export</button>
                 <input type="file" id="import_memories" accept="application/json" style="display: none;" />
                 <button id="import_memories_btn" title="Import channel memories from file">Import</button>
