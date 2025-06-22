@@ -68,9 +68,9 @@
               </div>
               <!-- Row 5: Export/Import buttons -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%;">
-                <button id="export_memories" title="Export all channel memories to file">Export</button>
+                <button id="export_memories" title="Export all channel memories to file" style="width: 60px;">Export</button>
                 <input type="file" id="import_memories" accept="application/json" style="display: none;" />
-                <button id="import_memories_btn" title="Import channel memories from file">Import</button>
+                <button id="import_memories_btn" title="Import channel memories from file" style="width: 60px;">Import</button>
               </div>
             </div>
         </div>
@@ -255,8 +255,10 @@
                 </tr>
             </table>
         </div>
-        <div style="display: flex; align-items: center;">
-            <canvas id="sMeter" width="220" height="140"></canvas>
+        <div style="display: flex; align-items: center; margin-left: 4px;">
+            <div id="analog_smeter_box" style="border: solid; border-color: dimgray; border-radius: 10px; padding: 2px 2px; background: transparent; display: block;">
+                <canvas id="sMeter" width="220" height="140"></canvas>
+            </div>
         </div>
     </div>
     <div style="height:10px;font-size:10px;">&nbsp;</div>      

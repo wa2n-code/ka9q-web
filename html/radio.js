@@ -1199,6 +1199,11 @@ const bandOptions = {
 // --- Ensure setAnalogMeterVisible is defined before use ---
 function setAnalogMeterVisible(visible) {
     //console.log(`Setting analog S-Meter visibility to: ${visible}`);
+    const analogBox = document.getElementById("analog_smeter_box");
+    if (analogBox) {
+        analogBox.style.display = visible ? "block" : "none";
+    }
+    // Also hide the canvas directly for safety (legacy)
     const meter = document.getElementById("sMeter");
     if (meter) {
         meter.style.display = visible ? "" : "none";
