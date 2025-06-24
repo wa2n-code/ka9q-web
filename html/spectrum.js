@@ -512,20 +512,20 @@ Spectrum.prototype.addData = function(data) {
             //console.log("addData - this.autoscaleWait= ",this.autoscaleWait.toString());
             if(this.autoscaleWait < maxAutoscaleWait) {
                 this.autoscaleWait++;
-                //console.log("autoscaleWait ", this.autoscaleWait.toString()," zoomControlActive=", zoomControlActive," this.minimum= ", (typeof this.minimum === "number" ? this.minimum.toFixed(1) : this.minimum),  " this.maximum= ", (typeof this.maximum === "number" ? this.maximum.toFixed(1) : this.maximum));
-                this.drawSpectrumWaterfall(data,true);
+                console.log("autoscaleWait ", this.autoscaleWait.toString()," zoomControlActive=", zoomControlActive," this.minimum= ", (typeof this.minimum === "number" ? this.minimum.toFixed(1) : this.minimum),  " this.maximum= ", (typeof this.maximum === "number" ? this.maximum.toFixed(1) : this.maximum));
+                this.drawSpectrumWaterfall(data,false);  //wdr, don't get new min max, just draw the spectrum and waterfall
                 return;
             }
             else
-                //console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive);
+                console.log("autoscaleWait ",this.autoscaleWait.toString()," zoomControlActive=",zoomControlActive);
             if(this.autoscaleWait >= maxAutoscaleWait)  // Clear the flags for waiting and autoscaling
             {
                 this.autoscaleWait = 0; // Reset the flags and counters, we're going to autoscale now!
                 this.autoscale = false;
-                this.drawSpectrumWaterfall(data,true);
+                this.drawSpectrumWaterfall(data,true); // now get new min max
             }
         }
-        this.drawSpectrumWaterfall(data,false);  // true means get new min max
+        this.drawSpectrumWaterfall(data,false);  // Draw the spectrum and waterfall, don't get new min max
     }
 }
 
@@ -557,6 +557,7 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
             }
             else{ 
                 this.measureMinMax(data);
+                console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1));
                 this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
             }
         }
@@ -754,6 +755,10 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // min_db + some bias to darken the waterfall 
         this.wf_max_db = max_db;
+        // Update the waterfall min/max display sliders
+        document.getElementById("waterfall_min").value = this.wf_min_db;
+        document.getElementById("waterfall_max").value = this.wf_max_db;
+
         //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
     this.updateAxes();
@@ -888,7 +893,7 @@ Spectrum.prototype.forceAutoscale = function(autoScaleCounterStart,waitToAutosca
         this.autoscaleWait = autoScaleCounterStart; // We're gonna run live up to maxAutoscaleWait
     else
         this.autoscaleWait = 100;  // not gonna wait
-    //console.log("forceAutoscale(), autoscaleWait set to ", this.autoscaleWait," waitToAutoscale= ", waitToAutoscale);
+    console.log("forceAutoscale(), autoscaleWait set to ", this.autoscaleWait," waitToAutoscale= ", waitToAutoscale);
 }
 
 Spectrum.prototype.onKeypress = function(e) {

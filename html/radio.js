@@ -256,11 +256,13 @@
               spectrum.addData(arr);
             }
 
+            /*
             if (pending_range_update) {
                 pending_range_update = false;
                 updateRangeValues();
                 saveSettings();
             }
+            */
 
             update_stats();
             break;
@@ -674,6 +676,7 @@
     }
 
 function updateRangeValues(){
+  console.log("updateRangeValues() called", spectrum.wf_min_db, spectrum.wf_max_db, spectrum.min_db, spectrum.max_db); 
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   document.getElementById("waterfall_min_range").value = spectrum.wf_min_db;
@@ -686,13 +689,13 @@ function updateRangeValues(){
 function autoscaleButtonPush() {                      // autoscale button pressed, definitely do autoscale right away
   spectrum.forceAutoscale(100,false); 
   //console.log("autoscaleButtonPush() called with start value 100");
-  pending_range_update = true;
+  //pending_range_update = true;
 }
 
 function autoAutoscale(autoScaleCounterStart,waitToAutoscale = false) {     // Autoscale commanded by a change other than autoscale button press
   if (!onlyAutoscaleByButton) {
     spectrum.forceAutoscale(autoScaleCounterStart,waitToAutoscale);           
-    pending_range_update = true;
+    //pending_range_update = true;
   }
 }
 
@@ -722,12 +725,14 @@ function rangeDecrease() {
 
 function setWaterfallMin() {
   spectrum.wf_min_db = document.getElementById("waterfall_min_range").value;
+  console.log("setWaterfallMin() called with value=",spectrum.wf_min_db);
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   saveSettings();
 }
 
 function setWaterfallMax() {
   spectrum.wf_max_db = document.getElementById("waterfall_max_range").value;
+  console.log("setWaterfallMax() called with value=",spectrum.wf_max_db);
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   saveSettings();
 }
@@ -754,7 +759,7 @@ function adjustRange(element, event) {
   }
 
   const currentValue = parseFloat(element.value);
-
+  //console.log(`Current value: ${currentValue}, Step: ${step}`);
   // Adjust the value based on scroll direction
   if (event.deltaY < 0) {
     // Scrolling up
