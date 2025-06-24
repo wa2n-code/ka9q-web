@@ -91,7 +91,7 @@
                         Spectrum gain:
                         <button id="rangedec" style="width:45px" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
                         <button id="rangeinc" style="width:45px" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
-                        <input type="text" id="spectrum_max" style="width:30px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
+                        <input type="text" id="spectrum_max" style="width:38px" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
                     </td>
                     <td rowspan=2>
                         <input type="text" id="freq" style="color:green; font-size:26px; height:32px;width:125px; border:solid" value="" onchange="setFrequencyW()" title="Frequency direct entry" />
@@ -132,7 +132,7 @@
                         Spec Baseline:
                         <button id="baseline_down" style="width:45px" onclick="baselineDown()" title="Decrease spectrum baseline dBm">-</button>
                         <button id="baseline_up" style="width:45px" onclick="baselineUp()" title="Increase spectrum baseline dBm">+</button>
-                        <input type="text" id="spectrum_min" style="width: 30px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
+                        <input type="text" id="spectrum_min" style="width: 38px" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
                     </td>
                     <td>
                         <label for="band_category">Band:</label>
@@ -151,8 +151,8 @@
                 <tr>
                     <td>
                         Spectrum size:
-                        <button style="width:66px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
-                        <button style="width:66px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+                        <button style="width:70px" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
+                        <button style="width:70px" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
                     </td>
                     <td align="center">
                         <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
@@ -177,7 +177,7 @@
                     <td>
                         <label for="zoom_level">WF ceil:&nbsp;&nbsp;&nbsp;</label>
                         <input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
-                        <input type="text" id="waterfall_max" style="width: 30px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
+                        <input type="text" id="waterfall_max" style="width: 38px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
                     </td>
                     <td align="center">
                         <label for="step">Step:</label>
@@ -225,8 +225,8 @@
                 <tr>
                     <td>
                         <label for="zoom_level"> WF floor:</label>
-                        <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()" onwheel="adjustRange(this, event)" title="Adjust waterfall floor" />
-                        <input type="text" id="waterfall_min" style="width: 30px" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
+                        <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()" onwheel="adjustRange(this, event)" title="Adjust waterfall floor" style="position: relative; left: 5px;" />
+                        <input type="text" id="waterfall_min" style="width: 38px; position: relative; left: 5px;" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
                     </td>
                     <td align="center">
                         <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>

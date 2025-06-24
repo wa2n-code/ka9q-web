@@ -575,7 +575,11 @@
           sampleRate: newSampleRate,
           flushingTime: 250
       });
-  
+      // Set the player volume to match the slider after reinitializing
+      const volumeSlider = document.getElementById('volume_control');
+      if (volumeSlider) {
+          player.volume(parseFloat(volumeSlider.value));
+      }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
   }
