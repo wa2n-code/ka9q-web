@@ -676,7 +676,7 @@
     }
 
 function updateRangeValues(){
-  console.log("updateRangeValues() called", spectrum.wf_min_db, spectrum.wf_max_db, spectrum.min_db, spectrum.max_db); 
+  //console.log("updateRangeValues() called", spectrum.wf_min_db, spectrum.wf_max_db, spectrum.min_db, spectrum.max_db); 
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   document.getElementById("waterfall_min_range").value = spectrum.wf_min_db;
@@ -725,14 +725,14 @@ function rangeDecrease() {
 
 function setWaterfallMin() {
   spectrum.wf_min_db = document.getElementById("waterfall_min_range").value;
-  console.log("setWaterfallMin() called with value=",spectrum.wf_min_db);
+  //console.log("setWaterfallMin() called with value=",spectrum.wf_min_db);
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   saveSettings();
 }
 
 function setWaterfallMax() {
   spectrum.wf_max_db = document.getElementById("waterfall_max_range").value;
-  console.log("setWaterfallMax() called with value=",spectrum.wf_max_db);
+  //console.log("setWaterfallMax() called with value=",spectrum.wf_max_db);
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   saveSettings();
 }
