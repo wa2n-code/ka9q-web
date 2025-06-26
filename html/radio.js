@@ -1418,7 +1418,7 @@ function setPlayerVolume(value) {
     // Map slider value [0,1] to gain [0,3] using a perceptual (log-like) curve
     // Use exponent for perceptual mapping (2.5 is a good start)
     const minGain = 0;
-    const maxGain = 7.5;
+    const maxGain = 4;  // 4 is about the maximum gain that prevents clipping during recording on an SSB signal
     const exponent = 2.5;
     const slider = parseFloat(value);
     const gain = minGain + (maxGain - minGain) * Math.pow(slider, exponent);
