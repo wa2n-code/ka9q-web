@@ -48,7 +48,7 @@ PCMPlayer.prototype.createContext = function() {
 
     // Create a gain node for volume control
     this.gainNode = this.audioCtx.createGain();
-    this.gainNode.gain.value = 1;
+    // Do NOT set gainNode.gain.value here; let UI logic set it after creation
 
     // Create a stereo panner node for panning control
     this.pannerNode = this.audioCtx.createStereoPanner();

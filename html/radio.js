@@ -43,6 +43,11 @@
         sampleRate: 12000,
         flushingTime: 250
         });
+      // Ensure player volume matches slider after creation
+      const volumeSliderInit = document.getElementById('volume_control');
+      if (volumeSliderInit) {
+        setPlayerVolume(volumeSliderInit.value);
+      }
 
       var pending_range_update = false;
       var target_frequency = frequencyHz;
@@ -331,6 +336,7 @@
       }
       
       var init = function(){
+        settingsReady = false; // Block saves during initialization
         frequencyHz = 10000000;
         centerHz = 10000000;
         binWidthHz = 20000;
@@ -369,6 +375,7 @@
         updateRangeValues();
         player.volume(1.00);
         getVersion();
+        settingsReady = true; // Allow saves after initialization
       }
 
     // removed addevent listener for load and call init in the fetch script in radio.html
@@ -580,7 +587,7 @@
       // Set the player volume to match the slider after reinitializing
       const volumeSlider = document.getElementById('volume_control');
       if (volumeSlider) {
-          player.volume(parseFloat(volumeSlider.value));
+          setPlayerVolume(volumeSlider.value);
       }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
@@ -668,6 +675,9 @@
           btn.innerHTML = "Stop Audio";
           ws.send("A:START:"+ssrc.toString());
           player.resume();
+          // Ensure volume is set after resuming audio context
+          const volumeSlider = document.getElementById('volume_control');
+          if (volumeSlider) setPlayerVolume(volumeSlider.value);
         } else {
           btn.value = "START";
           btn.innerHTML = "Start Audio";
@@ -1017,7 +1027,9 @@ function dumpHTML() {
   link.click();
 }
 
+let settingsReady = false; // Block saves until after settings are loaded and UI is initialized
 function saveSettings() {
+  if (!settingsReady) return; // Prevent saves during initialization
   localStorage.setItem("tune_hz", spectrum.frequency.toString());
   localStorage.setItem("zoom_level", document.getElementById("zoom_level").valueAsNumber);
   localStorage.setItem("min_db", spectrum.min_db.toString())
@@ -1042,6 +1054,9 @@ function saveSettings() {
   localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
+  var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
+  //console.log("Saving volume control: ", volumeControl);
+  localStorage.setItem("volume_control", volumeControlNumber);
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -1094,11 +1109,14 @@ function setDefaultSettings() {
   const MEMORY_KEY = 'frequency_memories';
   let memories = Array(20).fill("");
   localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
+  localStorage.setItem("volume_control", 1.0);
+  setPlayerVolume(1.0); // set the volue using the exponential scale
+  document.getElementById("volume_control").value = 1.0;
 }
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 25) {
+  if ((localStorage.length == 0) || localStorage.length != 26) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1119,7 +1137,6 @@ function loadSettings() {
   centerHz = spectrum.centerHz;
   target_center = centerHz;
   spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
-//  console.log(`loading form storage maxHold = ${spectrum.maxHold}`);
   document.getElementById("max_hold").checked = spectrum.maxHold;
   spectrum.paused = (localStorage.getItem("paused") == "true");
   spectrum.decay = parseFloat(localStorage.getItem("decay"));
@@ -1147,6 +1164,10 @@ function loadSettings() {
   enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
   document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
+  //console.log("Loaded volume settings: ",parseFloat(localStorage.getItem("volume_control")));
+  var vc = parseFloat(localStorage.getItem("volume_control"));
+  document.getElementById("volume_control").value = vc;
+  setPlayerVolume(vc); // set the volue using the exponential scale
   return true;
 }
 
@@ -1302,6 +1323,7 @@ function setAnalogMeterVisible(visible) {
     window.updateDropdownLabels = updateDropdownLabels;
 })();
 
+
 // Event handlers for new Spectrum Options Dialog box
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -1393,8 +1415,15 @@ function makeDialogDraggable(dialog) {
 }
 
 function setPlayerVolume(value) {
-    player.volume(parseFloat(value)); // Set the volume using player.js's volume function
-    //console.log(`Volume set to: ${value}`);
+    // Map slider value [0,1] to gain [0,3] using a perceptual (log-like) curve
+    // Use exponent for perceptual mapping (2.5 is a good start)
+    const minGain = 0;
+    const maxGain = 3.0;
+    const exponent = 2.5;
+    const slider = parseFloat(value);
+    const gain = minGain + (maxGain - minGain) * Math.pow(slider, exponent);
+    player.volume(gain);
+    console.log(`Volume set to: ${gain} (slider: ${slider})`);
   } 
 
   function setPanner(value) {
@@ -1579,7 +1608,6 @@ window.addEventListener('DOMContentLoaded', function() {
             if (typeof init === "function") {
                 init();
             }
-
             // --- Memories UI Setup ---
             // Defensive: check for required memory elements
             var sel = document.getElementById('memory_select');
@@ -1695,6 +1723,8 @@ window.addEventListener('DOMContentLoaded', function() {
             };
             // Initialize desc box for first memory
             descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
+            // --- END OF ALL INITIALIZATION ---
+            settingsReady = true; // Allow saveSettings() from now on
         })
         .catch(error => {
             console.error('Error loading optionsDialog.html:', error);
