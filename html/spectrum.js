@@ -929,8 +929,8 @@ Spectrum.prototype.onKeypress = function(e) {
         ws.send("Z:c");
         saveSettings();
     } else if (e.key == "i") {
-      	ws.send("Z:+:"+document.getElementById('freq').value);
-	saveSettings();
+        ws.send("Z:+:"+document.getElementById('freq').value);
+    saveSettings();
     } else if (e.key == "o") {
         ws.send("Z:-:"+document.getElementById('freq').value);
         saveSettings();
@@ -1164,5 +1164,29 @@ function Spectrum(id, options) {
             pendingCenterHz = null;
         }
     });
+}
 
+// Export the Max Hold data as CSV (moved to bottom of file)
+Spectrum.prototype.exportMaxHoldCSV = function() {
+    if (!this.binsMax || this.binsMax.length === 0) {
+        alert("No Max Hold data to export.");
+        return;
+    }
+    // CSV header
+    let csv = "bin,value\n";
+    for (let i = 0; i < this.binsMax.length; i++) {
+        csv += `${i},${this.binsMax[i]}\n`;
+    }
+    // Create a Blob and trigger download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "spectrum_max_hold.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
 }
