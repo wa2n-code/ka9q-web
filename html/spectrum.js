@@ -6,6 +6,196 @@
 
 'use strict';
 
+/**
+ * Spectrum constructor function.
+ *
+ * Creates a new Spectrum display instance, initializing all state, canvases, and event handlers for spectrum and waterfall visualization.
+ *
+ * @constructor
+ * @param {string} id - The DOM element ID of the main canvas to use for the spectrum display.
+ * @param {Object} [options] - Optional configuration object.
+ * @param {number} [options.centerHz=0] - Initial center frequency in Hz.
+ * @param {number} [options.spanHz=0] - Initial frequency span in Hz.
+ * @param {number} [options.wf_size=0] - Number of FFT bins (width of the waterfall).
+ * @param {number} [options.wf_rows=256] - Number of rows in the waterfall display.
+ * @param {number} [options.spectrumPercent=50] - Percentage of the canvas height used for the spectrum display.
+ * @param {number} [options.spectrumPercentStep=5] - Step size for changing spectrum height percentage.
+ * @param {number} [options.averaging=0] - FFT averaging factor.
+ * @param {boolean} [options.maxHold=false] - Whether max hold is enabled initially.
+ * @param {number} [options.bins=false] - Number of FFT bins.
+ *
+ * @description
+ * Initializes the spectrum and waterfall canvases, sets up default display parameters, and attaches mouse and keyboard event handlers for user interaction.
+ * Handles spectrum display, waterfall rendering, autoscaling, color maps, and user controls for tuning and zooming.
+ */
+function Spectrum(id, options) {
+    // Handle options
+    this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
+    this.spanHz = (options && options.spanHz) ? options.spanHz : 0;
+    this.wf_size = (options && options.wf_size) ? options.wf_size : 0;
+    this.wf_rows = (options && options.wf_rows) ? options.wf_rows : 256;
+    this.spectrumPercent = (options && options.spectrumPercent) ? options.spectrumPercent : 50;
+    this.spectrumPercentStep = (options && options.spectrumPercentStep) ? options.spectrumPercentStep : 5;
+    this.averaging = (options && options.averaging) ? options.averaging : 0;
+    this.maxHold = (options && options.maxHold) ? options.maxHold : false;
+    this.bins = (options && options.bins) ? options.bins : false;
+    this.graticuleIncrement = 5;  // Default value for graticule spacing
+
+    // Setup state
+    this.paused = false;
+    this.fullscreen = false;
+    // newell 12/1/2024, 10:16:50
+    // set default spectrum ranges to match the scaled bin amplitudes
+    this.min_db = -120;
+    this.max_db = 0;
+    this.wf_min_db = -120;
+    this.wf_max_db = 0;
+    this.spectrumHeight = 0;
+
+    // Colors
+    this.colorindex = 9;                // Default colormap index to Kiwi
+    this.colormap = colormaps[9];
+
+    // Create main canvas and adjust dimensions to match actual
+    this.canvas = document.getElementById(id);
+    this.canvas.height = this.canvas.clientHeight;
+    this.canvas.width = this.canvas.clientWidth;
+    this.ctx = this.canvas.getContext("2d");
+    this.ctx.fillStyle = "black";
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Create offscreen canvas for axes
+    this.axes = document.createElement("canvas");
+    this.axes.height = 1; // Updated later
+    this.axes.width = this.canvas.width;
+    this.ctx_axes = this.axes.getContext("2d");
+
+    // Create offscreen canvas for waterfall
+    this.wf = document.createElement("canvas");
+    this.wf.height = this.wf_rows;
+    this.wf.width = this.wf_size;
+    this.ctx_wf = this.wf.getContext("2d");
+
+    this.autoscale = false;
+    this.autoscaleWait = 0;
+    this.decay = 1.0;
+    this.cursor_active = false;
+    this.cursor_step = 1000;
+    this.cursor_freq = 10000000;
+
+    this.radio_pointer = undefined;
+
+    // Trigger first render
+    this.setAveraging(this.averaging);
+    this.updateSpectrumRatio();
+    this.resize();
+
+    // Drag spectrum with right mouse button
+
+    let isDragging = false;
+    let dragStarted = false;
+    let dragThreshold = 4; // pixels
+    let startX = 0;
+    let startY = 0;
+    let startCenterHz = 0;
+    let pendingCenterHz = null;
+    const spectrum = this;
+
+    this.canvas.addEventListener('mousedown', function(e) {
+        if (e.button === 0) { // Left mouse button: tune instantly or set cursor
+            const rect = spectrum.canvas.getBoundingClientRect();
+            const mouseX = e.offsetX;
+            const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+            let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
+            let freq_khz = clickedHz / 1000;
+            let step = increment / 1000; 
+            let snapped_khz = Math.round(freq_khz / step) * step;
+
+            if (spectrum.cursor_active) {
+                // Set the cursor frequency instead of tuning
+                spectrum.cursor_freq = clickedHz;
+                if (spectrum.bin_copy) {
+                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                }
+            } else {
+                document.getElementById("freq").value = snapped_khz.toFixed(3);
+                ws.send("F:" + snapped_khz.toFixed(3));
+                spectrum.frequency = snapped_khz * 1000;
+                if (spectrum.bin_copy) {
+                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                }
+            }
+        } else if (e.button === 2) { // Right mouse button: start drag, move cursor to center
+            isDragging = true;
+            dragStarted = false;
+            startX = e.offsetX;
+            startY = e.offsetY;
+            startCenterHz = spectrum.centerHz;
+            pendingCenterHz = null;
+            // Move cursor to center immediately
+            spectrum.frequency = spectrum.centerHz;
+            document.getElementById("freq").value = (spectrum.centerHz / 1000).toFixed(3);
+            ws.send("F:" + (spectrum.centerHz / 1000).toFixed(3));
+            ws.send("Z:c");
+            spectrum.canvas.style.cursor = "grabbing";
+            e.preventDefault(); // Prevent context menu
+        }
+    });
+   
+    // Prevent context menu on right click
+    this.canvas.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function(e) {
+        // Only process if right mouse button is being dragged
+        if (!isDragging || (e.buttons & 2) === 0) return;
+        const rect = spectrum.canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const dx = mouseX - startX;
+        if (!dragStarted && Math.abs(dx) > dragThreshold) {
+            dragStarted = true;
+        }
+        if (!dragStarted) return; // Don't start drag logic until threshold passed
+
+        const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+        pendingCenterHz = startCenterHz - dx * hzPerPixel;
+        spectrum.setCenterHz(pendingCenterHz);
+
+        // Keep cursor at center
+        spectrum.frequency = pendingCenterHz;
+        document.getElementById("freq").value = (pendingCenterHz / 1000).toFixed(3);
+        ws.send("F:" + (pendingCenterHz / 1000).toFixed(3));
+        ws.send("Z:c");
+
+        if (spectrum.bin_copy) {
+            spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+        }
+    });
+
+    window.addEventListener('mouseup', function(e) {
+        if (isDragging && e.button === 2) {
+            spectrum.canvas.style.cursor = "";
+            if (pendingCenterHz !== null && dragStarted) {
+                // Snap centerHz to next 0.500 kHz step
+                let freq_khz = pendingCenterHz / 1000;
+                let step = increment / 1000  
+                let snapped_center = Math.round(freq_khz / step) * step * 1000;
+                spectrum.setCenterHz(snapped_center);
+
+                // Keep cursor at center
+                spectrum.frequency = snapped_center;
+                document.getElementById("freq").value = (snapped_center / 1000).toFixed(3);
+                ws.send("F:" + (snapped_center / 1000).toFixed(3));
+                ws.send("Z:c");
+            }
+            isDragging = false;
+            dragStarted = false;
+            pendingCenterHz = null;
+        }
+    });
+}
+
 Spectrum.prototype.setFrequency = function(freq) {
     this.frequency=freq;
 }
@@ -973,197 +1163,6 @@ Spectrum.prototype.cursorUp = function() {
 Spectrum.prototype.cursorDown = function() {
     this.cursor_freq = this.limitCursor(this.cursor_freq - parseInt(document.getElementById("step").value));
     this.cursorUpdate(this.cursor_freq);
-}
-
-
-/**
- * Spectrum constructor function.
- *
- * Creates a new Spectrum display instance, initializing all state, canvases, and event handlers for spectrum and waterfall visualization.
- *
- * @constructor
- * @param {string} id - The DOM element ID of the main canvas to use for the spectrum display.
- * @param {Object} [options] - Optional configuration object.
- * @param {number} [options.centerHz=0] - Initial center frequency in Hz.
- * @param {number} [options.spanHz=0] - Initial frequency span in Hz.
- * @param {number} [options.wf_size=0] - Number of FFT bins (width of the waterfall).
- * @param {number} [options.wf_rows=256] - Number of rows in the waterfall display.
- * @param {number} [options.spectrumPercent=50] - Percentage of the canvas height used for the spectrum display.
- * @param {number} [options.spectrumPercentStep=5] - Step size for changing spectrum height percentage.
- * @param {number} [options.averaging=0] - FFT averaging factor.
- * @param {boolean} [options.maxHold=false] - Whether max hold is enabled initially.
- * @param {number} [options.bins=false] - Number of FFT bins.
- *
- * @description
- * Initializes the spectrum and waterfall canvases, sets up default display parameters, and attaches mouse and keyboard event handlers for user interaction.
- * Handles spectrum display, waterfall rendering, autoscaling, color maps, and user controls for tuning and zooming.
- */
-function Spectrum(id, options) {
-    // Handle options
-    this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
-    this.spanHz = (options && options.spanHz) ? options.spanHz : 0;
-    this.wf_size = (options && options.wf_size) ? options.wf_size : 0;
-    this.wf_rows = (options && options.wf_rows) ? options.wf_rows : 256;
-    this.spectrumPercent = (options && options.spectrumPercent) ? options.spectrumPercent : 50;
-    this.spectrumPercentStep = (options && options.spectrumPercentStep) ? options.spectrumPercentStep : 5;
-    this.averaging = (options && options.averaging) ? options.averaging : 0;
-    this.maxHold = (options && options.maxHold) ? options.maxHold : false;
-    this.bins = (options && options.bins) ? options.bins : false;
-    this.graticuleIncrement = 5;  // Default value for graticule spacing
-
-    // Setup state
-    this.paused = false;
-    this.fullscreen = false;
-    // newell 12/1/2024, 10:16:50
-    // set default spectrum ranges to match the scaled bin amplitudes
-    this.min_db = -120;
-    this.max_db = 0;
-    this.wf_min_db = -120;
-    this.wf_max_db = 0;
-    this.spectrumHeight = 0;
-
-    // Colors
-    this.colorindex = 9;                // Default colormap index to Kiwi
-    this.colormap = colormaps[9];
-
-    // Create main canvas and adjust dimensions to match actual
-    this.canvas = document.getElementById(id);
-    this.canvas.height = this.canvas.clientHeight;
-    this.canvas.width = this.canvas.clientWidth;
-    this.ctx = this.canvas.getContext("2d");
-    this.ctx.fillStyle = "black";
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-    // Create offscreen canvas for axes
-    this.axes = document.createElement("canvas");
-    this.axes.height = 1; // Updated later
-    this.axes.width = this.canvas.width;
-    this.ctx_axes = this.axes.getContext("2d");
-
-    // Create offscreen canvas for waterfall
-    this.wf = document.createElement("canvas");
-    this.wf.height = this.wf_rows;
-    this.wf.width = this.wf_size;
-    this.ctx_wf = this.wf.getContext("2d");
-
-    this.autoscale = false;
-    this.autoscaleWait = 0;
-    this.decay = 1.0;
-    this.cursor_active = false;
-    this.cursor_step = 1000;
-    this.cursor_freq = 10000000;
-
-    this.radio_pointer = undefined;
-
-    // Trigger first render
-    this.setAveraging(this.averaging);
-    this.updateSpectrumRatio();
-    this.resize();
-
-    // Drag spectrum with right mouse button
-
-    let isDragging = false;
-    let dragStarted = false;
-    let dragThreshold = 4; // pixels
-    let startX = 0;
-    let startY = 0;
-    let startCenterHz = 0;
-    let pendingCenterHz = null;
-    const spectrum = this;
-
-    this.canvas.addEventListener('mousedown', function(e) {
-        if (e.button === 0) { // Left mouse button: tune instantly or set cursor
-            const rect = spectrum.canvas.getBoundingClientRect();
-            const mouseX = e.offsetX;
-            const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
-            let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
-            let freq_khz = clickedHz / 1000;
-            let step = increment / 1000; 
-            let snapped_khz = Math.round(freq_khz / step) * step;
-
-            if (spectrum.cursor_active) {
-                // Set the cursor frequency instead of tuning
-                spectrum.cursor_freq = clickedHz;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            } else {
-                document.getElementById("freq").value = snapped_khz.toFixed(3);
-                ws.send("F:" + snapped_khz.toFixed(3));
-                spectrum.frequency = snapped_khz * 1000;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            }
-        } else if (e.button === 2) { // Right mouse button: start drag, move cursor to center
-            isDragging = true;
-            dragStarted = false;
-            startX = e.offsetX;
-            startY = e.offsetY;
-            startCenterHz = spectrum.centerHz;
-            pendingCenterHz = null;
-            // Move cursor to center immediately
-            spectrum.frequency = spectrum.centerHz;
-            document.getElementById("freq").value = (spectrum.centerHz / 1000).toFixed(3);
-            ws.send("F:" + (spectrum.centerHz / 1000).toFixed(3));
-            ws.send("Z:c");
-            spectrum.canvas.style.cursor = "grabbing";
-            e.preventDefault(); // Prevent context menu
-        }
-    });
-   
-    // Prevent context menu on right click
-    this.canvas.addEventListener('contextmenu', function(e) {
-        e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', function(e) {
-        // Only process if right mouse button is being dragged
-        if (!isDragging || (e.buttons & 2) === 0) return;
-        const rect = spectrum.canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const dx = mouseX - startX;
-        if (!dragStarted && Math.abs(dx) > dragThreshold) {
-            dragStarted = true;
-        }
-        if (!dragStarted) return; // Don't start drag logic until threshold passed
-
-        const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
-        pendingCenterHz = startCenterHz - dx * hzPerPixel;
-        spectrum.setCenterHz(pendingCenterHz);
-
-        // Keep cursor at center
-        spectrum.frequency = pendingCenterHz;
-        document.getElementById("freq").value = (pendingCenterHz / 1000).toFixed(3);
-        ws.send("F:" + (pendingCenterHz / 1000).toFixed(3));
-        ws.send("Z:c");
-
-        if (spectrum.bin_copy) {
-            spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-        }
-    });
-
-    window.addEventListener('mouseup', function(e) {
-        if (isDragging && e.button === 2) {
-            spectrum.canvas.style.cursor = "";
-            if (pendingCenterHz !== null && dragStarted) {
-                // Snap centerHz to next 0.500 kHz step
-                let freq_khz = pendingCenterHz / 1000;
-                let step = increment / 1000  
-                let snapped_center = Math.round(freq_khz / step) * step * 1000;
-                spectrum.setCenterHz(snapped_center);
-
-                // Keep cursor at center
-                spectrum.frequency = snapped_center;
-                document.getElementById("freq").value = (snapped_center / 1000).toFixed(3);
-                ws.send("F:" + (snapped_center / 1000).toFixed(3));
-                ws.send("Z:c");
-            }
-            isDragging = false;
-            dragStarted = false;
-            pendingCenterHz = null;
-        }
-    });
 }
 
 // Export the Max Hold data as CSV (moved to bottom of file)
