@@ -1173,9 +1173,10 @@ Spectrum.prototype.exportMaxHoldCSV = function() {
         return;
     }
     // CSV header
-    let csv = "bin,value\n";
+    let csv = "bin,frequency,value\n";
     for (let i = 0; i < this.binsMax.length; i++) {
-        csv += `${i},${this.binsMax[i]}\n`;
+        let freq = this.bin_to_hz(i);
+        csv += `${i},${freq},${this.binsMax[i]}\n`;
     }
     // Create a Blob and trigger download
     const blob = new Blob([csv], { type: 'text/csv' });
