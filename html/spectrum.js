@@ -1165,6 +1165,123 @@ Spectrum.prototype.cursorDown = function() {
     this.cursorUpdate(this.cursor_freq);
 }
 
+// Add a method to Spectrum for overlaying a trace for N seconds in bright green
+if (!Spectrum.prototype.showOverlayTrace) {
+    Spectrum.prototype.showOverlayTrace = function(trace, seconds) {
+        var self = this;
+        // Accepts either an array of values or an array of objects/arrays with bin/freq/value
+        // If input is an array of objects/arrays, extract only the value for each bin
+        if (Array.isArray(trace) && trace.length > 0 && typeof trace[0] !== 'number') {
+            // Try to extract the value (3rd column) from each row
+            var values = [];
+            for (var i = 0; i < trace.length; ++i) {
+                var row = trace[i];
+                if (Array.isArray(row) && row.length >= 3) {
+                    values[i] = parseFloat(row[2]);
+                } else if (typeof row === 'object' && row !== null && 'value' in row) {
+                    values[i] = parseFloat(row.value);
+                }
+            }
+            trace = values;
+        }
+        this._overlayTrace = trace;
+        this._overlayTraceTimer = Date.now() + (seconds * 1000);
+        // Compute scaling for overlay trace to match spectrum scaling
+        // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
+        var min_db = this.min_db;
+        var max_db = this.max_db;
+        var spectrumHeight = this.spectrumHeight || this.canvas.height;
+        // Precompute scaled values for overlay
+        this._overlayTraceScaled = Array.isArray(trace) ? trace.map(function(v) {
+            // Clamp and scale as in drawFFT
+            if (v <= min_db) return spectrumHeight;
+            if (v >= max_db) return 0;
+            return spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
+        }) : [];
+        // Schedule a timer to clear the overlay after N seconds, and trigger a redraw
+        if (this._overlayTimeout) {
+            clearTimeout(this._overlayTimeout);
+        }
+        this._overlayTimeout = setTimeout(function() {
+            self._overlayTrace = null;
+            self._overlayTraceScaled = null;
+            self._overlayTraceTimer = null;
+            self._overlayTimeout = null;
+            // Trigger a redraw to clear overlay
+            if (typeof self.drawSpectrumWaterfall === 'function' && self.bin_copy) {
+                self.drawSpectrumWaterfall(self.bin_copy, false);
+            }
+        }, seconds * 1000);
+        // Trigger a redraw to show overlay immediately
+        if (typeof this.drawSpectrumWaterfall === 'function' && this.bin_copy) {
+            this.drawSpectrumWaterfall(this.bin_copy, false);
+        }
+    };
+}
+
+// Patch drawSpectrum to draw overlay trace if active
+(function(origDrawSpectrum) {
+    Spectrum.prototype.drawSpectrum = function(bins) {
+        origDrawSpectrum.call(this, bins);
+        // Draw overlay trace if active and not expired
+        if (this._overlayTrace && this._overlayTraceScaled && Array.isArray(this._overlayTraceScaled)) {
+            if (!this._overlayTraceTimer || Date.now() < this._overlayTraceTimer) {
+                var ctx = this.ctx;
+                ctx.save();
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = '#00FF00';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                for (var i = 0; i < this._overlayTraceScaled.length; ++i) {
+                    var y = this._overlayTraceScaled[i];
+                    var x = (i / (this._overlayTraceScaled.length - 1)) * this.canvas.width;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    };
+})(Spectrum.prototype.drawSpectrum);
+
+/**
+ * Exports the current spectrum data to a CSV file.
+ *
+ * @function
+ * @param {string} filename - The name of the file to save (without extension).
+ *
+ * @description
+ * This function converts the current spectrum data (FFT bin values) into a CSV format and triggers a download.
+ * The CSV contains columns for bin number, frequency (in Hz), and amplitude (in dB).
+ * The file is named using the provided `filename` parameter, with a `.csv` extension.
+ */
+Spectrum.prototype.exportCSV = function(filename) {
+    // Ensure filename is valid
+    if (!filename || typeof filename !== 'string' || filename.trim() === '') {
+        alert('Invalid filename. Please provide a valid file name.');
+        return;
+    }
+
+    // Prepare CSV data
+    let csv = 'Bin,Frequency (Hz),Amplitude (dB)\n';
+    for (let i = 0; i < this.bin_copy.length; i++) {
+        let freq = this.bin_to_hz(i);
+        let amp = this.bin_copy[i];
+        csv += `${i},${freq},${amp}\n`;
+    }
+
+    // Trigger CSV download
+    let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    let link = document.createElement('a');
+    link.setAttribute('href', URL.createObjectURL(blob));
+    link.setAttribute('download', `${filename}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
 // Export the Max Hold data as CSV (moved to bottom of file)
 Spectrum.prototype.exportMaxHoldCSV = function() {
     if (!this.binsMax || this.binsMax.length === 0) {

@@ -1695,6 +1695,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (!file) return;
                 var reader = new FileReader();
                 reader.onload = function(evt) {
+                   
                     try {
                         var arr = JSON.parse(evt.target.result);
                         if (Array.isArray(arr) && arr.length === 50) {
@@ -1756,3 +1757,113 @@ window.addEventListener('DOMContentLoaded', function() {
         bandCategory.dispatchEvent(new Event('change'));
     }
 });
+
+// Add support for loading a max hold CSV and overlaying it as a trace for 15 seconds
+(function() {
+    // Wait for DOM and spectrum to be ready
+    document.addEventListener('DOMContentLoaded', function() {
+        // Defensive: only proceed if spectrum exists
+        function setupLoadMaxButton() {
+            var btn = document.getElementById('load_max');
+            if (!btn) return;
+            // Create a hidden file input
+            var input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.csv,text/csv';
+            input.style.display = 'none';
+            btn.parentNode.insertBefore(input, btn.nextSibling);
+            btn.addEventListener('click', function() { input.value = ''; input.click(); });
+            input.addEventListener('change', function(e) {
+                var file = e.target.files[0];
+                if (!file) return;
+                var reader = new FileReader();
+                reader.onload = function(evt) {
+                    try {
+                        var lines = evt.target.result.split(/\r?\n/);
+                        var data = [];
+                        for (var i = 1; i < lines.length; ++i) { // skip header
+                            var parts = lines[i].split(',');
+                            if (parts.length >= 3) {
+                                var bin = parseInt(parts[0]);
+                                var freq = parseFloat(parts[1]);
+                                var value = parseFloat(parts[2]);
+                                if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
+                                    data[bin] = value;
+                                }
+                            }
+                        }
+                        if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.showOverlayTrace === 'function') {
+                            spectrum.showOverlayTrace(data, 15); // 15 seconds
+                        } else if (window.spectrum && typeof window.spectrum.showOverlayTrace === 'function') {
+                            window.spectrum.showOverlayTrace(data, 15);
+                        } else {
+                            alert('Spectrum overlay function not available.');
+                        }
+                    } catch (e) {
+                        alert('Failed to load max hold CSV: ' + e.message);
+                    }
+                };
+                reader.readAsText(file);
+            });
+        }
+        // Try to set up immediately, or after dialog is loaded
+        if (document.getElementById('load_max')) {
+            setupLoadMaxButton();
+        } else {
+            var observer = new MutationObserver(function() {
+                if (document.getElementById('load_max')) {
+                    setupLoadMaxButton();
+                    observer.disconnect();
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    });
+})();
+
+// Add a method to Spectrum for overlaying a trace for N seconds in bright green
+if (typeof Spectrum !== 'undefined' && !Spectrum.prototype.showOverlayTrace) {
+    Spectrum.prototype.showOverlayTrace = function(trace, seconds) {
+        var self = this;
+        this._overlayTrace = trace;
+        this._overlayTraceTimer = Date.now() + (seconds * 1000);
+        if (!this._overlayDrawHook) {
+            this._overlayDrawHook = function() {
+                if (!self._overlayTrace || !Array.isArray(self._overlayTrace)) return;
+                var ctx = self.ctx;
+                ctx.save();
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = '#00FF00'; // bright green
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for (var i = 0; i < self._overlayTrace.length; ++i) {
+                    var y = self.squeeze(self._overlayTrace[i], self.canvas.height, 0);
+                    var x = (i / (self._overlayTrace.length - 1)) * self.canvas.width;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.restore();
+            };
+        }
+        if (!this._overlayDrawScheduled) {
+            this._overlayDrawScheduled = true;
+            var drawOverlay = function() {
+                if (!self._overlayTrace || !Array.isArray(self._overlayTrace)) return;
+                // Redraw spectrum (assume drawSpectrumWaterfall is called regularly)
+                if (typeof self.drawSpectrumWaterfall === 'function' && self.bin_copy) {
+                    self.drawSpectrumWaterfall(self.bin_copy, false);
+                }
+                // Draw overlay
+                self._overlayDrawHook();
+                if (Date.now() < self._overlayTraceTimer) {
+                    requestAnimationFrame(drawOverlay);
+                } else {
+                    self._overlayTrace = null;
+                    self._overlayDrawScheduled = false;
+                }
+            };
+            requestAnimationFrame(drawOverlay);
+        }
+    };
+}
