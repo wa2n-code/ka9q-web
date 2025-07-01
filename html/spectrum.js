@@ -1165,9 +1165,9 @@ Spectrum.prototype.cursorDown = function() {
     this.cursorUpdate(this.cursor_freq);
 }
 
-// Add a method to Spectrum for overlaying a trace for N seconds in bright green
+// Add a method to Spectrum for overlaying a trace in bright green
 if (!Spectrum.prototype.showOverlayTrace) {
-    Spectrum.prototype.showOverlayTrace = function(trace, seconds) {
+    Spectrum.prototype.showOverlayTrace = function(trace) {
         var self = this;
         // Accepts either an array of values or an array of objects/arrays with bin/freq/value
         // If input is an array of objects/arrays, extract only the value for each bin
@@ -1185,7 +1185,6 @@ if (!Spectrum.prototype.showOverlayTrace) {
             trace = values;
         }
         this._overlayTrace = trace;
-        this._overlayTraceTimer = Date.now() + (seconds * 1000);
         // Compute scaling for overlay trace to match spectrum scaling
         // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
         var min_db = this.min_db;
@@ -1198,20 +1197,7 @@ if (!Spectrum.prototype.showOverlayTrace) {
             if (v >= max_db) return 0;
             return spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
         }) : [];
-        // Schedule a timer to clear the overlay after N seconds, and trigger a redraw
-        if (this._overlayTimeout) {
-            clearTimeout(this._overlayTimeout);
-        }
-        this._overlayTimeout = setTimeout(function() {
-            self._overlayTrace = null;
-            self._overlayTraceScaled = null;
-            self._overlayTraceTimer = null;
-            self._overlayTimeout = null;
-            // Trigger a redraw to clear overlay
-            if (typeof self.drawSpectrumWaterfall === 'function' && self.bin_copy) {
-                self.drawSpectrumWaterfall(self.bin_copy, false);
-            }
-        }, seconds * 1000);
+
         // Trigger a redraw to show overlay immediately
         if (typeof this.drawSpectrumWaterfall === 'function' && this.bin_copy) {
             this.drawSpectrumWaterfall(this.bin_copy, false);
