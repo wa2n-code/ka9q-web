@@ -794,20 +794,17 @@ function level_to_string(f) {
   let amp = -120.0;
   if ((spectrum.averaging > 0) && (typeof spectrum.binsAverage !== 'undefined') && (spectrum.binsAverage.length > 0)) {
     amp = spectrum.binsAverage[bin];
-  } else {
+  } else if (spectrum.bin_copy && spectrum.bin_copy.length > bin) {
     amp = spectrum.bin_copy[bin];
   }
 
   f /= 1e6;
-  //s = "bin " + bin.toString() + ", " + f.toFixed(3) + " MHz: " + amp.toFixed(1) + " dB";
-  s = f.toFixed(4) + " MHz: " + amp.toFixed(1) + " dBm";
-  /* deep six the maxhold stuff for now
-  var max_amp = -120.0;
-  if ((spectrum.maxHold) && (typeof spectrum.binsMax !== 'undefined') && (spectrum.binsMax.length > 0)) {
-    max_amp = spectrum.binsMax[bin];
-    s += " (" + max_amp.toFixed(1) + " dB max hold)";
+  // Only call toFixed if amp is a finite number
+  if (typeof amp === 'number' && isFinite(amp)) {
+    s = f.toFixed(4) + " MHz: " + amp.toFixed(1) + " dBm";
+  } else {
+    s = f.toFixed(4) + " MHz: N/A dBm";
   }
-    */
   return s;
 }
 
