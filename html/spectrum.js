@@ -1307,3 +1307,28 @@ Spectrum.prototype.exportMaxHoldCSV = function() {
         URL.revokeObjectURL(url);
     }, 100);
 }
+
+Spectrum.prototype.exportMinHoldCSV = function() {
+    if (!this.binsMin || this.binsMin.length === 0) {
+        alert("No Min Hold data to export.");
+        return;
+    }
+    // CSV header
+    let csv = "bin,frequency,value\n";
+    for (let i = 0; i < this.binsMin.length; i++) {
+        let freq = this.bin_to_hz(i);
+        csv += `${i},${freq},${this.binsMin[i]}\n`;
+    }
+    // Create a Blob and trigger download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "spectrum_min_hold.csv";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}

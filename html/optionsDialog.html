@@ -45,14 +45,15 @@
            </div>
         </div>
         <div style="font-size:12px;margin-top:5px">
-           <button type="button" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px" id="ExportMax" title="Export Max Hold CSV" onclick="spectrum.exportMaxHoldCSV()">Export Max</button>
-           <button type="button" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px; margin-top:4px;" id="ExportData" title="Export current spectrum data as CSV" onclick="spectrum.exportCSV('spectrum_data')">Export Data</button>
-           <button id="load_max" type="button" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px; margin-top:4px;" title="Load spectrum or max data for 15 seconds">Load Data</button>
-           <button id="fft_avg_down" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px" onclick="spectrum.decrementAveraging()"
-               title="Decrease FFT averaging">FFT AVG -</button> 
-           <button id="fft_avg_up" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px" onclick="spectrum.incrementAveraging()"
-               title="Increase FFT averaging">FFT AVG +</button>
-           <button id="csv_out" style="font-size:12px; padding:0 4px; min-width:0; min-height:0; height:28px" onclick="dumpCSV()" title="Write info file">Write info file</button>
-        </div>
+         <button id="fft_avg_down" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="spectrum.decrementAveraging()"
+            title="Decrease FFT averaging">FFT AVG -</button> 
+         <button id="fft_avg_up" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="spectrum.incrementAveraging()"
+            title="Increase FFT averaging">FFT AVG +</button>
+         <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" id="ExportMax" title="Export Max Hold CSV" onclick="spectrum.exportMaxHoldCSV()">Export Max</button>
+         <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" id="ExportData" title="Export current spectrum data as CSV" onclick="spectrum.exportCSV('spectrum_data')">Export Data</button>
+         <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" id="ExportMin" title="Export Min Hold CSV" onclick="spectrum.exportMinHoldCSV()">Export Min</button>
+         <button id="load_max" type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" title="Load spectrum or max data for 15 seconds">Load Data</button>
+         <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="dumpCSV()" title="Write info file">Write info file</button>
+      </div>
      </form>
 </div>
