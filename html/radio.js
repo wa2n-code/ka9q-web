@@ -1297,7 +1297,7 @@ function setAnalogMeterVisible(visible) {
             for (let i = 0; i < 50; i++) {
                 const opt = document.createElement('option');
                 opt.value = i;
-                opt.text = `${i+1}: ---`;
+                opt.textContent = `${i+1}: ---`;
                 sel.appendChild(opt);
             }
         }
@@ -1588,6 +1588,21 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             dialogPlaceholder.innerHTML = data;
 
+            // Attach Clear Data button handler after dialog is loaded
+            var clearBtn = document.getElementById('clear_overlay');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', function() {
+                    console.log('[Overlay] Clear Data button pressed');
+                    if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.clearOverlayTrace === 'function') {
+                        spectrum.clearOverlayTrace();
+                    } else {
+                        console.warn('[Overlay] spectrum.clearOverlayTrace not found');
+                    }
+                });
+            } else {
+                console.warn('[Overlay] Clear Data button (#clear_overlay) not found in DOM after dialog load');
+            }
+
             // Defensive: check for required dialog elements
             var closeXButton = document.getElementById('closeXButton');
             var optionsDialog = document.getElementById('optionsDialog');
@@ -1677,7 +1692,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
                 // Use only the IP address (no port) in the filename
                 var serverIP = window.location.hostname.replace(/:/g, '_');
-                var filename = `channel_memories_${serverIP}.json`;
+                               var filename = `channel_memories_${serverIP}.json`;
 
                 var a = document.createElement('a');
                 a.href = url;
@@ -1695,7 +1710,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (!file) return;
                 var reader = new FileReader();
                 reader.onload = function(evt) {
-                   
+                                                                                                                                
                     try {
                         var arr = JSON.parse(evt.target.result);
                         if (Array.isArray(arr) && arr.length === 50) {
@@ -1758,15 +1773,12 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Add support for loading a max hold CSV and overlaying it as a trace for 15 seconds
+// Add support for loading a max hold CSV and overlaying it as a trace
 (function() {
-    // Wait for DOM and spectrum to be ready
     document.addEventListener('DOMContentLoaded', function() {
-        // Defensive: only proceed if spectrum exists
         function setupLoadMaxButton() {
             var btn = document.getElementById('load_max');
             if (!btn) return;
-            // Create a hidden file input
             var input = document.createElement('input');
             input.type = 'file';
             input.accept = '.csv,text/csv';
@@ -1793,9 +1805,9 @@ window.addEventListener('DOMContentLoaded', function() {
                             }
                         }
                         if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.showOverlayTrace === 'function') {
-                            spectrum.showOverlayTrace(data, 15); // 15 seconds
+                            spectrum.showOverlayTrace(data); // No timer
                         } else if (window.spectrum && typeof window.spectrum.showOverlayTrace === 'function') {
-                            window.spectrum.showOverlayTrace(data, 15);
+                            window.spectrum.showOverlayTrace(data);
                         } else {
                             alert('Spectrum overlay function not available.');
                         }
@@ -1806,7 +1818,6 @@ window.addEventListener('DOMContentLoaded', function() {
                 reader.readAsText(file);
             });
         }
-        // Try to set up immediately, or after dialog is loaded
         if (document.getElementById('load_max')) {
             setupLoadMaxButton();
         } else {
@@ -1821,49 +1832,77 @@ window.addEventListener('DOMContentLoaded', function() {
     });
 })();
 
-// Add a method to Spectrum for overlaying a trace for N seconds in bright green
-if (typeof Spectrum !== 'undefined' && !Spectrum.prototype.showOverlayTrace) {
-    Spectrum.prototype.showOverlayTrace = function(trace, seconds) {
-        var self = this;
+// Add a method to Spectrum for overlaying a trace in bright green, and a method to clear it
+if (typeof Spectrum !== 'undefined') {
+    Spectrum.prototype.showOverlayTrace = function(trace) {
         this._overlayTrace = trace;
-        this._overlayTraceTimer = Date.now() + (seconds * 1000);
-        if (!this._overlayDrawHook) {
-            this._overlayDrawHook = function() {
-                if (!self._overlayTrace || !Array.isArray(self._overlayTrace)) return;
-                var ctx = self.ctx;
-                ctx.save();
-                ctx.globalAlpha = 1.0;
-                ctx.strokeStyle = '#00FF00'; // bright green
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                for (var i = 0; i < self._overlayTrace.length; ++i) {
-                    var y = self.squeeze(self._overlayTrace[i], self.canvas.height, 0);
-                    var x = (i / (self._overlayTrace.length - 1)) * self.canvas.width;
-                    if (i === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-                ctx.restore();
-            };
+        // Trigger a redraw of the spectrum (main routine will handle overlay drawing)
+        if (typeof this.drawSpectrumWaterfall === 'function' && this.bin_copy) {
+            this.drawSpectrumWaterfall(this.bin_copy, false);
         }
-        if (!this._overlayDrawScheduled) {
-            this._overlayDrawScheduled = true;
-            var drawOverlay = function() {
-                if (!self._overlayTrace || !Array.isArray(self._overlayTrace)) return;
-                // Redraw spectrum (assume drawSpectrumWaterfall is called regularly)
-                if (typeof self.drawSpectrumWaterfall === 'function' && self.bin_copy) {
-                    self.drawSpectrumWaterfall(self.bin_copy, false);
-                }
-                // Draw overlay
-                self._overlayDrawHook();
-                if (Date.now() < self._overlayTraceTimer) {
-                    requestAnimationFrame(drawOverlay);
-                } else {
-                    self._overlayTrace = null;
-                    self._overlayDrawScheduled = false;
-                }
-            };
-            requestAnimationFrame(drawOverlay);
+    };
+    Spectrum.prototype.clearOverlayTrace = function() {
+        // Debug: log when called
+        console.log('clearOverlayTrace called');
+        this._overlayTrace = null;
+        // Defensive: force redraw
+        if (typeof this.drawSpectrumWaterfall === 'function') {
+            if (this.bin_copy && this.bin_copy.length) {
+                this.drawSpectrumWaterfall(this.bin_copy, false);
+            } else if (this.binsAverage && this.binsAverage.length) {
+                this.drawSpectrumWaterfall(this.binsAverage, false);
+            } else {
+                // As a last resort, clear the canvas
+                const ctx = this.ctx;
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            }
         }
     };
 }
+
+// Patch the main spectrum drawing function to draw the overlay trace if present
+if (typeof Spectrum !== 'undefined' && Spectrum.prototype.drawSpectrumWaterfall) {
+    const origDrawSpectrumWaterfall = Spectrum.prototype.drawSpectrumWaterfall;
+    Spectrum.prototype.drawSpectrumWaterfall = function(bins, updateWaterfall) {
+        origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
+        if (this._overlayTrace && Array.isArray(this._overlayTrace)) {
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.globalAlpha = 1.0;
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 2;
+            const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
+            ctx.beginPath();
+            for (let i = 0; i < this._overlayTrace.length; ++i) {
+                const dB = this._overlayTrace[i];
+                const min = this.min_db;
+                const max = this.max_db;
+                const clamped = Math.max(min, Math.min(max, dB));
+                const y = ((max - clamped) / (max - min)) * spectrumHeight;
+                const x = (i / (this._overlayTrace.length - 1)) * this.canvas.width;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+    };
+    Spectrum.prototype.clearOverlayTrace = function() {
+        // Debug: log when called
+        console.log('clearOverlayTrace called');
+        this._overlayTrace = null;
+        // Defensive: force redraw
+        if (typeof this.drawSpectrumWaterfall === 'function') {
+            if (this.bin_copy && this.bin_copy.length) {
+                this.drawSpectrumWaterfall(this.bin_copy, false);
+            } else if (this.binsAverage && this.binsAverage.length) {
+                this.drawSpectrumWaterfall(this.binsAverage, false);
+            } else {
+                // As a last resort, clear the canvas
+                const ctx = this.ctx;
+                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            }
+        }
+    };
+}
+
