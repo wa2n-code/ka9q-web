@@ -1,35 +1,3 @@
-// Helper to generate a filename suffix with min, max, center frequencies and zoom
-Spectrum.prototype.getExportSuffix = function() {
-    // Use kHz for readability
-    const minHz = (typeof this.lowHz === 'number') ? this.lowHz : (this.centerHz - (this.spanHz/2));
-    const maxHz = (typeof this.highHz === 'number') ? this.highHz : (this.centerHz + (this.spanHz/2));
-    const centerHz = (typeof this.centerHz === 'number') ? this.centerHz : 0;
-    let zoom = 'z';
-    // Try to get zoom level from DOM if available
-    try {
-        const zoomElem = document.getElementById("zoom_level");
-        if (zoomElem) {
-            // Support both input and text content
-            if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
-                zoom = zoomElem.value;
-            } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
-                zoom = zoomElem.textContent.trim();
-            }
-        }
-    } catch (e) {
-        // fallback to default if any error
-    }
-    const min = Math.round(minHz / 1000);
-    const max = Math.round(maxHz / 1000);
-    const center = Math.round(centerHz / 1000);
-    return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
-};
-/*
- * Copyright (c) 2019 Jeppe Ledet-Pedersen
- * This software is released under the MIT license.
- * See the LICENSE file for further details.
- */
-
 'use strict';
 
 /**
@@ -1219,7 +1187,6 @@ Spectrum.prototype.cursorDown = function() {
 }
 
 // Note: showOverlayTrace method is now defined directly on the Spectrum prototype
-
 // Patch drawSpectrum to draw overlay trace if active
 // Note: drawSpectrum overlay functionality has been moved to drawSpectrumWaterfall
 
@@ -1261,7 +1228,7 @@ Spectrum.prototype.exportCSV = function(filename) {
     document.body.removeChild(link);
 }
 
-// Export the Max Hold data as CSV (moved to bottom of file)
+// Export the Max Hold data as CSV 
 Spectrum.prototype.exportMaxHoldCSV = function() {
     if (!this.binsMax || this.binsMax.length === 0) {
         alert("No Max Hold data to export.");
@@ -1288,6 +1255,7 @@ Spectrum.prototype.exportMaxHoldCSV = function() {
     }, 100);
 }
 
+// Export the Min Hold data as CSV
 Spectrum.prototype.exportMinHoldCSV = function() {
     if (!this.binsMin || this.binsMin.length === 0) {
         alert("No Min Hold data to export.");
@@ -1509,7 +1477,8 @@ Spectrum.prototype.clearOverlayTrace = function() {
                 
                 ctx.save();
                 ctx.globalAlpha = 1.0;
-                ctx.strokeStyle = '#00FF00';  // Bright green
+                ctx.strokeStyle = '#FFA500'; // bright orange
+                //ctx.strokeStyle = '#00FF00';  // Bright green
                 ctx.lineWidth = 2;
                 const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
                 
@@ -1617,3 +1586,35 @@ Spectrum.prototype.setupOverlayButtons = function() {
         console.warn('Clear Data button (#clear_overlay) not found in DOM');
     }
 };
+
+// Helper to generate a filename suffix with min, max, center frequencies and zoom
+Spectrum.prototype.getExportSuffix = function() {
+    // Use kHz for readability
+    const minHz = (typeof this.lowHz === 'number') ? this.lowHz : (this.centerHz - (this.spanHz/2));
+    const maxHz = (typeof this.highHz === 'number') ? this.highHz : (this.centerHz + (this.spanHz/2));
+    const centerHz = (typeof this.centerHz === 'number') ? this.centerHz : 0;
+    let zoom = 'z';
+    // Try to get zoom level from DOM if available
+    try {
+        const zoomElem = document.getElementById("zoom_level");
+        if (zoomElem) {
+            // Support both input and text content
+            if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
+                zoom = zoomElem.value;
+            } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
+                zoom = zoomElem.textContent.trim();
+            }
+        }
+    } catch (e) {
+        // fallback to default if any error
+    }
+    const min = Math.round(minHz / 1000);
+    const max = Math.round(maxHz / 1000);
+    const center = Math.round(centerHz / 1000);
+    return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
+};
+/*
+ * Copyright (c) 2019 Jeppe Ledet-Pedersen
+ * This software is released under the MIT license.
+ * See the LICENSE file for further details.
+ */
