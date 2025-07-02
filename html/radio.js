@@ -866,7 +866,21 @@ function update_stats() {
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
   document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_audio.toFixed(1)} dBmJ, Noise power at BW ${bw.toLocaleString()}: ${noisePower.toFixed(1)} dBm`;
   document.getElementById('bins').textContent = `Bins: ${binCount.toLocaleString()}`;
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz`;
+  // Show bin width and zoom level
+  let zoomLevel = '';
+  try {
+    const zoomElem = document.getElementById('zoom_level');
+    if (zoomElem) {
+      if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
+        zoomLevel = zoomElem.value;
+      } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
+        zoomLevel = zoomElem.textContent.trim();
+      }
+    }
+  } catch (e) {
+    // fallback to empty if any error
+  }
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, zoom level=${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();

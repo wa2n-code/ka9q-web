@@ -1,3 +1,29 @@
+// Helper to generate a filename suffix with min, max, center frequencies and zoom
+Spectrum.prototype.getExportSuffix = function() {
+    // Use kHz for readability
+    const minHz = (typeof this.lowHz === 'number') ? this.lowHz : (this.centerHz - (this.spanHz/2));
+    const maxHz = (typeof this.highHz === 'number') ? this.highHz : (this.centerHz + (this.spanHz/2));
+    const centerHz = (typeof this.centerHz === 'number') ? this.centerHz : 0;
+    let zoom = 'z';
+    // Try to get zoom level from DOM if available
+    try {
+        const zoomElem = document.getElementById("zoom_level");
+        if (zoomElem) {
+            // Support both input and text content
+            if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
+                zoom = zoomElem.value;
+            } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
+                zoom = zoomElem.textContent.trim();
+            }
+        }
+    } catch (e) {
+        // fallback to default if any error
+    }
+    const min = Math.round(minHz / 1000);
+    const max = Math.round(maxHz / 1000);
+    const center = Math.round(centerHz / 1000);
+    return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
+};
 /*
  * Copyright (c) 2019 Jeppe Ledet-Pedersen
  * This software is released under the MIT license.
@@ -1223,11 +1249,12 @@ Spectrum.prototype.exportCSV = function(filename) {
         csv += `${i},${freq},${amp}\n`;
     }
 
-    // Trigger CSV download
-    let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
     let link = document.createElement('a');
+    let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     link.setAttribute('href', URL.createObjectURL(blob));
-    link.setAttribute('download', `${filename}.csv`);
+    link.setAttribute('download', `${filename}${suffix}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -1246,12 +1273,13 @@ Spectrum.prototype.exportMaxHoldCSV = function() {
         let freq = this.bin_to_hz(i);
         csv += `${i},${freq},${this.binsMax[i]}\n`;
     }
-    // Create a Blob and trigger download
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = "spectrum_max_hold.csv";
+    a.download = `spectrum_max_hold${suffix}.csv`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
@@ -1271,12 +1299,13 @@ Spectrum.prototype.exportMinHoldCSV = function() {
         let freq = this.bin_to_hz(i);
         csv += `${i},${freq},${this.binsMin[i]}\n`;
     }
-    // Create a Blob and trigger download
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = "spectrum_min_hold.csv";
+    a.download = `spectrum_min_hold${suffix}.csv`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
