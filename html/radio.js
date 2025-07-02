@@ -341,6 +341,15 @@
         centerHz = 10000000;
         binWidthHz = 20000;
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
+        
+        // Setup overlay buttons after spectrum is created
+        document.addEventListener('DOMContentLoaded', function() {
+            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+                setTimeout(function() {
+                    spectrum.setupOverlayButtons();
+                }, 100); // Small delay to ensure DOM is ready
+            }
+        });
         if (!loadSettings()) {
           console.log("loadSettings() returned false, setting defaults");
           setDefaultSettings(); 
@@ -1357,6 +1366,16 @@ function initializeDialogEventListeners() {
     // Show the dialog
     optionsDialog.classList.add('open');
     dialogOverlay.classList.add('open');
+    
+    // Setup the overlay buttons when the dialog is opened
+    if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+      console.log('Dialog opened, setting up overlay buttons');
+      setTimeout(function() {
+        spectrum.setupOverlayButtons();
+      }, 50); // Small delay to ensure dialog is fully visible
+    } else {
+      console.warn('Spectrum not available when opening dialog');
+    }
   });
 
   // Attach the event handler to the close button
@@ -1584,20 +1603,10 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(response => response.text())
         .then(data => {
             dialogPlaceholder.innerHTML = data;
-
-            // Attach Clear Data button handler after dialog is loaded
-            var clearBtn = document.getElementById('clear_overlay');
-            if (clearBtn) {
-                clearBtn.addEventListener('click', function() {
-                    console.log('[Overlay] Clear Data button pressed');
-                    if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.clearOverlayTrace === 'function') {
-                        spectrum.clearOverlayTrace();
-                    } else {
-                        console.warn('[Overlay] spectrum.clearOverlayTrace not found');
-                    }
-                });
-            } else {
-                console.warn('[Overlay] Clear Data button (#clear_overlay) not found in DOM after dialog load');
+            
+            // Setup overlay buttons if spectrum exists
+            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+                spectrum.setupOverlayButtons();
             }
 
             // Defensive: check for required dialog elements
@@ -1770,136 +1779,5 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Add support for loading a max hold CSV and overlaying it as a trace
-(function() {
-    document.addEventListener('DOMContentLoaded', function() {
-        function setupLoadMaxButton() {
-            var btn = document.getElementById('load_max');
-            if (!btn) return;
-            var input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.csv,text/csv';
-            input.style.display = 'none';
-            btn.parentNode.insertBefore(input, btn.nextSibling);
-            btn.addEventListener('click', function() { input.value = ''; input.click(); });
-            input.addEventListener('change', function(e) {
-                var file = e.target.files[0];
-                if (!file) return;
-                var reader = new FileReader();
-                reader.onload = function(evt) {
-                    try {
-                        var lines = evt.target.result.split(/\r?\n/);
-                        var data = [];
-                        for (var i = 1; i < lines.length; ++i) { // skip header
-                            var parts = lines[i].split(',');
-                            if (parts.length >= 3) {
-                                var bin = parseInt(parts[0]);
-                                var freq = parseFloat(parts[1]);
-                                var value = parseFloat(parts[2]);
-                                if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
-                                    data[bin] = value;
-                                }
-                            }
-                        }
-                        if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.showOverlayTrace === 'function') {
-                            spectrum.showOverlayTrace(data); // No timer
-                        } else if (window.spectrum && typeof window.spectrum.showOverlayTrace === 'function') {
-                            window.spectrum.showOverlayTrace(data);
-                        } else {
-                            alert('Spectrum overlay function not available.');
-                        }
-                    } catch (e) {
-                        alert('Failed to load max hold CSV: ' + e.message);
-                    }
-                };
-                reader.readAsText(file);
-            });
-        }
-        if (document.getElementById('load_max')) {
-            setupLoadMaxButton();
-        } else {
-            var observer = new MutationObserver(function() {
-                if (document.getElementById('load_max')) {
-                    setupLoadMaxButton();
-                    observer.disconnect();
-                }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-        }
-    });
-})();
-
-// Add a method to Spectrum for overlaying a trace in bright green, and a method to clear it
-if (typeof Spectrum !== 'undefined') {
-    Spectrum.prototype.showOverlayTrace = function(trace) {
-        this._overlayTrace = trace;
-        // Trigger a redraw of the spectrum (main routine will handle overlay drawing)
-        if (typeof this.drawSpectrumWaterfall === 'function' && this.bin_copy) {
-            this.drawSpectrumWaterfall(this.bin_copy, false);
-        }
-    };
-    Spectrum.prototype.clearOverlayTrace = function() {
-        // Debug: log when called
-        console.log('clearOverlayTrace called');
-        this._overlayTrace = null;
-        // Defensive: force redraw
-        if (typeof this.drawSpectrumWaterfall === 'function') {
-            if (this.bin_copy && this.bin_copy.length) {
-                this.drawSpectrumWaterfall(this.bin_copy, false);
-            } else if (this.binsAverage && this.binsAverage.length) {
-                this.drawSpectrumWaterfall(this.binsAverage, false);
-            } else {
-                // As a last resort, clear the canvas
-                const ctx = this.ctx;
-                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            }
-        }
-    };
-}
-
-// Patch the main spectrum drawing function to draw the overlay trace if present
-if (typeof Spectrum !== 'undefined' && Spectrum.prototype.drawSpectrumWaterfall) {
-    const origDrawSpectrumWaterfall = Spectrum.prototype.drawSpectrumWaterfall;
-    Spectrum.prototype.drawSpectrumWaterfall = function(bins, updateWaterfall) {
-        origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
-        if (this._overlayTrace && Array.isArray(this._overlayTrace)) {
-            const ctx = this.ctx;
-            ctx.save();
-            ctx.globalAlpha = 1.0;
-            ctx.strokeStyle = '#00FF00';
-            ctx.lineWidth = 2;
-            const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
-            ctx.beginPath();
-            for (let i = 0; i < this._overlayTrace.length; ++i) {
-                const dB = this._overlayTrace[i];
-                const min = this.min_db;
-                const max = this.max_db;
-                const clamped = Math.max(min, Math.min(max, dB));
-                const y = ((max - clamped) / (max - min)) * spectrumHeight;
-                const x = (i / (this._overlayTrace.length - 1)) * this.canvas.width;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-            ctx.restore();
-        }
-    };
-    Spectrum.prototype.clearOverlayTrace = function() {
-        // Debug: log when called
-        console.log('clearOverlayTrace called');
-        this._overlayTrace = null;
-        // Defensive: force redraw
-        if (typeof this.drawSpectrumWaterfall === 'function') {
-            if (this.bin_copy && this.bin_copy.length) {
-                this.drawSpectrumWaterfall(this.bin_copy, false);
-            } else if (this.binsAverage && this.binsAverage.length) {
-                this.drawSpectrumWaterfall(this.binsAverage, false);
-            } else {
-                // As a last resort, clear the canvas
-                const ctx = this.ctx;
-                ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-            }
-        }
-    };
-}
+// Overlay trace functionality has been moved to spectrum.js
 

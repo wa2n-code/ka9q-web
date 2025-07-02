@@ -27,6 +27,7 @@
  * @description
  * Initializes the spectrum and waterfall canvases, sets up default display parameters, and attaches mouse and keyboard event handlers for user interaction.
  * Handles spectrum display, waterfall rendering, autoscaling, color maps, and user controls for tuning and zooming.
+ * Also handles overlay trace functionality for importing, exporting, and displaying spectrum data.
  */
 function Spectrum(id, options) {
     // Handle options
@@ -89,6 +90,32 @@ function Spectrum(id, options) {
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+    
+    // Initialize overlay trace functionality
+    this._overlayTrace = null;
+    
+    // Setup overlay buttons if they exist in the DOM
+    var self = this;
+    
+    // Try to set up buttons immediately if DOM is already loaded
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(function() {
+            console.log('DOM already ready, setting up overlay buttons');
+            if (typeof self.setupOverlayButtons === 'function') {
+                self.setupOverlayButtons();
+            }
+        }, 100);
+    }
+    
+    // Also set up on DOMContentLoaded in case we're still loading
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            console.log('DOMContentLoaded fired, setting up overlay buttons');
+            if (typeof self.setupOverlayButtons === 'function') {
+                self.setupOverlayButtons();
+            }
+        }, 100); // Small delay to ensure DOM is fully loaded
+    });
 
     // Drag spectrum with right mouse button
 
@@ -1165,71 +1192,10 @@ Spectrum.prototype.cursorDown = function() {
     this.cursorUpdate(this.cursor_freq);
 }
 
-// Add a method to Spectrum for overlaying a trace in bright green
-if (!Spectrum.prototype.showOverlayTrace) {
-    Spectrum.prototype.showOverlayTrace = function(trace) {
-        var self = this;
-        // Accepts either an array of values or an array of objects/arrays with bin/freq/value
-        // If input is an array of objects/arrays, extract only the value for each bin
-        if (Array.isArray(trace) && trace.length > 0 && typeof trace[0] !== 'number') {
-            // Try to extract the value (3rd column) from each row
-            var values = [];
-            for (var i = 0; i < trace.length; ++i) {
-                var row = trace[i];
-                if (Array.isArray(row) && row.length >= 3) {
-                    values[i] = parseFloat(row[2]);
-                } else if (typeof row === 'object' && row !== null && 'value' in row) {
-                    values[i] = parseFloat(row.value);
-                }
-            }
-            trace = values;
-        }
-        this._overlayTrace = trace;
-        // Compute scaling for overlay trace to match spectrum scaling
-        // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
-        var min_db = this.min_db;
-        var max_db = this.max_db;
-        var spectrumHeight = this.spectrumHeight || this.canvas.height;
-        // Precompute scaled values for overlay
-        this._overlayTraceScaled = Array.isArray(trace) ? trace.map(function(v) {
-            // Clamp and scale as in drawFFT
-            if (v <= min_db) return spectrumHeight;
-            if (v >= max_db) return 0;
-            return spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
-        }) : [];
-
-        // Trigger a redraw to show overlay immediately
-        if (typeof this.drawSpectrumWaterfall === 'function' && this.bin_copy) {
-            this.drawSpectrumWaterfall(this.bin_copy, false);
-        }
-    };
-}
+// Note: showOverlayTrace method is now defined directly on the Spectrum prototype
 
 // Patch drawSpectrum to draw overlay trace if active
-(function(origDrawSpectrum) {
-    Spectrum.prototype.drawSpectrum = function(bins) {
-        origDrawSpectrum.call(this, bins);
-        // Draw overlay trace if active and not expired
-        if (this._overlayTrace && this._overlayTraceScaled && Array.isArray(this._overlayTraceScaled)) {
-            if (!this._overlayTraceTimer || Date.now() < this._overlayTraceTimer) {
-                var ctx = this.ctx;
-                ctx.save();
-                ctx.globalAlpha = 1.0;
-                ctx.strokeStyle = '#00FF00';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                for (var i = 0; i < this._overlayTraceScaled.length; ++i) {
-                    var y = this._overlayTraceScaled[i];
-                    var x = (i / (this._overlayTraceScaled.length - 1)) * this.canvas.width;
-                    if (i === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-                ctx.restore();
-            }
-        }
-    };
-})(Spectrum.prototype.drawSpectrum);
+// Note: drawSpectrum overlay functionality has been moved to drawSpectrumWaterfall
 
 /**
  * Exports the current spectrum data to a CSV file.
@@ -1318,3 +1284,307 @@ Spectrum.prototype.exportMinHoldCSV = function() {
         URL.revokeObjectURL(url);
     }, 100);
 }
+
+/**
+ * Loads a CSV file and displays the data as an overlay trace on the spectrum.
+ * 
+ * @function
+ * @description
+ * This function is called by the "Load Data" button to load a CSV file containing
+ * frequency spectrum data and display it as an overlay on the spectrum graph.
+ */
+Spectrum.prototype.loadOverlayTrace = function() {
+    console.log('loadOverlayTrace called');
+    var self = this;
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,text/csv';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    
+    input.addEventListener('change', function(e) {
+        console.log('File selected', e.target.files);
+        var file = e.target.files[0];
+        if (!file) {
+            document.body.removeChild(input);
+            return;
+        }
+        
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+            console.log('File loaded, processing data');
+            try {
+                var lines = evt.target.result.split(/\r?\n/);
+                console.log('CSV lines:', lines.length);
+                var data = [];
+                var validEntries = 0;
+                
+                for (var i = 1; i < lines.length; ++i) { // skip header
+                    var line = lines[i].trim();
+                    if (line === '') continue;
+                    
+                    var parts = line.split(',');
+                    if (parts.length >= 3) {
+                        var bin = parseInt(parts[0], 10);
+                        var freq = parseFloat(parts[1]);
+                        var value = parseFloat(parts[2]);
+                        if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
+                            data[bin] = value;
+                            validEntries++;
+                        }
+                    }
+                }
+                
+                console.log('Valid CSV entries:', validEntries);
+                if (validEntries > 0) {
+                    console.log('Calling showOverlayTrace with data');
+                    self.showOverlayTrace(data);
+                } else {
+                    console.error('No valid data found in CSV');
+                    alert('No valid data found in CSV file.');
+                }
+            } catch (e) {
+                console.error('Error processing CSV:', e);
+                alert('Failed to load CSV: ' + e.message);
+            } finally {
+                document.body.removeChild(input);
+            }
+        };
+        
+        reader.onerror = function(evt) {
+            console.error('Error reading file:', evt);
+            alert('Error reading file');
+            document.body.removeChild(input);
+        };
+        
+        console.log('Starting file read');
+        reader.readAsText(file);
+    });
+    
+    // Add timeout to ensure browser responds to the click
+    setTimeout(function() {
+        input.click();
+    }, 50);
+};
+
+/**
+ * Displays an overlay trace on the spectrum.
+ * 
+ * @function
+ * @param {Array} trace - An array of amplitude values to overlay on the spectrum.
+ * @description
+ * This function takes an array of amplitude values and displays them as an overlay
+ * on the spectrum graph. The overlay is drawn in green.
+ */
+Spectrum.prototype.showOverlayTrace = function(trace) {
+    console.log('showOverlayTrace called');
+    var self = this;
+    
+    // Check for valid input
+    if (!trace || (Array.isArray(trace) && trace.length === 0)) {
+        console.error('Empty or invalid trace data');
+        return;
+    }
+    
+    // Accepts either an array of values or an array of objects/arrays with bin/freq/value
+    // If input is an array of objects/arrays, extract only the value for each bin
+    if (Array.isArray(trace) && trace.length > 0 && typeof trace[0] !== 'number') {
+        // Try to extract the value (3rd column) from each row
+        var values = [];
+        for (var i = 0; i < trace.length; ++i) {
+            var row = trace[i];
+            if (Array.isArray(row) && row.length >= 3) {
+                values[i] = parseFloat(row[2]);
+            } else if (typeof row === 'object' && row !== null && 'value' in row) {
+                values[i] = parseFloat(row.value);
+            }
+        }
+        trace = values;
+    }
+    
+    // Store the overlay trace data
+    this._overlayTrace = trace;
+    console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
+    
+    // Compute scaling for overlay trace to match spectrum scaling
+    // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
+    var min_db = this.min_db;
+    var max_db = this.max_db;
+    var spectrumHeight = this.spectrumHeight || this.canvas.height;
+    
+    // Precompute scaled values for overlay if needed by drawSpectrum
+    this._overlayTraceScaled = [];
+    if (Array.isArray(trace)) {
+        for (var i = 0; i < trace.length; i++) {
+            var v = trace[i];
+            if (typeof v === 'undefined') {
+                this._overlayTraceScaled[i] = undefined;
+            } else if (v <= min_db) {
+                this._overlayTraceScaled[i] = spectrumHeight;
+            } else if (v >= max_db) {
+                this._overlayTraceScaled[i] = 0;
+            } else {
+                this._overlayTraceScaled[i] = spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
+            }
+        }
+    }
+    
+    // Trigger a redraw to show overlay immediately
+    console.log('Triggering redraw with overlay');
+    if (this.bin_copy) {
+        this.drawSpectrumWaterfall(this.bin_copy, false);
+    }
+};
+
+/**
+ * Clears the overlay trace from the spectrum.
+ * 
+ * @function
+ * @description
+ * This function removes any overlay trace from the spectrum and redraws the spectrum.
+ */
+Spectrum.prototype.clearOverlayTrace = function() {
+    console.log('clearOverlayTrace called');
+    this._overlayTrace = null;
+    // Force redraw
+    if (this.bin_copy && this.bin_copy.length) {
+        this.drawSpectrumWaterfall(this.bin_copy, false);
+    } else if (this.binsAverage && this.binsAverage.length) {
+        this.drawSpectrumWaterfall(this.binsAverage, false);
+    } else {
+        // As a last resort, clear the canvas
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+};
+
+// Patch the main spectrum drawing function to draw the overlay trace if present
+(function() {
+    // Store the original drawSpectrumWaterfall function
+    const origDrawSpectrumWaterfall = Spectrum.prototype.drawSpectrumWaterfall;
+    
+    // Replace with our patched version that also draws the overlay
+    Spectrum.prototype.drawSpectrumWaterfall = function(bins, updateWaterfall) {
+        try {
+            // Call the original function first
+            origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
+            
+            // Then draw our overlay if present
+            if (this._overlayTrace && Array.isArray(this._overlayTrace) && this._overlayTrace.length > 0) {
+                console.log('Drawing overlay trace');
+                const ctx = this.ctx;
+                if (!ctx) {
+                    console.error('Canvas context is not available');
+                    return;
+                }
+                
+                ctx.save();
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = '#00FF00';  // Bright green
+                ctx.lineWidth = 2;
+                const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
+                
+                // Start a new path for the overlay trace
+                ctx.beginPath();
+                
+                let isFirstPoint = true;
+                for (let i = 0; i < this._overlayTrace.length; ++i) {
+                    // Skip undefined values
+                    if (typeof this._overlayTrace[i] === 'undefined') continue;
+                    
+                    const dB = this._overlayTrace[i];
+                    const min = this.min_db;
+                    const max = this.max_db;
+                    const clamped = Math.max(min, Math.min(max, dB));
+                    const y = ((max - clamped) / (max - min)) * spectrumHeight;
+                    
+                    // Calculate x position based on bin index, ensuring we don't divide by zero
+                    const denominator = bins.length > 1 ? (bins.length - 1) : 1;
+                    const x = (i / denominator) * this.canvas.width;
+                    
+                    // Draw the point
+                    if (isFirstPoint) {
+                        ctx.moveTo(x, y);
+                        isFirstPoint = false;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                // Only stroke if we actually drew something
+                if (!isFirstPoint) {
+                    ctx.stroke();
+                } else {
+                    console.warn('No valid points to draw in overlay trace');
+                }
+                
+                ctx.restore();
+            }
+        } catch (err) {
+            console.error('Error drawing spectrum overlay:', err);
+        }
+    };
+})();
+
+/**
+ * Sets up event handlers for spectrum overlay-related buttons.
+ * 
+ * @function
+ * @description
+ * This function is called during initialization to set up event handlers for
+ * buttons related to spectrum overlay functionality (Load Data and Clear Data).
+ */
+Spectrum.prototype.setupOverlayButtons = function() {
+    var self = this;
+    console.log('Setting up overlay buttons...');
+    
+    // Set up the Load Data button
+    var loadBtn = document.getElementById('load_max');
+    if (loadBtn) {
+        console.log('Found Load Data button, attaching handler');
+        // Remove any existing click handlers to prevent duplicates
+        loadBtn.removeEventListener('click', loadBtn._clickHandler);
+        
+        // Create and store the handler function
+        loadBtn._clickHandler = function(e) {
+            console.log('Load Data button clicked');
+            if (e) e.preventDefault();
+            if (self && typeof self.loadOverlayTrace === 'function') {
+                self.loadOverlayTrace();
+            } else {
+                console.error('Spectrum.loadOverlayTrace is not available', self);
+                alert('Load Data function not available. Please try again later.');
+            }
+        };
+        
+        // Attach the handler
+        loadBtn.addEventListener('click', loadBtn._clickHandler);
+    } else {
+        console.warn('Load Data button (#load_max) not found in DOM');
+    }
+    
+    // Set up the Clear Data button
+    var clearBtn = document.getElementById('clear_overlay');
+    if (clearBtn) {
+        console.log('Found Clear Data button, attaching handler');
+        // Remove any existing click handlers to prevent duplicates
+        clearBtn.removeEventListener('click', clearBtn._clickHandler);
+        
+        // Create and store the handler function
+        clearBtn._clickHandler = function(e) {
+            console.log('Clear Data button clicked');
+            if (e) e.preventDefault();
+            if (self && typeof self.clearOverlayTrace === 'function') {
+                self.clearOverlayTrace();
+            } else {
+                console.error('Spectrum.clearOverlayTrace is not available', self);
+                alert('Clear Data function not available. Please try again later.');
+            }
+        };
+        
+        // Attach the handler
+        clearBtn.addEventListener('click', clearBtn._clickHandler);
+    } else {
+        console.warn('Clear Data button (#clear_overlay) not found in DOM');
+    }
+};
