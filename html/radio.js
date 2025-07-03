@@ -880,7 +880,7 @@ function update_stats() {
   } catch (e) {
     // fallback to empty if any error
   }
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, zoom level=${zoomLevel}` : '');
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
@@ -1346,13 +1346,7 @@ function setAnalogMeterVisible(visible) {
 
 // Event handlers for new Spectrum Options Dialog box
 
-document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('OptionsButton').addEventListener('click', function() {
-    const dialog = document.getElementById('optionsDialog');
-    dialog.classList.add('open');
-    document.getElementById('dialogOverlay').classList.add('open');
-  });
-});
+
 
 function initializeDialogEventListeners() {
   const optionsButton = document.getElementById('OptionsButton'); // The launch button
@@ -1606,6 +1600,17 @@ function enableBandSelectAlwaysCallsSetBand() {
 
 // --- Unified Initialization ---
 window.addEventListener('DOMContentLoaded', function() {
+    // Move the original OptionsButton DOMContentLoaded handler here, before dialogPlaceholder fetch for order preservation
+    var optionsButton = document.getElementById('OptionsButton');
+    if (optionsButton) {
+        optionsButton.addEventListener('click', function() {
+            var dialog = document.getElementById('optionsDialog');
+            if (dialog) dialog.classList.add('open');
+            var overlay = document.getElementById('dialogOverlay');
+            if (overlay) overlay.classList.add('open');
+        });
+    }
+
     // Defensive: check for dialogPlaceholder
     var dialogPlaceholder = document.getElementById('dialogPlaceholder');
     if (!dialogPlaceholder) {
