@@ -1377,7 +1377,7 @@ function initializeDialogEventListeners() {
     
     // Setup the overlay buttons when the dialog is opened
     if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.setupOverlayButtons === 'function') {
-      console.log('Dialog opened, setting up overlay buttons');
+      //console.log('Dialog opened, setting up overlay buttons');
       setTimeout(function() {
         spectrum.setupOverlayButtons();
       }, 50); // Small delay to ensure dialog is fully visible
@@ -1447,7 +1447,7 @@ function setPlayerVolume(value) {
     const slider = parseFloat(value);
     const gain = minGain + (maxGain - minGain) * Math.pow(slider, exponent);
     player.volume(gain);
-    console.log(`Volume set to: ${gain} (slider: ${slider})`);
+    //console.log(`Volume set to: ${gain} (slider: ${slider})`);
   } 
 
   function setPanner(value) {

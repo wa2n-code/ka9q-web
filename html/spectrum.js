@@ -94,7 +94,7 @@ function Spectrum(id, options) {
     // Try to set up buttons immediately if DOM is already loaded
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         setTimeout(function() {
-            console.log('DOM already ready, setting up overlay buttons');
+            //console.log('DOM already ready, setting up overlay buttons');
             if (typeof self.setupOverlayButtons === 'function') {
                 self.setupOverlayButtons();
             }
@@ -104,7 +104,7 @@ function Spectrum(id, options) {
     // Also set up on DOMContentLoaded in case we're still loading
     document.addEventListener('DOMContentLoaded', function() {
         setTimeout(function() {
-            console.log('DOMContentLoaded fired, setting up overlay buttons');
+            //console.log('DOMContentLoaded fired, setting up overlay buttons');
             if (typeof self.setupOverlayButtons === 'function') {
                 self.setupOverlayButtons();
             }
@@ -1291,7 +1291,7 @@ Spectrum.prototype.exportMinHoldCSV = function() {
  * frequency spectrum data and display it as an overlay on the spectrum graph.
  */
 Spectrum.prototype.loadOverlayTrace = function() {
-    console.log('loadOverlayTrace called');
+    //console.log('loadOverlayTrace called');
     var self = this;
     var input = document.createElement('input');
     input.type = 'file';
@@ -1300,7 +1300,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
     document.body.appendChild(input);
     
     input.addEventListener('change', function(e) {
-        console.log('File selected', e.target.files);
+        //console.log('File selected', e.target.files);
         var file = e.target.files[0];
         if (!file) {
             document.body.removeChild(input);
@@ -1309,10 +1309,10 @@ Spectrum.prototype.loadOverlayTrace = function() {
         
         var reader = new FileReader();
         reader.onload = function(evt) {
-            console.log('File loaded, processing data');
+            //console.log('File loaded, processing data');
             try {
                 var lines = evt.target.result.split(/\r?\n/);
-                console.log('CSV lines:', lines.length);
+                //console.log('CSV lines:', lines.length);
                 var data = [];
                 var validEntries = 0;
                 
@@ -1332,9 +1332,9 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     }
                 }
                 
-                console.log('Valid CSV entries:', validEntries);
+                //console.log('Valid CSV entries:', validEntries);
                 if (validEntries > 0) {
-                    console.log('Calling showOverlayTrace with data');
+                    //console.log('Calling showOverlayTrace with data');
                     self.showOverlayTrace(data);
                 } else {
                     console.error('No valid data found in CSV');
@@ -1354,7 +1354,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
             document.body.removeChild(input);
         };
         
-        console.log('Starting file read');
+        //console.log('Starting file read');
         reader.readAsText(file);
     });
     
@@ -1374,7 +1374,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
  * on the spectrum graph. The overlay is drawn in green.
  */
 Spectrum.prototype.showOverlayTrace = function(trace) {
-    console.log('showOverlayTrace called');
+    //console.log('showOverlayTrace called');
     var self = this;
     
     // Check for valid input
@@ -1401,7 +1401,7 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
     
     // Store the overlay trace data
     this._overlayTrace = trace;
-    console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
+    //console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
     
     // Compute scaling for overlay trace to match spectrum scaling
     // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
@@ -1427,7 +1427,7 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
     }
     
     // Trigger a redraw to show overlay immediately
-    console.log('Triggering redraw with overlay');
+    //console.log('Triggering redraw with overlay');
     if (this.bin_copy) {
         this.drawSpectrumWaterfall(this.bin_copy, false);
     }
@@ -1441,7 +1441,7 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
  * This function removes any overlay trace from the spectrum and redraws the spectrum.
  */
 Spectrum.prototype.clearOverlayTrace = function() {
-    console.log('clearOverlayTrace called');
+    //console.log('clearOverlayTrace called');
     this._overlayTrace = null;
     // Force redraw
     if (this.bin_copy && this.bin_copy.length) {
@@ -1468,7 +1468,7 @@ Spectrum.prototype.clearOverlayTrace = function() {
             
             // Then draw our overlay if present
             if (this._overlayTrace && Array.isArray(this._overlayTrace) && this._overlayTrace.length > 0) {
-                console.log('Drawing overlay trace');
+                //console.log('Drawing overlay trace');
                 const ctx = this.ctx;
                 if (!ctx) {
                     console.error('Canvas context is not available');
@@ -1534,18 +1534,18 @@ Spectrum.prototype.clearOverlayTrace = function() {
  */
 Spectrum.prototype.setupOverlayButtons = function() {
     var self = this;
-    console.log('Setting up overlay buttons...');
+    //console.log('Setting up overlay buttons...');
     
     // Set up the Load Data button
     var loadBtn = document.getElementById('load_max');
     if (loadBtn) {
-        console.log('Found Load Data button, attaching handler');
+        //console.log('Found Load Data button, attaching handler');
         // Remove any existing click handlers to prevent duplicates
         loadBtn.removeEventListener('click', loadBtn._clickHandler);
         
         // Create and store the handler function
         loadBtn._clickHandler = function(e) {
-            console.log('Load Data button clicked');
+            //console.log('Load Data button clicked');
             if (e) e.preventDefault();
             if (self && typeof self.loadOverlayTrace === 'function') {
                 self.loadOverlayTrace();
@@ -1564,13 +1564,13 @@ Spectrum.prototype.setupOverlayButtons = function() {
     // Set up the Clear Data button
     var clearBtn = document.getElementById('clear_overlay');
     if (clearBtn) {
-        console.log('Found Clear Data button, attaching handler');
+        //console.log('Found Clear Data button, attaching handler');
         // Remove any existing click handlers to prevent duplicates
         clearBtn.removeEventListener('click', clearBtn._clickHandler);
         
         // Create and store the handler function
         clearBtn._clickHandler = function(e) {
-            console.log('Clear Data button clicked');
+            //console.log('Clear Data button clicked');
             if (e) e.preventDefault();
             if (self && typeof self.clearOverlayTrace === 'function') {
                 self.clearOverlayTrace();
