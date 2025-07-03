@@ -1597,6 +1597,7 @@ Spectrum.prototype.getExportSuffix = function() {
     // Try to get zoom level from DOM if available
     try {
         const zoomElem = document.getElementById("zoom_level");
+        console.log("zoomElem=", zoomElem.value);
         if (zoomElem) {
             // Support both input and text content
             if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
@@ -1608,6 +1609,10 @@ Spectrum.prototype.getExportSuffix = function() {
     } catch (e) {
         // fallback to default if any error
     }
+
+    console.log("getExportSuffix called with lowHz=", this.lowHz, " highHz=", this.highHz, " centerHz=", this.centerHz, " spanHz=", this.spanHz);
+
+
     const min = Math.round(minHz / 1000);
     const max = Math.round(maxHz / 1000);
     const center = Math.round(centerHz / 1000);
