@@ -10,7 +10,7 @@
       let ws = null; // Declare WebSocket as a global variable
       let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
-      let binWidthHz = 20000; // 20000 Hz per bin
+      let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025 
       var centerHz = 10000000; // center frequency
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
@@ -339,7 +339,7 @@
         settingsReady = false; // Block saves during initialization
         frequencyHz = 10000000;
         centerHz = 10000000;
-        binWidthHz = 20000;
+        binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         
         // Setup overlay buttons after spectrum is created
