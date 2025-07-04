@@ -1399,8 +1399,15 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
         trace = values;
     }
     
-    // Store the overlay trace data
-    this._overlayTrace = trace;
+    // Store the overlay trace data in the array (up to 3)
+    if (!this._overlayTraces) this._overlayTraces = [];
+    if (this._overlayTraces.length < 3) {
+        this._overlayTraces.push(trace);
+        this._overlayTraceIndex = this._overlayTraces.length - 1;
+    } else {
+        this._overlayTraceIndex = (this._overlayTraceIndex + 1) % 3;
+        this._overlayTraces[this._overlayTraceIndex] = trace;
+    }
     //console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
     
     // Compute scaling for overlay trace to match spectrum scaling
@@ -1442,7 +1449,7 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
  */
 Spectrum.prototype.clearOverlayTrace = function() {
     //console.log('clearOverlayTrace called');
-    this._overlayTrace = null;
+    this._overlayTraces = [];
     // Force redraw
     if (this.bin_copy && this.bin_copy.length) {
         this.drawSpectrumWaterfall(this.bin_copy, false);
@@ -1466,57 +1473,41 @@ Spectrum.prototype.clearOverlayTrace = function() {
             // Call the original function first
             origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
             
-            // Then draw our overlay if present
-            if (this._overlayTrace && Array.isArray(this._overlayTrace) && this._overlayTrace.length > 0) {
-                //console.log('Drawing overlay trace');
-                const ctx = this.ctx;
-                if (!ctx) {
-                    console.error('Canvas context is not available');
-                    return;
-                }
-                
-                ctx.save();
-                ctx.globalAlpha = 1.0;
-                ctx.strokeStyle = '#FFA500'; // bright orange
-                //ctx.strokeStyle = '#00FF00';  // Bright green
-                ctx.lineWidth = 2;
-                const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
-                
-                // Start a new path for the overlay trace
-                ctx.beginPath();
-                
-                let isFirstPoint = true;
-                for (let i = 0; i < this._overlayTrace.length; ++i) {
-                    // Skip undefined values
-                    if (typeof this._overlayTrace[i] === 'undefined') continue;
-                    
-                    const dB = this._overlayTrace[i];
-                    const min = this.min_db;
-                    const max = this.max_db;
-                    const clamped = Math.max(min, Math.min(max, dB));
-                    const y = ((max - clamped) / (max - min)) * spectrumHeight;
-                    
-                    // Calculate x position based on bin index, ensuring we don't divide by zero
-                    const denominator = bins.length > 1 ? (bins.length - 1) : 1;
-                    const x = (i / denominator) * this.canvas.width;
-                    
-                    // Draw the point
-                    if (isFirstPoint) {
-                        ctx.moveTo(x, y);
-                        isFirstPoint = false;
-                    } else {
-                        ctx.lineTo(x, y);
+            // Then draw all overlay traces if present
+            if (this._overlayTraces && Array.isArray(this._overlayTraces)) {
+                const colors = ['#FFA500', '#00FF00', '#00BFFF']; // orange, green, blue
+                for (let t = 0; t < this._overlayTraces.length; ++t) {
+                    const trace = this._overlayTraces[t];
+                    if (!trace || !Array.isArray(trace) || trace.length === 0) continue;
+                    const ctx = this.ctx;
+                    ctx.save();
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = colors[t % colors.length];
+                    ctx.lineWidth = 2;
+                    const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
+                    ctx.beginPath();
+                    let isFirstPoint = true;
+                    for (let i = 0; i < trace.length; ++i) {
+                        if (typeof trace[i] === 'undefined') continue;
+                        const dB = trace[i];
+                        const min = this.min_db;
+                        const max = this.max_db;
+                        const clamped = Math.max(min, Math.min(max, dB));
+                        const y = ((max - clamped) / (max - min)) * spectrumHeight;
+                        const denominator = bins.length > 1 ? (bins.length - 1) : 1;
+                        const x = (i / denominator) * this.canvas.width;
+                        if (isFirstPoint) {
+                            ctx.moveTo(x, y);
+                            isFirstPoint = false;
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
                     }
+                    if (!isFirstPoint) {
+                        ctx.stroke();
+                    }
+                    ctx.restore();
                 }
-                
-                // Only stroke if we actually drew something
-                if (!isFirstPoint) {
-                    ctx.stroke();
-                } else {
-                    console.warn('No valid points to draw in overlay trace');
-                }
-                
-                ctx.restore();
             }
         } catch (err) {
             console.error('Error drawing spectrum overlay:', err);
