@@ -45,7 +45,7 @@
            </div>
         </div>
         <div style="font-size:12px;margin-top:5px">
-         <button id="reserved" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reserved">Reserved</button> 
+         <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset Settings</button> 
          <button id="fft_avg_down" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="spectrum.decrementAveraging()" title="Decrease FFT averaging">FFT AVG -</button> 
          <button id="fft_avg_up" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="spectrum.incrementAveraging()" title="Increase FFT averaging">FFT AVG +</button>
          <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" onclick="dumpCSV()" title="Write info file">Write info file</button>
