@@ -365,8 +365,16 @@ Spectrum.prototype.drawFFT = function(bins,color) {
     x = (this.highHz-this.start_freq)/hz_per_pixel;
     this.ctx.fillRect(x, 0, this.ctx.canvas.width-x, this.spectrumHeight);
 */
+    // Check if No Spectrum Fill is enabled
+    var noSpectrumFill = document.getElementById("ckNoSpectrumFill") && document.getElementById("ckNoSpectrumFill").checked;
+    
     this.ctx.beginPath();
-    this.ctx.moveTo(-1, this.spectrumHeight + 1);
+    
+    if (!noSpectrumFill) {
+        // Original behavior - start at the bottom left for filling
+        this.ctx.moveTo(-1, this.spectrumHeight + 1);
+    }
+    
     var max_s=0;
     for(var i=0; i<bins.length; i++) {
         var s = bins[i];
@@ -375,14 +383,30 @@ Spectrum.prototype.drawFFT = function(bins,color) {
         // this needs to flip to draw the spectrum correctly
         s = (s-this.min_db)*dbm_per_line;
         s = this.spectrumHeight-s;
-        if(i==0) this.ctx.lineTo(-1,s);
+        
+        // For the first point
+        if(i==0) {
+            if (noSpectrumFill) {
+                // If no fill, start directly at the first data point
+                this.ctx.moveTo(-1, s);
+            }
+            this.ctx.lineTo(-1, s);
+        }
+        
         this.ctx.lineTo(i, s);
-        if (i==bins.length-1) this.ctx.lineTo(this.wf_size+1,s);
+        
+        if (i==bins.length-1) this.ctx.lineTo(this.wf_size+1, s);
+        
         if(s>max_s) {
           max_s=s;
         }
     }
-    this.ctx.lineTo(this.wf_size+1,this.spectrumHeight+1);
+    
+    // Only close the path to the bottom if we're filling
+    if (!noSpectrumFill) {
+        this.ctx.lineTo(this.wf_size+1, this.spectrumHeight+1);
+    }
+    
     this.ctx.strokeStyle = color;
     this.ctx.stroke();
 }
@@ -544,9 +568,14 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     if (true == document.getElementById("check_live").checked){
         // Draw FFT bins
         this.drawFFT(bins,"#ffffff");
-        // Fill scaled path
-        this.ctx.fillStyle = this.gradient;
-        this.ctx.fill();
+        
+        // Only fill if No Spectrum Fill is not checked
+        var noSpectrumFill = document.getElementById("ckNoSpectrumFill") && document.getElementById("ckNoSpectrumFill").checked;
+        if (!noSpectrumFill) {
+            // Fill scaled path
+            this.ctx.fillStyle = this.gradient;
+            this.ctx.fill();
+        }
     }
 
     // Draw minhold
