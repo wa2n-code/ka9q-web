@@ -1799,4 +1799,9 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 
 // Overlay trace functionality has been moved to spectrum.js
-
+function resetSettings() {
+  // Clear all local storage for this origin
+  localStorage.clear();
+  // Reload the current page (preserves URL, reloads from server)
+  window.location.reload();
+}
