@@ -1230,31 +1230,32 @@ Spectrum.prototype.cursorDown = function() {
  * The CSV contains columns for bin number, frequency (in Hz), and amplitude (in dB).
  * The file is named using the provided `filename` parameter, with a `.csv` extension.
  */
-Spectrum.prototype.exportCSV = function(filename) {
-    // Ensure filename is valid
-    if (!filename || typeof filename !== 'string' || filename.trim() === '') {
-        alert('Invalid filename. Please provide a valid file name.');
+Spectrum.prototype.exportCSV = function() {
+    if (!this.bin_copy || this.bin_copy.length === 0) {
+        alert("No spectrum data to export.");
         return;
     }
-
-    // Prepare CSV data
-    let csv = 'Bin,Frequency (Hz),Amplitude (dB)\n';
+    // CSV header
+    let csv = "bin,frequency,value\n";
     for (let i = 0; i < this.bin_copy.length; i++) {
         let freq = this.bin_to_hz(i);
-        let amp = this.bin_copy[i];
-        csv += `${i},${freq},${amp}\n`;
+        csv += `${i},${freq},${this.bin_copy[i]}\n`;
     }
-
     // Add min/max/center/zoom to filename
     const suffix = this.getExportSuffix();
-    let link = document.createElement('a');
-    let blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    link.setAttribute('href', URL.createObjectURL(blob));
-    link.setAttribute('download', `${filename}${suffix}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_spectrum${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
 }
 
 // Export the Max Hold data as CSV 
@@ -1275,7 +1276,9 @@ Spectrum.prototype.exportMaxHoldCSV = function() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `spectrum_max_hold${suffix}.csv`;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_max_hold${suffix}.csv`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
@@ -1302,7 +1305,9 @@ Spectrum.prototype.exportMinHoldCSV = function() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `spectrum_min_hold${suffix}.csv`;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_min_hold${suffix}.csv`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {

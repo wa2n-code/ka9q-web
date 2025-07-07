@@ -44,7 +44,7 @@ PCMPlayer.prototype.createContext = function() {
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
     // Resume the context for iOS and Safari
-    this.audioCtx.resume();
+    //this.audioCtx.resume();  Could be causing a problem and losing server connection to websocket wdr 7-6-2025
 
     // Create a gain node for volume control
     this.gainNode = this.audioCtx.createGain();
