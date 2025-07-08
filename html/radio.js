@@ -981,7 +981,9 @@ function dumpCSV() {
   var csvFile = "data:text/csv;charset=utf-8," + buildCSV();
 
   const d = new Date();
-  const timestring = d.toISOString();
+  // Format as HH_MM_SS (no fractional seconds)
+  const pad = n => String(n).padStart(2, '0');
+  const timestring = `${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}`;
 
   var encodedUri = encodeURI(csvFile);
   var link = document.createElement("a");
@@ -1038,7 +1040,9 @@ function buildScreenshot() {
 function dumpHTML() {
   const htmlFile = "data:text/html;charset=utf-8," + buildScreenshot();
   const d = new Date();
-  const timestring = d.toISOString();
+  // Format as HH_MM_SS (no fractional seconds)
+  const pad = n => String(n).padStart(2, '0');
+  const timestring = `${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}`;
   const encodedUri = encodeURI(htmlFile);
   const link = document.createElement("a");
   link.setAttribute("href", encodedUri);
@@ -1805,3 +1809,47 @@ function resetSettings() {
   // Reload the current page (preserves URL, reloads from server)
   window.location.reload();
 }
+
+let csvMinuteTimer = null;
+
+function handleWriteInfoClickMinimal() {
+    const minuteInput = document.getElementById('csvMinuteInput');
+    const writeInfoBtn = document.getElementById('csv_out');
+    let minutes = parseInt(minuteInput.value, 10) || 0;
+    if (minutes > 0) {
+        if (csvMinuteTimer) clearInterval(csvMinuteTimer);
+        dumpCSV();
+        csvMinuteTimer = setInterval(dumpCSV, minutes * 60 * 1000);
+        if (writeInfoBtn) {
+            writeInfoBtn.textContent = 'Write Info!';
+            writeInfoBtn.title = 'Write Info is periodically being written, enter 0 and press again to stop';
+        }
+        alert(`Write Info timer started: exporting every ${minutes} minute(s).`);
+    } else {
+        if (csvMinuteTimer) {
+            clearInterval(csvMinuteTimer);
+            csvMinuteTimer = null;
+            dumpCSV();
+            if (writeInfoBtn) {
+                writeInfoBtn.textContent = 'Write Info';
+                writeInfoBtn.title = 'Write Info and/or start/stop periodic info export';
+            }
+            alert('Write Info timer stopped. One last export completed.');
+        } else {
+            dumpCSV();
+            if (writeInfoBtn) {
+                writeInfoBtn.textContent = 'Write Info';
+                writeInfoBtn.title = 'Write Info and/or start/stop periodic info export';
+            }
+            alert('Exporting info file one time.');
+        }
+    }
+}
+
+// Patch event handler setup after dialog load
+const origInitDialogEvents = window.initializeDialogEventListeners;
+window.initializeDialogEventListeners = function() {
+    if (typeof origInitDialogEvents === 'function') origInitDialogEvents();
+    const btn = document.getElementById('csv_out');
+    if (btn) btn.onclick = handleWriteInfoClickMinimal;
+};
