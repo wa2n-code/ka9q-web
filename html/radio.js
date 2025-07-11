@@ -1853,3 +1853,35 @@ window.initializeDialogEventListeners = function() {
     const btn = document.getElementById('csv_out');
     if (btn) btn.onclick = handleWriteInfoClickMinimal;
 };
+
+// --- Periodic WWV Solar Data Fetch ---
+function fetchAndDisplayWWVSolarData() {
+    fetch('https://services.swpc.noaa.gov/text/wwv.txt')
+        .then(response => response.text())
+        .then(text => {
+            // Parse Solar Flux
+            const fluxMatch = text.match(/Solar flux (\d+)/);
+            const aMatch = text.match(/A-index (\d+)/);
+            // K-index can be a float, e.g. "K-index at 1200 UTC on 11 July was 4.33"
+            const kMatch = text.match(/K-index.*?was ([\d.]+)/);
+            // Issued time
+            const issuedMatch = text.match(/:Issued:\s*([^\n]+)/);
+            let flux = fluxMatch ? fluxMatch[1] : 'N/A';
+            let a = aMatch ? aMatch[1] : 'N/A';
+            let k = kMatch ? kMatch[1] : 'N/A';
+            let issued = issuedMatch ? issuedMatch[1].trim() : '';
+            const result = `WWV Flux=${flux}, A=${a}, K=${k}${issued ? " (" + issued + ")" : ""}`;
+            const wwvElem = document.getElementById('wwv_solar');
+            if (wwvElem) wwvElem.textContent = result;
+        })
+        .catch(() => {
+            const wwvElem = document.getElementById('wwv_solar');
+            if (wwvElem) wwvElem.textContent = 'WWV Flux=N/A, A=N/A, K=N/A';
+        });
+}
+
+// Initial fetch and then every hour, after DOM is ready
+window.addEventListener('DOMContentLoaded', function() {
+    fetchAndDisplayWWVSolarData();
+    setInterval(fetchAndDisplayWWVSolarData, 60 * 60 * 1000);
+});
