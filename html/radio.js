@@ -124,9 +124,11 @@
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         fetchZoomTableSize(); // Fetch and store the zoom table size
       }
-      function on_ws_close() {
+      
+      function on_ws_close(evt) {
+         console.log("WebSocket closed:", evt);
       }
-
+    
       async function on_ws_message(evt) {
         if(typeof evt.data === 'string') {
           // text data
@@ -326,7 +328,8 @@
         }
       }
 
-      function on_ws_error() {
+      function on_ws_error(evt) {
+        console.log("WebSocket error:", evt);
       }
 
       function is_touch_enabled() {
