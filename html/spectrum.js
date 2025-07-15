@@ -73,6 +73,7 @@ function Spectrum(id, options) {
 
     this.autoscale = false;
     this.autoscaleWait = 0;
+    this.freezeMinMax = false; // Flag to freeze min/max 
     this.decay = 1.0;
     this.cursor_active = false;
     this.cursor_step = 1000;
@@ -512,11 +513,13 @@ Spectrum.prototype.drawSpectrum = function(bins) {
             this.binsMax = Array.from(bins);
         } else {
             for (var i = 0; i < bins.length; i++) {
-                if (bins[i] > this.binsMax[i]) {
-                    this.binsMax[i] = bins[i];
-                } else {
-                    // Decay
-                    this.binsMax[i] = this.decay * this.binsMax[i];
+                if(!this.freezeMinMax) {                // Only update max if not frozen
+                    if (bins[i] > this.binsMax[i]) {
+                        this.binsMax[i] = bins[i];
+                    } else {
+                        // Decay
+                        this.binsMax[i] = this.decay * this.binsMax[i];
+                    }
                 }
             }
         }
@@ -528,11 +531,13 @@ Spectrum.prototype.drawSpectrum = function(bins) {
             this.binsMin = Array.from(bins);
         } else {
             for (var i = 0; i < bins.length; i++) {
-                if (bins[i] < this.binsMin[i]) {
-                    this.binsMin[i] = bins[i];
-                } else {
-                    // Decay
-                    this.binsMin[i] = this.binsMin[i];
+                if(!this.freezeMinMax) {                // Only update min if not frozen
+                    if (bins[i] < this.binsMin[i]) {
+                        this.binsMin[i] = bins[i];
+                    } else {
+                        // Decay
+                        this.binsMin[i] = this.binsMin[i];
+                    }
                 }
             }
         }
@@ -558,6 +563,20 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // draw cursor
     if (this.cursor_active)
         this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
+
+    if (true == document.getElementById("freeze_min_max").checked){
+        this.freezeMinMax = true;
+    } else {
+        this.freezeMinMax = false;
+    }
+ 
+    // Draw maxhold
+    if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMax,"#ffff00");
+    }
+
+
 
     // Draw maxhold
     if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
