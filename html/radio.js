@@ -283,7 +283,14 @@
                   let d = new Uint8Array(dataBuffer);
                   let enc = new TextDecoder("utf-8");
                   page_title = enc.decode(d);
-                  document.getElementById('heading').textContent = page_title;
+                  const headingElem = document.getElementById('heading');
+                  if (headingElem) {
+                      if (/^https?:\/\//i.test(page_title)) {
+                          headingElem.innerHTML = `<a href="${page_title}" target="_blank" style="text-decoration: underline; color: inherit;">${page_title}</a>`;
+                      } else {
+                          headingElem.textContent = page_title;
+                      }
+                  }
                   document.title = page_title;
                   i=i+l;
                   break;
