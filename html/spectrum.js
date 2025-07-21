@@ -1,9 +1,3 @@
-/*
- * Copyright (c) 2019 Jeppe Ledet-Pedersen
- * This software is released under the MIT license.
- * See the LICENSE file for further details.
- */
-
 'use strict';
 
 /**
@@ -27,6 +21,7 @@
  * @description
  * Initializes the spectrum and waterfall canvases, sets up default display parameters, and attaches mouse and keyboard event handlers for user interaction.
  * Handles spectrum display, waterfall rendering, autoscaling, color maps, and user controls for tuning and zooming.
+ * Also handles overlay trace functionality for importing, exporting, and displaying spectrum data.
  */
 function Spectrum(id, options) {
     // Handle options
@@ -78,6 +73,7 @@ function Spectrum(id, options) {
 
     this.autoscale = false;
     this.autoscaleWait = 0;
+    this.freezeMinMax = false; // Flag to freeze min/max 
     this.decay = 1.0;
     this.cursor_active = false;
     this.cursor_step = 1000;
@@ -89,6 +85,32 @@ function Spectrum(id, options) {
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+    
+    // Initialize overlay trace functionality
+    this._overlayTrace = null;
+    
+    // Setup overlay buttons if they exist in the DOM
+    var self = this;
+    
+    // Try to set up buttons immediately if DOM is already loaded
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(function() {
+            //console.log('DOM already ready, setting up overlay buttons');
+            if (typeof self.setupOverlayButtons === 'function') {
+                self.setupOverlayButtons();
+            }
+        }, 100);
+    }
+    
+    // Also set up on DOMContentLoaded in case we're still loading
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            //console.log('DOMContentLoaded fired, setting up overlay buttons');
+            if (typeof self.setupOverlayButtons === 'function') {
+                self.setupOverlayButtons();
+            }
+        }, 100); // Small delay to ensure DOM is fully loaded
+    });
 
     // Drag spectrum with right mouse button
 
@@ -194,7 +216,6 @@ function Spectrum(id, options) {
             pendingCenterHz = null;
         }
     });
-
 }
 
 Spectrum.prototype.setFrequency = function(freq) {
@@ -345,8 +366,16 @@ Spectrum.prototype.drawFFT = function(bins,color) {
     x = (this.highHz-this.start_freq)/hz_per_pixel;
     this.ctx.fillRect(x, 0, this.ctx.canvas.width-x, this.spectrumHeight);
 */
+    // Check if No Spectrum Fill is enabled
+    var noSpectrumFill = document.getElementById("ckNoSpectrumFill") && document.getElementById("ckNoSpectrumFill").checked;
+    
     this.ctx.beginPath();
-    this.ctx.moveTo(-1, this.spectrumHeight + 1);
+    
+    if (!noSpectrumFill) {
+        // Original behavior - start at the bottom left for filling
+        this.ctx.moveTo(-1, this.spectrumHeight + 1);
+    }
+    
     var max_s=0;
     for(var i=0; i<bins.length; i++) {
         var s = bins[i];
@@ -355,14 +384,30 @@ Spectrum.prototype.drawFFT = function(bins,color) {
         // this needs to flip to draw the spectrum correctly
         s = (s-this.min_db)*dbm_per_line;
         s = this.spectrumHeight-s;
-        if(i==0) this.ctx.lineTo(-1,s);
+        
+        // For the first point
+        if(i==0) {
+            if (noSpectrumFill) {
+                // If no fill, start directly at the first data point
+                this.ctx.moveTo(-1, s);
+            }
+            this.ctx.lineTo(-1, s);
+        }
+        
         this.ctx.lineTo(i, s);
-        if (i==bins.length-1) this.ctx.lineTo(this.wf_size+1,s);
+        
+        if (i==bins.length-1) this.ctx.lineTo(this.wf_size+1, s);
+        
         if(s>max_s) {
           max_s=s;
         }
     }
-    this.ctx.lineTo(this.wf_size+1,this.spectrumHeight+1);
+    
+    // Only close the path to the bottom if we're filling
+    if (!noSpectrumFill) {
+        this.ctx.lineTo(this.wf_size+1, this.spectrumHeight+1);
+    }
+    
     this.ctx.strokeStyle = color;
     this.ctx.stroke();
 }
@@ -468,11 +513,13 @@ Spectrum.prototype.drawSpectrum = function(bins) {
             this.binsMax = Array.from(bins);
         } else {
             for (var i = 0; i < bins.length; i++) {
-                if (bins[i] > this.binsMax[i]) {
-                    this.binsMax[i] = bins[i];
-                } else {
-                    // Decay
-                    this.binsMax[i] = this.decay * this.binsMax[i];
+                if(!this.freezeMinMax) {                // Only update max if not frozen
+                    if (bins[i] > this.binsMax[i]) {
+                        this.binsMax[i] = bins[i];
+                    } else {
+                        // Decay
+                        this.binsMax[i] = this.decay * this.binsMax[i];
+                    }
                 }
             }
         }
@@ -484,11 +531,13 @@ Spectrum.prototype.drawSpectrum = function(bins) {
             this.binsMin = Array.from(bins);
         } else {
             for (var i = 0; i < bins.length; i++) {
-                if (bins[i] < this.binsMin[i]) {
-                    this.binsMin[i] = bins[i];
-                } else {
-                    // Decay
-                    this.binsMin[i] = this.binsMin[i];
+                if(!this.freezeMinMax) {                // Only update min if not frozen
+                    if (bins[i] < this.binsMin[i]) {
+                        this.binsMin[i] = bins[i];
+                    } else {
+                        // Decay
+                        this.binsMin[i] = this.binsMin[i];
+                    }
                 }
             }
         }
@@ -515,6 +564,20 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     if (this.cursor_active)
         this.drawCursor(this.cursor_freq, bins, "#00ffff", bins[this.hz_to_bin(this.cursor_freq)]);
 
+    if (true == document.getElementById("freeze_min_max").checked){
+        this.freezeMinMax = true;
+    } else {
+        this.freezeMinMax = false;
+    }
+ 
+    // Draw maxhold
+    if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
+        this.ctx.fillStyle = "none";
+        this.drawFFT(this.binsMax,"#ffff00");
+    }
+
+
+
     // Draw maxhold
     if ((this.maxHold) && (true == document.getElementById("check_max").checked)) {
         this.ctx.fillStyle = "none";
@@ -524,9 +587,14 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     if (true == document.getElementById("check_live").checked){
         // Draw FFT bins
         this.drawFFT(bins,"#ffffff");
-        // Fill scaled path
-        this.ctx.fillStyle = this.gradient;
-        this.ctx.fill();
+        
+        // Only fill if No Spectrum Fill is not checked
+        var noSpectrumFill = document.getElementById("ckNoSpectrumFill") && document.getElementById("ckNoSpectrumFill").checked;
+        if (!noSpectrumFill) {
+            // Fill scaled path
+            this.ctx.fillStyle = this.gradient;
+            this.ctx.fill();
+        }
     }
 
     // Draw minhold
@@ -1120,8 +1188,8 @@ Spectrum.prototype.onKeypress = function(e) {
         ws.send("Z:c");
         saveSettings();
     } else if (e.key == "i") {
-      	ws.send("Z:+:"+document.getElementById('freq').value);
-	saveSettings();
+        ws.send("Z:+:"+document.getElementById('freq').value);
+    saveSettings();
     } else if (e.key == "o") {
         ws.send("Z:-:"+document.getElementById('freq').value);
         saveSettings();
@@ -1165,3 +1233,437 @@ Spectrum.prototype.cursorDown = function() {
     this.cursor_freq = this.limitCursor(this.cursor_freq - parseInt(document.getElementById("step").value));
     this.cursorUpdate(this.cursor_freq);
 }
+
+// Note: showOverlayTrace method is now defined directly on the Spectrum prototype
+// Patch drawSpectrum to draw overlay trace if active
+// Note: drawSpectrum overlay functionality has been moved to drawSpectrumWaterfall
+
+/**
+ * Exports the current spectrum data to a CSV file.
+ *
+ * @function
+ * @param {string} filename - The name of the file to save (without extension).
+ *
+ * @description
+ * This function converts the current spectrum data (FFT bin values) into a CSV format and triggers a download.
+ * The CSV contains columns for bin number, frequency (in Hz), and amplitude (in dB).
+ * The file is named using the provided `filename` parameter, with a `.csv` extension.
+ */
+Spectrum.prototype.exportCSV = function() {
+    if (!this.bin_copy || this.bin_copy.length === 0) {
+        alert("No spectrum data to export.");
+        return;
+    }
+    // CSV header
+    let csv = "bin,frequency,value\n";
+    for (let i = 0; i < this.bin_copy.length; i++) {
+        let freq = this.bin_to_hz(i);
+        csv += `${i},${freq},${this.bin_copy[i]}\n`;
+    }
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_spectrum${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+// Export the Max Hold data as CSV 
+Spectrum.prototype.exportMaxHoldCSV = function() {
+    if (!this.binsMax || this.binsMax.length === 0) {
+        alert("No Max Hold data to export.");
+        return;
+    }
+    // CSV header
+    let csv = "bin,frequency,value\n";
+    for (let i = 0; i < this.binsMax.length; i++) {
+        let freq = this.bin_to_hz(i);
+        csv += `${i},${freq},${this.binsMax[i]}\n`;
+    }
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_max_hold${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+// Export the Min Hold data as CSV
+Spectrum.prototype.exportMinHoldCSV = function() {
+    if (!this.binsMin || this.binsMin.length === 0) {
+        alert("No Min Hold data to export.");
+        return;
+    }
+    // CSV header
+    let csv = "bin,frequency,value\n";
+    for (let i = 0; i < this.binsMin.length; i++) {
+        let freq = this.bin_to_hz(i);
+        csv += `${i},${freq},${this.binsMin[i]}\n`;
+    }
+    // Add min/max/center/zoom to filename
+    const suffix = this.getExportSuffix();
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // Prefix with host:port
+    const host = window.location.host.replace(/[:\/\\]/g, '_');
+    a.download = `${host}_min_hold${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+/**
+ * Loads a CSV file and displays the data as an overlay trace on the spectrum.
+ * 
+ * @function
+ * @description
+ * This function is called by the "Load Data" button to load a CSV file containing
+ * frequency spectrum data and display it as an overlay on the spectrum graph.
+ */
+Spectrum.prototype.loadOverlayTrace = function() {
+    //console.log('loadOverlayTrace called');
+    var self = this;
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,text/csv';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    
+    input.addEventListener('change', function(e) {
+        //console.log('File selected', e.target.files);
+        var file = e.target.files[0];
+        if (!file) {
+            document.body.removeChild(input);
+            return;
+        }
+        
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+            //console.log('File loaded, processing data');
+            try {
+                var lines = evt.target.result.split(/\r?\n/);
+                //console.log('CSV lines:', lines.length);
+                var data = [];
+                var validEntries = 0;
+                
+                for (var i = 1; i < lines.length; ++i) { // skip header
+                    var line = lines[i].trim();
+                    if (line === '') continue;
+                    
+                    var parts = line.split(',');
+                    if (parts.length >= 3) {
+                        var bin = parseInt(parts[0], 10);
+                        var freq = parseFloat(parts[1]);
+                        var value = parseFloat(parts[2]);
+                        if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
+                            data[bin] = value;
+                            validEntries++;
+                        }
+                    }
+                }
+                
+                //console.log('Valid CSV entries:', validEntries);
+                if (validEntries > 0) {
+                    //console.log('Calling showOverlayTrace with data');
+                    self.showOverlayTrace(data);
+                } else {
+                    console.error('No valid data found in CSV');
+                    alert('No valid data found in CSV file.');
+                }
+            } catch (e) {
+                console.error('Error processing CSV:', e);
+                alert('Failed to load CSV: ' + e.message);
+            } finally {
+                document.body.removeChild(input);
+            }
+        };
+        
+        reader.onerror = function(evt) {
+            console.error('Error reading file:', evt);
+            alert('Error reading file');
+            document.body.removeChild(input);
+        };
+        
+        //console.log('Starting file read');
+        reader.readAsText(file);
+    });
+    
+    // Add timeout to ensure browser responds to the click
+    setTimeout(function() {
+        input.click();
+    }, 50);
+};
+
+/**
+ * Displays an overlay trace on the spectrum.
+ * 
+ * @function
+ * @param {Array} trace - An array of amplitude values to overlay on the spectrum.
+ * @description
+ * This function takes an array of amplitude values and displays them as an overlay
+ * on the spectrum graph. The overlay is drawn in green.
+ */
+Spectrum.prototype.showOverlayTrace = function(trace) {
+    //console.log('showOverlayTrace called');
+    var self = this;
+    
+    // Check for valid input
+    if (!trace || (Array.isArray(trace) && trace.length === 0)) {
+        console.error('Empty or invalid trace data');
+        return;
+    }
+    
+    // Accepts either an array of values or an array of objects/arrays with bin/freq/value
+    // If input is an array of objects/arrays, extract only the value for each bin
+    if (Array.isArray(trace) && trace.length > 0 && typeof trace[0] !== 'number') {
+        // Try to extract the value (3rd column) from each row
+        var values = [];
+        for (var i = 0; i < trace.length; ++i) {
+            var row = trace[i];
+            if (Array.isArray(row) && row.length >= 3) {
+                values[i] = parseFloat(row[2]);
+            } else if (typeof row === 'object' && row !== null && 'value' in row) {
+                values[i] = parseFloat(row.value);
+            }
+        }
+        trace = values;
+    }
+    
+    // Store the overlay trace data in the array (up to 3)
+    if (!this._overlayTraces) this._overlayTraces = [];
+    if (this._overlayTraces.length < 3) {
+        this._overlayTraces.push(trace);
+        this._overlayTraceIndex = this._overlayTraces.length - 1;
+    } else {
+        this._overlayTraceIndex = (this._overlayTraceIndex + 1) % 3;
+        this._overlayTraces[this._overlayTraceIndex] = trace;
+    }
+    //console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
+    
+    // Compute scaling for overlay trace to match spectrum scaling
+    // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
+    var min_db = this.min_db;
+    var max_db = this.max_db;
+    var spectrumHeight = this.spectrumHeight || this.canvas.height;
+    
+    // Precompute scaled values for overlay if needed by drawSpectrum
+    this._overlayTraceScaled = [];
+    if (Array.isArray(trace)) {
+        for (var i = 0; i < trace.length; i++) {
+            var v = trace[i];
+            if (typeof v === 'undefined') {
+                this._overlayTraceScaled[i] = undefined;
+            } else if (v <= min_db) {
+                this._overlayTraceScaled[i] = spectrumHeight;
+            } else if (v >= max_db) {
+                this._overlayTraceScaled[i] = 0;
+            } else {
+                this._overlayTraceScaled[i] = spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
+            }
+        }
+    }
+    
+    // Trigger a redraw to show overlay immediately
+    //console.log('Triggering redraw with overlay');
+    if (this.bin_copy) {
+        this.drawSpectrumWaterfall(this.bin_copy, false);
+    }
+};
+
+/**
+ * Clears the overlay trace from the spectrum.
+ * 
+ * @function
+ * @description
+ * This function removes any overlay trace from the spectrum and redraws the spectrum.
+ */
+Spectrum.prototype.clearOverlayTrace = function() {
+    //console.log('clearOverlayTrace called');
+    this._overlayTraces = [];
+    // Force redraw
+    if (this.bin_copy && this.bin_copy.length) {
+        this.drawSpectrumWaterfall(this.bin_copy, false);
+    } else if (this.binsAverage && this.binsAverage.length) {
+        this.drawSpectrumWaterfall(this.binsAverage, false);
+    } else {
+        // As a last resort, clear the canvas
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+};
+
+// Patch the main spectrum drawing function to draw the overlay trace if present
+(function() {
+    // Store the original drawSpectrumWaterfall function
+    const origDrawSpectrumWaterfall = Spectrum.prototype.drawSpectrumWaterfall;
+    
+    // Replace with our patched version that also draws the overlay
+    Spectrum.prototype.drawSpectrumWaterfall = function(bins, updateWaterfall) {
+        try {
+            // Call the original function first
+            origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
+            
+            // Then draw all overlay traces if present
+            if (this._overlayTraces && Array.isArray(this._overlayTraces)) {
+                const colors = ['#FFA500', '#00FF00', '#00BFFF']; // orange, green, blue
+                for (let t = 0; t < this._overlayTraces.length; ++t) {
+                    const trace = this._overlayTraces[t];
+                    if (!trace || !Array.isArray(trace) || trace.length === 0) continue;
+                    const ctx = this.ctx;
+                    ctx.save();
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = colors[t % colors.length];
+                    ctx.lineWidth = 2;
+                    const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
+                    ctx.beginPath();
+                    let isFirstPoint = true;
+                    for (let i = 0; i < trace.length; ++i) {
+                        if (typeof trace[i] === 'undefined') continue;
+                        const dB = trace[i];
+                        const min = this.min_db;
+                        const max = this.max_db;
+                        const clamped = Math.max(min, Math.min(max, dB));
+                        const y = ((max - clamped) / (max - min)) * spectrumHeight;
+                        const denominator = bins.length > 1 ? (bins.length - 1) : 1;
+                        const x = (i / denominator) * this.canvas.width;
+                        if (isFirstPoint) {
+                            ctx.moveTo(x, y);
+                            isFirstPoint = false;
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                    if (!isFirstPoint) {
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+            }
+        } catch (err) {
+            console.error('Error drawing spectrum overlay:', err);
+        }
+    };
+})();
+
+/**
+ * Sets up event handlers for spectrum overlay-related buttons.
+ * 
+ * @function
+ * @description
+ * This function is called during initialization to set up event handlers for
+ * buttons related to spectrum overlay functionality (Load Data and Clear Data).
+ */
+Spectrum.prototype.setupOverlayButtons = function() {
+    var self = this;
+    //console.log('Setting up overlay buttons...');
+    
+    // Set up the Load Data button
+    var loadBtn = document.getElementById('load_max');
+    if (loadBtn) {
+        //console.log('Found Load Data button, attaching handler');
+        // Remove any existing click handlers to prevent duplicates
+        loadBtn.removeEventListener('click', loadBtn._clickHandler);
+        
+        // Create and store the handler function
+        loadBtn._clickHandler = function(e) {
+            //console.log('Load Data button clicked');
+            if (e) e.preventDefault();
+            if (self && typeof self.loadOverlayTrace === 'function') {
+                self.loadOverlayTrace();
+            } else {
+                console.error('Spectrum.loadOverlayTrace is not available', self);
+                alert('Load Data function not available. Please try again later.');
+            }
+        };
+        
+        // Attach the handler
+        loadBtn.addEventListener('click', loadBtn._clickHandler);
+    } else {
+        console.warn('Load Data button (#load_max) not found in DOM');
+    }
+    
+    // Set up the Clear Data button
+    var clearBtn = document.getElementById('clear_overlay');
+    if (clearBtn) {
+        //console.log('Found Clear Data button, attaching handler');
+        // Remove any existing click handlers to prevent duplicates
+        clearBtn.removeEventListener('click', clearBtn._clickHandler);
+        
+        // Create and store the handler function
+        clearBtn._clickHandler = function(e) {
+            //console.log('Clear Data button clicked');
+            if (e) e.preventDefault();
+            if (self && typeof self.clearOverlayTrace === 'function') {
+                self.clearOverlayTrace();
+            } else {
+                console.error('Spectrum.clearOverlayTrace is not available', self);
+                alert('Clear Data function not available. Please try again later.');
+            }
+        };
+        
+        // Attach the handler
+        clearBtn.addEventListener('click', clearBtn._clickHandler);
+    } else {
+        console.warn('Clear Data button (#clear_overlay) not found in DOM');
+    }
+};
+
+// Helper to generate a filename suffix with min, max, center frequencies and zoom
+Spectrum.prototype.getExportSuffix = function() {
+    // Use kHz for readability
+    const minHz = (typeof this.lowHz === 'number') ? this.lowHz : (this.centerHz - (this.spanHz/2));
+    const maxHz = (typeof this.highHz === 'number') ? this.highHz : (this.centerHz + (this.spanHz/2));
+    const centerHz = (typeof this.centerHz === 'number') ? this.centerHz : 0;
+    let zoom = 'z';
+    // Try to get zoom level from DOM if available
+    try {
+        const zoomElem = document.getElementById("zoom_level");
+        console.log("zoomElem=", zoomElem.value);
+        if (zoomElem) {
+            // Support both input and text content
+            if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
+                zoom = zoomElem.value;
+            } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
+                zoom = zoomElem.textContent.trim();
+            }
+        }
+    } catch (e) {
+        // fallback to default if any error
+    }
+
+    console.log("getExportSuffix called with lowHz=", this.lowHz, " highHz=", this.highHz, " centerHz=", this.centerHz, " spanHz=", this.spanHz);
+
+
+    const min = Math.round(minHz / 1000);
+    const max = Math.round(maxHz / 1000);
+    const center = Math.round(centerHz / 1000);
+    return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
+};
+/*
+ * Copyright (c) 2019 Jeppe Ledet-Pedersen
+ * This software is released under the MIT license.
+ * See the LICENSE file for further details.
+ */

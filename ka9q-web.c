@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.73";
+const char *webserver_version = "2.74";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);

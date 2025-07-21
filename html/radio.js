@@ -124,9 +124,11 @@
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         fetchZoomTableSize(); // Fetch and store the zoom table size
       }
-      function on_ws_close() {
+      
+      function on_ws_close(evt) {
+         console.log("WebSocket closed:", evt);
       }
-
+    
       async function on_ws_message(evt) {
         if(typeof evt.data === 'string') {
           // text data
@@ -281,7 +283,14 @@
                   let d = new Uint8Array(dataBuffer);
                   let enc = new TextDecoder("utf-8");
                   page_title = enc.decode(d);
-                  document.getElementById('heading').textContent = page_title;
+                  const headingElem = document.getElementById('heading');
+                  if (headingElem) {
+                      if (/^https?:\/\//i.test(page_title)) {
+                          headingElem.innerHTML = `<a href="${page_title}" target="_blank" style="text-decoration: underline; color: inherit;">${page_title}</a>`;
+                      } else {
+                          headingElem.textContent = page_title;
+                      }
+                  }
                   document.title = page_title;
                   i=i+l;
                   break;
@@ -326,7 +335,8 @@
         }
       }
 
-      function on_ws_error() {
+      function on_ws_error(evt) {
+        console.log("WebSocket error:", evt);
       }
 
       function is_touch_enabled() {
@@ -339,8 +349,17 @@
         settingsReady = false; // Block saves during initialization
         frequencyHz = 10000000;
         centerHz = 10000000;
-        let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025 
+        binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
+        
+        // Setup overlay buttons after spectrum is created
+        document.addEventListener('DOMContentLoaded', function() {
+            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+                setTimeout(function() {
+                    spectrum.setupOverlayButtons();
+                }, 100); // Small delay to ensure DOM is ready
+            }
+        });
         if (!loadSettings()) {
           console.log("loadSettings() returned false, setting defaults");
           setDefaultSettings(); 
@@ -857,7 +876,21 @@ function update_stats() {
   document.getElementById('if_power').innerHTML = "A/D: " + if_power.toFixed(1) + " dBFS";
   document.getElementById('noise_density').innerHTML = `N<sub>0</sub>: ${noise_density_audio.toFixed(1)} dBmJ, Noise power at BW ${bw.toLocaleString()}: ${noisePower.toFixed(1)} dBm`;
   document.getElementById('bins').textContent = `Bins: ${binCount.toLocaleString()}`;
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz`;
+  // Show bin width and zoom level
+  let zoomLevel = '';
+  try {
+    const zoomElem = document.getElementById('zoom_level');
+    if (zoomElem) {
+      if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') {
+        zoomLevel = zoomElem.value;
+      } else if (zoomElem.textContent && zoomElem.textContent.trim() !== '') {
+        zoomLevel = zoomElem.textContent.trim();
+      }
+    }
+  } catch (e) {
+    // fallback to empty if any error
+  }
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
@@ -958,7 +991,9 @@ function dumpCSV() {
   var csvFile = "data:text/csv;charset=utf-8," + buildCSV();
 
   const d = new Date();
-  const timestring = d.toISOString();
+  // Format as HH_MM_SS (no fractional seconds)
+  const pad = n => String(n).padStart(2, '0');
+  const timestring = `${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}`;
 
   var encodedUri = encodeURI(csvFile);
   var link = document.createElement("a");
@@ -1015,7 +1050,9 @@ function buildScreenshot() {
 function dumpHTML() {
   const htmlFile = "data:text/html;charset=utf-8," + buildScreenshot();
   const d = new Date();
-  const timestring = d.toISOString();
+  // Format as HH_MM_SS (no fractional seconds)
+  const pad = n => String(n).padStart(2, '0');
+  const timestring = `${pad(d.getHours())}_${pad(d.getMinutes())}_${pad(d.getSeconds())}`;
   const encodedUri = encodeURI(htmlFile);
   const link = document.createElement("a");
   link.setAttribute("href", encodedUri);
@@ -1294,7 +1331,7 @@ function setAnalogMeterVisible(visible) {
             for (let i = 0; i < 50; i++) {
                 const opt = document.createElement('option');
                 opt.value = i;
-                opt.text = `${i+1}: ---`;
+                opt.textContent = `${i+1}: ---`;
                 sel.appendChild(opt);
             }
         }
@@ -1323,13 +1360,7 @@ function setAnalogMeterVisible(visible) {
 
 // Event handlers for new Spectrum Options Dialog box
 
-document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('OptionsButton').addEventListener('click', function() {
-    const dialog = document.getElementById('optionsDialog');
-    dialog.classList.add('open');
-    document.getElementById('dialogOverlay').classList.add('open');
-  });
-});
+
 
 function initializeDialogEventListeners() {
   const optionsButton = document.getElementById('OptionsButton'); // The launch button
@@ -1357,6 +1388,16 @@ function initializeDialogEventListeners() {
     // Show the dialog
     optionsDialog.classList.add('open');
     dialogOverlay.classList.add('open');
+    
+    // Setup the overlay buttons when the dialog is opened
+    if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+      //console.log('Dialog opened, setting up overlay buttons');
+      setTimeout(function() {
+        spectrum.setupOverlayButtons();
+      }, 50); // Small delay to ensure dialog is fully visible
+    } else {
+      console.warn('Spectrum not available when opening dialog');
+    }
   });
 
   // Attach the event handler to the close button
@@ -1420,7 +1461,7 @@ function setPlayerVolume(value) {
     const slider = parseFloat(value);
     const gain = minGain + (maxGain - minGain) * Math.pow(slider, exponent);
     player.volume(gain);
-    console.log(`Volume set to: ${gain} (slider: ${slider})`);
+    //console.log(`Volume set to: ${gain} (slider: ${slider})`);
   } 
 
   function setPanner(value) {
@@ -1573,6 +1614,17 @@ function enableBandSelectAlwaysCallsSetBand() {
 
 // --- Unified Initialization ---
 window.addEventListener('DOMContentLoaded', function() {
+    // Move the original OptionsButton DOMContentLoaded handler here, before dialogPlaceholder fetch for order preservation
+    var optionsButton = document.getElementById('OptionsButton');
+    if (optionsButton) {
+        optionsButton.addEventListener('click', function() {
+            var dialog = document.getElementById('optionsDialog');
+            if (dialog) dialog.classList.add('open');
+            var overlay = document.getElementById('dialogOverlay');
+            if (overlay) overlay.classList.add('open');
+        });
+    }
+
     // Defensive: check for dialogPlaceholder
     var dialogPlaceholder = document.getElementById('dialogPlaceholder');
     if (!dialogPlaceholder) {
@@ -1584,6 +1636,11 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(response => response.text())
         .then(data => {
             dialogPlaceholder.innerHTML = data;
+            
+            // Setup overlay buttons if spectrum exists
+            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+                spectrum.setupOverlayButtons();
+            }
 
             // Defensive: check for required dialog elements
             var closeXButton = document.getElementById('closeXButton');
@@ -1674,7 +1731,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
                 // Use only the IP address (no port) in the filename
                 var serverIP = window.location.hostname.replace(/:/g, '_');
-                var filename = `channel_memories_${serverIP}.json`;
+                               var filename = `channel_memories_${serverIP}.json`;
 
                 var a = document.createElement('a');
                 a.href = url;
@@ -1692,6 +1749,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (!file) return;
                 var reader = new FileReader();
                 reader.onload = function(evt) {
+                                                                                                                                
                     try {
                         var arr = JSON.parse(evt.target.result);
                         if (Array.isArray(arr) && arr.length === 50) {
@@ -1754,9 +1812,86 @@ window.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// Overlay trace functionality has been moved to spectrum.js
 function resetSettings() {
   // Clear all local storage for this origin
   localStorage.clear();
   // Reload the current page (preserves URL, reloads from server)
   window.location.reload();
 }
+
+let csvMinuteTimer = null;
+
+function handleWriteInfoClickMinimal() {
+    const minuteInput = document.getElementById('csvMinuteInput');
+    const writeInfoBtn = document.getElementById('csv_out');
+    let minutes = parseInt(minuteInput.value, 10) || 0;
+    if (minutes > 0) {
+        if (csvMinuteTimer) clearInterval(csvMinuteTimer);
+        dumpCSV();
+        csvMinuteTimer = setInterval(dumpCSV, minutes * 60 * 1000);
+        if (writeInfoBtn) {
+            writeInfoBtn.textContent = 'Write Info!';
+            writeInfoBtn.title = 'Write Info is periodically being written, enter 0 and press again to stop';
+        }
+        alert(`Write Info timer started: exporting every ${minutes} minute(s).`);
+    } else {
+        if (csvMinuteTimer) {
+            clearInterval(csvMinuteTimer);
+            csvMinuteTimer = null;
+            dumpCSV();
+            if (writeInfoBtn) {
+                writeInfoBtn.textContent = 'Write Info';
+                writeInfoBtn.title = 'Write Info and/or start/stop periodic info export';
+            }
+            alert('Write Info timer stopped. One last export completed.');
+        } else {
+            dumpCSV();
+            if (writeInfoBtn) {
+                writeInfoBtn.textContent = 'Write Info';
+                writeInfoBtn.title = 'Write Info and/or start/stop periodic info export';
+            }
+            alert('Exporting info file one time.');
+        }
+    }
+}
+
+// Patch event handler setup after dialog load
+const origInitDialogEvents = window.initializeDialogEventListeners;
+window.initializeDialogEventListeners = function() {
+    if (typeof origInitDialogEvents === 'function') origInitDialogEvents();
+    const btn = document.getElementById('csv_out');
+    if (btn) btn.onclick = handleWriteInfoClickMinimal;
+};
+
+// --- Periodic WWV Solar Data Fetch ---
+function fetchAndDisplayWWVSolarData() {
+    fetch('https://services.swpc.noaa.gov/text/wwv.txt')
+        .then(response => response.text())
+        .then(text => {
+            // Parse Solar Flux
+            const fluxMatch = text.match(/Solar flux (\d+)/);
+            const aMatch = text.match(/A-index (\d+)/);
+            // K-index can be a float, e.g. "K-index at 1200 UTC on 11 July was 4.33"
+            const kMatch = text.match(/K-index.*?was ([\d.]+)/);
+            // Issued time
+            const issuedMatch = text.match(/:Issued:\s*([^\n]+)/);
+            let flux = fluxMatch ? fluxMatch[1] : 'N/A';
+            let a = aMatch ? aMatch[1] : 'N/A';
+            let k = kMatch ? kMatch[1] : 'N/A';
+            let issued = issuedMatch ? issuedMatch[1].trim() : '';
+            const result = `WWV Flux=${flux}, A=${a}, K=${k}${issued ? " (" + issued + ")" : ""}`;
+            const wwvElem = document.getElementById('wwv_solar');
+            if (wwvElem) wwvElem.textContent = result;
+        })
+        .catch(() => {
+            const wwvElem = document.getElementById('wwv_solar');
+            if (wwvElem) wwvElem.textContent = 'WWV Flux=N/A, A=N/A, K=N/A';
+        });
+}
+
+// Initial fetch and then every hour, after DOM is ready
+window.addEventListener('DOMContentLoaded', function() {
+    fetchAndDisplayWWVSolarData();
+    setInterval(fetchAndDisplayWWVSolarData, 60 * 60 * 1000);
+});
