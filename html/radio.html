@@ -90,9 +90,9 @@
                     <td>
                         <div style="display: flex; align-items: center;">
                             <span style="min-width: 100px; display: inline-block;">Spectrum ceil:</span>
-                            <button id="rangedec" style="width:45px; margin-left: 4px;" onclick="rangeDecrease()" title="Decrease spectrum maximum dBm">-</button>
-                            <button id="rangeinc" style="width:45px; margin-left: 3px;" onclick="rangeIncrease()" title="Increase spectrum maximum dBm">+</button>
-                            <input type="text" id="spectrum_max" style="width:38px; margin-left: 4px;" value="" onchange="setSpectrumMax()" title="Spectrum max dBm" />
+                            <button id="rangedec" style="width:45px; margin-left: 4px;" onclick="rangeDecrease()" title="Decrease spectrum ceiling dBm">-</button>
+                            <button id="rangeinc" style="width:45px; margin-left: 3px;" onclick="rangeIncrease()" title="Increase spectrum ceiling dBm">+</button>
+                            <input type="number" id="spectrum_max" style="width:54px; margin-left: 4px;" value="" onchange="setSpectrumMax()" title="Spectrum ceiling dBm" />
                         </div>
                     </td>
                     <td rowspan=2>
@@ -111,7 +111,7 @@
                             <option value="sam">SAM</option>
                             <option value="nam">NAM</option>
                             <option value="fm">FM</option>
-                            <option value="iq">I/Q</option>
+                            <option value="iq">Iinput type="numberd/Q</option>
                             <option value="user1">USER1</option>
                             <option value="user2">USER2</option>
                             <option value="user3">USER3</option>
@@ -133,9 +133,9 @@
                     <td>
                         <div style="display: flex; align-items: center;">
                             <span style="min-width: 100px; display: inline-block;">Spectrum floor:</span>
-                            <button id="baseline_down" style="width:45px; margin-left: 4px;" onclick="baselineDown()" title="Decrease spectrum baseline position">-</button>
-                            <button id="baseline_up" style="width:45px; margin-left: 3px;" onclick="baselineUp()" title="Increase spectrum baseline position">+</button>
-                            <input type="text" id="spectrum_min" style="width:38px; margin-left: 4px;" value="" onchange="setSpectrumMin()" title="Spectrum baseline dBm" />
+                            <button id="baseline_down" style="width:45px; margin-left: 4px;" onclick="baselineDown()" title="Lower spectrum baseline position">-</button>
+                            <button id="baseline_up" style="width:45px; margin-left: 3px;" onclick="baselineUp()" title="Raise spectrum baseline position">+</button>
+                            <input type="number" id="spectrum_min" style="width:54px; margin-left: 4px;" value="" onchange="setSpectrumMin()" title="Spectrum floor dBm" />
                         </div>
                     </td>
                     <td style="padding-left: 4px;">
@@ -156,8 +156,8 @@
                     <td>
                         <div style="display: flex; align-items: center;">
                             <span style="min-width: 100px; display: inline-block;">Spectrum size:</span>
-                            <button style="width:70px; margin-left: 4px;" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
-                            <button style="width:70px; margin-left: 3px;" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
+                            <button style="width:45px; margin-left: 4px;" id="spectrum_size_down" onclick="spectrum.decrementSpectrumPercent()" title="Decrease spectrum size">-</button>
+                            <button style="width:45px; margin-left: 3px;" id="spectrum_size_up" onclick="spectrum.incrementSpectrumPercent()" title="Increase spectrum size">+</button>
                         </div>
                     </td>
                     <td align="center">
