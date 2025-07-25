@@ -183,7 +183,7 @@
                     <td>
                         <label for="zoom_level">WF ceil:&nbsp;&nbsp;&nbsp;</label>
                         <input type="range" id="waterfall_max_range" min="-140" value="-80" max="0" oninput="setWaterfallMax()" onwheel="adjustRange(this, event)" title="Adjust Waterfall Ceiling" />
-                        <input type="text" id="waterfall_max" style="width: 38px" value="" onchange="setWaterfallMax()" title="Max waterfall dBm level (signal color intensity)" />
+                        <input type="text" id="waterfall_max" style="width: 38px" value="" readonly title="Max waterfall dBm level (signal color intensity)" />
                     </td>
                     <td align="center">
                         <label for="step">Step:</label>
@@ -232,7 +232,7 @@
                     <td>
                         <label for="zoom_level"> WF floor:</label>
                         <input type="range" id="waterfall_min_range" min="-150" value="-110" max="-40" oninput="setWaterfallMin()" onwheel="adjustRange(this, event)" title="Adjust waterfall floor" style="position: relative; left: 5px;" />
-                        <input type="text" id="waterfall_min" style="width: 38px; position: relative; left: 5px;" value="" onchange="setWaterfallMin()" title="Minimum waterfall dBm level (background brightness)" />
+                        <input type="text" id="waterfall_min" style="width: 38px; position: relative; left: 5px;" value="" readonly title="Minimum waterfall dBm level (background brightness)" />
                     </td>
                     <td align="center">
                         <input type="checkbox" id="cursor" onclick="spectrum.cursorCheck()" value=false name="cursor" title="Check to turn on / off frequency cursor" /> <label for="cursor">Activate cursor</label>
