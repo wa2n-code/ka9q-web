@@ -1525,7 +1525,7 @@ Spectrum.prototype.clearOverlayTrace = function() {
         try {
             // Call the original function first
             origDrawSpectrumWaterfall.call(this, bins, updateWaterfall);
-            
+
             // Then draw all overlay traces if present
             if (this._overlayTraces && Array.isArray(this._overlayTraces)) {
                 const colors = ['#FFA500', '#00FF00', '#00BFFF']; // orange, green, blue
@@ -1539,26 +1539,39 @@ Spectrum.prototype.clearOverlayTrace = function() {
                     ctx.lineWidth = 2;
                     const spectrumHeight = Math.round(this.canvas.height * (this.spectrumPercent / 100));
                     ctx.beginPath();
-                    let isFirstPoint = true;
+                    // Improved overlay trace drawing with line clipping at spectrum edges
+                    let prevValid = false;
+                    let prevX = 0, prevY = 0, prevDB = 0;
+                    const min = this.min_db;
+                    const max = this.max_db;
+                    const denominator = bins.length > 1 ? (bins.length - 1) : 1;
                     for (let i = 0; i < trace.length; ++i) {
-                        if (typeof trace[i] === 'undefined') continue;
                         const dB = trace[i];
-                        const min = this.min_db;
-                        const max = this.max_db;
-                        const clamped = Math.max(min, Math.min(max, dB));
-                        const y = ((max - clamped) / (max - min)) * spectrumHeight;
-                        const denominator = bins.length > 1 ? (bins.length - 1) : 1;
                         const x = (i / denominator) * this.canvas.width;
-                        if (isFirstPoint) {
-                            ctx.moveTo(x, y);
-                            isFirstPoint = false;
-                        } else {
-                            ctx.lineTo(x, y);
+                        let y = ((max - dB) / (max - min)) * spectrumHeight;
+                        let inRange = (typeof dB === 'number' && dB >= min && dB <= max);
+                        // Clamp y to spectrum area if out of range
+                        if (typeof dB !== 'number') {
+                            prevValid = false;
+                            continue;
                         }
+                        if (!inRange) {
+                            if (dB < min) y = spectrumHeight;
+                            else if (dB > max) y = 0;
+                        }
+                        if (prevValid) {
+                            // If previous or current point is in range, draw the segment (with endpoint(s) possibly clipped)
+                            if (inRange || prevValid) {
+                                ctx.moveTo(prevX, prevY);
+                                ctx.lineTo(x, y);
+                            }
+                        }
+                        prevValid = inRange;
+                        prevX = x;
+                        prevY = y;
+                        prevDB = dB;
                     }
-                    if (!isFirstPoint) {
-                        ctx.stroke();
-                    }
+                    ctx.stroke();
                     ctx.restore();
                 }
             }
