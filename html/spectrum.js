@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2019 Jeppe Ledet-Pedersen
+ * This software is released under the MIT license.
+ * See the LICENSE file for further details.
+ */
 'use strict';
 
 /**
@@ -1896,8 +1901,3 @@ Spectrum.prototype.getExportSuffix = function() {
     const center = Math.round(centerHz / 1000);
     return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
 };
-/*
- * Copyright (c) 2019 Jeppe Ledet-Pedersen
- * This software is released under the MIT license.
- * See the LICENSE file for further details.
- */
