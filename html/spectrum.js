@@ -1398,8 +1398,11 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     }
                 }
 
+                // ...existing code...
+
                 // If no metadata, scan data section for min/max freq
                 let minFreq = null, maxFreq = null, binCountFromData = 0;
+                let frequencies = []; // Add this array to store all frequencies
                 for (let i = dataStart + 1; i < lines.length; ++i) {
                     var line = lines[i].trim();
                     if (line === '') continue;
@@ -1410,6 +1413,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
                         var value = parseFloat(parts[2]);
                         if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
                             data[bin] = value;
+                            frequencies[bin] = freq; // Store frequency at bin index
                             validEntries++;
                             // Track min/max freq
                             if (minFreq === null || freq < minFreq) minFreq = freq;
@@ -1424,12 +1428,20 @@ Spectrum.prototype.loadOverlayTrace = function() {
                         console.warn('CSV line does not have at least 3 columns (ignored):', line);
                     }
                 }
+
                 // If no metadata, use data-derived limits
                 if (fileLowHz === null && minFreq !== null) fileLowHz = minFreq;
                 if (fileHighHz === null && maxFreq !== null) fileHighHz = maxFreq;
-                if (fileCenterHz === null && minFreq !== null && maxFreq !== null) fileCenterHz = (minFreq + maxFreq) / 2;
                 if (fileBinCount === null && binCountFromData > 0) fileBinCount = binCountFromData + 1;
 
+                // NOW calculate center frequency after we know the actual bin count
+                if (fileCenterHz === null && fileBinCount !== null && frequencies[Math.floor(fileBinCount / 2)]) {
+                    fileCenterHz = frequencies[Math.floor(fileBinCount / 2)]; // Use the middle frequency bin as center if not specified
+                }
+
+                console.log("fileBinCount:",fileBinCount,"fileCenterHz:", fileCenterHz,"at fileBinCount/2:", Math.floor(fileBinCount / 2), "minFreq:", minFreq, "maxFreq:", maxFreq);
+
+                // ...existing code...
                 // Remove all overlay debug logs except concise slot log
 
                 // --- Determine if spectrum matches ---
