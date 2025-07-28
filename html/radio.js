@@ -1549,6 +1549,47 @@ async function fetchZoomTableSize() {
     }
 }
 
+// --- Zoom Table: Expose to global scope ---
+// Example: window.zoomTable = [ { index: 0, value: 0, label: 'Zoom 0' }, ... ]
+// If already present, skip this block. Otherwise, define it here or fetch from DOM/JS.
+// --- Hardcoded zoom table to match ka9q-web.c ---
+// This must be available before overlays or zoom logic is used
+window.zoomTable = [
+  { bin_width: 40000, bin_count: 1620 },
+  { bin_width: 20000, bin_count: 1620 },
+  { bin_width: 16000, bin_count: 1620 },
+  { bin_width: 8000, bin_count: 1620 },
+  { bin_width: 4000, bin_count: 1620 },
+  { bin_width: 2000, bin_count: 1620 },
+  { bin_width: 1000, bin_count: 1620 },
+  { bin_width: 800, bin_count: 1620 },
+  { bin_width: 400, bin_count: 1620 },
+  { bin_width: 200, bin_count: 1620 },
+  { bin_width: 120, bin_count: 1620 },
+  { bin_width: 80, bin_count: 1620 },
+  { bin_width: 40, bin_count: 1620 },
+  { bin_width: 20, bin_count: 1620 },
+  { bin_width: 10, bin_count: 1620 },
+  { bin_width: 5, bin_count: 1620 },
+  { bin_width: 2, bin_count: 1620 },
+  { bin_width: 1, bin_count: 1620 }
+];
+
+// Utility: Find closest zoom level index for a given value
+window.findClosestZoomIndex = function(requestedZoom) {
+  if (!window.zoomTable || window.zoomTable.length === 0) return null;
+  let closest = window.zoomTable[0];
+  let minDiff = Math.abs(requestedZoom - closest.value);
+  for (let i = 1; i < window.zoomTable.length; ++i) {
+    const diff = Math.abs(requestedZoom - window.zoomTable[i].value);
+    if (diff < minDiff) {
+      closest = window.zoomTable[i];
+      minDiff = diff;
+    }
+  }
+  return closest.index;
+};
+
 function setSkipWaterfallLines(val) {
   val = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
   window.skipWaterfallLines = val;
@@ -1654,6 +1695,7 @@ window.addEventListener('DOMContentLoaded', function() {
             } else {
                 console.error('Dialog elements missing after loading optionsDialog.html');
             }
+
             // Initialize dialog event listeners
             if (typeof initializeDialogEventListeners === "function") {
                 initializeDialogEventListeners();

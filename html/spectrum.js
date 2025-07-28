@@ -1056,6 +1056,7 @@ Spectrum.prototype.rangeDecrease = function() {
 }
 
 Spectrum.prototype.setCenterHz = function(hz) {
+    console.log("spectrum.setCenterHz: ", hz);
     this.centerHz = hz;
     this.updateAxes();
     this.saveSettings();
@@ -1344,35 +1345,64 @@ Spectrum.prototype.exportMinHoldCSV = function() {
  * frequency spectrum data and display it as an overlay on the spectrum graph.
  */
 Spectrum.prototype.loadOverlayTrace = function() {
-    //console.log('loadOverlayTrace called');
     var self = this;
     var input = document.createElement('input');
     input.type = 'file';
     input.accept = '.csv,text/csv';
     input.style.display = 'none';
     document.body.appendChild(input);
-    
+
+    // Track overlay spectrum match and first load state
+    if (typeof this._overlayFirstLoadState === 'undefined') {
+        this._overlayFirstLoadState = true;
+        this._overlayFirstLoadParams = null;
+        this._overlayPrevTunedFreq = null;
+    }
+
     input.addEventListener('change', function(e) {
-        //console.log('File selected', e.target.files);
         var file = e.target.files[0];
         if (!file) {
             document.body.removeChild(input);
             return;
         }
-        
+
         var reader = new FileReader();
         reader.onload = function(evt) {
-            //console.log('File loaded, processing data');
             try {
                 var lines = evt.target.result.split(/\r?\n/);
-                //console.log('CSV lines:', lines.length);
                 var data = [];
                 var validEntries = 0;
-                
-                for (var i = 1; i < lines.length; ++i) { // skip header
+
+
+                // --- Parse metadata for spectrum params (if present) ---
+                let fileCenterHz = null, fileZoomLevel = null, fileLowHz = null, fileHighHz = null, fileBinCount = null;
+                let metaDone = false;
+                // Declare dataStart only if not already declared in the outer scope
+                if (typeof dataStart === 'undefined') {
+                    var dataStart = -1;
+                } else {
+                    dataStart = -1;
+                }
+                for (let i = 0; i < lines.length; ++i) {
+                    const line = lines[i].trim();
+                    if (line === '' || /^bin/i.test(line)) { metaDone = true; dataStart = i; break; }
+                    const parts = line.split(',');
+                    if (parts.length >= 2) {
+                        const key = parts[0].trim();
+                        const value = parts[1].trim();
+                        if (key === 'center_hz') fileCenterHz = parseFloat(value);
+                        if (key === 'zoom_level') fileZoomLevel = parseInt(value);
+                        if (key === 'start_hz') fileLowHz = parseFloat(value);
+                        if (key === 'stop_hz') fileHighHz = parseFloat(value);
+                        if (key === 'bins') fileBinCount = parseInt(value);
+                    }
+                }
+
+                // If no metadata, scan data section for min/max freq
+                let minFreq = null, maxFreq = null, binCountFromData = 0;
+                for (let i = dataStart + 1; i < lines.length; ++i) {
                     var line = lines[i].trim();
                     if (line === '') continue;
-                    
                     var parts = line.split(',');
                     if (parts.length >= 3) {
                         var bin = parseInt(parts[0], 10);
@@ -1381,16 +1411,212 @@ Spectrum.prototype.loadOverlayTrace = function() {
                         if (!isNaN(bin) && !isNaN(freq) && !isNaN(value)) {
                             data[bin] = value;
                             validEntries++;
+                            // Track min/max freq
+                            if (minFreq === null || freq < minFreq) minFreq = freq;
+                            if (maxFreq === null || freq > maxFreq) maxFreq = freq;
+                            if (bin > binCountFromData) binCountFromData = bin;
+                        } else {
+                            // Debug: log invalid data lines
+                            console.warn('Invalid CSV data line (ignored):', line);
                         }
+                    } else {
+                        // Debug: log lines with too few columns
+                        console.warn('CSV line does not have at least 3 columns (ignored):', line);
                     }
                 }
-                
-                //console.log('Valid CSV entries:', validEntries);
+                // If no metadata, use data-derived limits
+                if (fileLowHz === null && minFreq !== null) fileLowHz = minFreq;
+                if (fileHighHz === null && maxFreq !== null) fileHighHz = maxFreq;
+                if (fileCenterHz === null && minFreq !== null && maxFreq !== null) fileCenterHz = (minFreq + maxFreq) / 2;
+                if (fileBinCount === null && binCountFromData > 0) fileBinCount = binCountFromData + 1;
+
+                // Remove all overlay debug logs except concise slot log
+
+                // --- Determine if spectrum matches ---
+                function spectrumParamsMatch(a, b) {
+                    if (!a || !b) return false;
+                    return a.centerHz === b.centerHz && a.zoomLevel === b.zoomLevel && a.lowHz === b.lowHz && a.highHz === b.highHz && a.binCount === b.binCount;
+                }
+
+                // Save current spectrum params
+                const currentParams = {
+                    centerHz: self.centerHz,
+                    zoomLevel: (function() {
+                        const zoomElem = document.getElementById('zoom_level');
+                        if (zoomElem) {
+                            if (typeof zoomElem.value !== 'undefined' && zoomElem.value !== '') return parseInt(zoomElem.value);
+                            if (zoomElem.textContent && zoomElem.textContent.trim() !== '') return parseInt(zoomElem.textContent.trim());
+                        }
+                        return null;
+                    })(),
+                    lowHz: typeof self.lowHz === 'number' ? self.lowHz : null,
+                    highHz: typeof self.highHz === 'number' ? self.highHz : null,
+                    binCount: typeof self.nbins === 'number' ? self.nbins : null
+                };
+                const fileParams = {
+                    centerHz: fileCenterHz,
+                    zoomLevel: fileZoomLevel,
+                    lowHz: fileLowHz,
+                    highHz: fileHighHz,
+                    binCount: fileBinCount
+                };
+
+                // --- Overlay logic ---
+                let treatAsFirstLoad = false;
+                self._overlayPrevTunedFreq = self.frequency;    // Save previous tuned frequency for comparison 
+                if (self._overlayFirstLoadState) {
+                    // First overlay: save tuned freq, set spectrum to file
+                    //self._overlayPrevTunedFreq = self.frequency; wdr do it for any load state
+                    treatAsFirstLoad = true;
+                } else if (!spectrumParamsMatch(currentParams, fileParams)) {
+                    // If spectrum does not match, treat as first load again
+                    treatAsFirstLoad = true;
+                }
+
+                if (treatAsFirstLoad) {
+                    // Only update GUI and backend if tuned frequency is outside new limits
+                    var newLow = (typeof fileLowHz === 'number') ? fileLowHz : self.lowHz;
+                    var newHigh = (typeof fileHighHz === 'number') ? fileHighHz : self.highHz;
+                    var prevTuned = self._overlayPrevTunedFreq;
+                    console.log(`[Overlay CSV] First load or spectrum mismatch detected. Previous tuned frequency: ${prevTuned}, New low: ${newLow}, New high: ${newHigh}`);
+                    var freqOutOfRange = false;
+                    if (prevTuned !== null && newLow !== null && newHigh !== null) {
+                        if (prevTuned <= newLow || prevTuned >= newHigh) {
+                            freqOutOfRange = true;
+                        }
+                    } else {
+                        freqOutOfRange = true;
+                    }
+                    if (freqOutOfRange) {
+                        // Update frequency and span input boxes in the UI if present
+                        if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                            let freqElem = document.getElementById('freq');
+                            if (freqElem) freqElem.value = (fileCenterHz / 1000).toFixed(3);
+                        }
+                        if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
+                            let spanElem = document.getElementById('span');
+                            if (spanElem) spanElem.value = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
+                        }
+                        var currentFreq = self.frequency;
+                        // After setting centerHz and span, send commands to backend
+                        if (typeof ws !== 'undefined' && ws.readyState === 1) {
+                            if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                                console.log(`[Overlay CSV] Sending center frequency to backend: ${(fileCenterHz / 1000).toFixed(3)}`);
+                                ws.send("F:" + (fileCenterHz / 1000).toFixed(3));  // Here is where the problem is
+                            }
+                            if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
+                                let spanKHz = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
+                                console.log(`[Overlay CSV] Sending span to backend: ${spanKHz} kHz`);
+                                ws.send("Z:" + spanKHz);
+                            }
+                        }
+                    }
+                    // Set spectrum to match file
+                    // --- Determine and set zoom level ---
+                    let zoomElem = document.getElementById('zoom_level');
+                    // Try both window.zoomTable and window.zoom_table for compatibility
+                    let zoomTable = window.zoomTable;
+                    if (!zoomTable && window.zoom_table) zoomTable = window.zoom_table;
+                    if (!zoomTable || !Array.isArray(zoomTable) || zoomTable.length === 0) {
+                        const msg = '[Overlay CSV] ERROR: The zoom table is empty or missing! Overlay zoom cannot be set.';
+                        console.error(msg);
+                        alert('ERROR: The zoom table is empty or missing! Overlay zoom cannot be set.\n\nPlease ensure the zoom table is initialized in radio.js before loading overlays.');
+                    } else {
+                        if (!zoomElem) {
+                            console.warn('[Overlay CSV] No zoom_level element found in DOM');
+                        }
+                        let fileSpan = null;
+                        let bestIdx = null;
+                        let bestSpan = null;
+                        let minDiff = Infinity;
+                        if (fileLowHz !== null && fileHighHz !== null && typeof zoomTable[0] === 'object' && 'bin_width' in zoomTable[0]) {
+                            fileSpan = fileHighHz - fileLowHz;
+                            for (let i = 0; i < zoomTable.length; ++i) {
+                                let span = zoomTable[i].bin_width * zoomTable[i].bin_count;
+                                let diff = span - fileSpan;
+                                // Only allow spans >= fileSpan, prefer smallest such span
+                                if (diff >= 0 && diff < minDiff) {
+                                    minDiff = diff;
+                                    bestIdx = i;
+                                    bestSpan = span;
+                                }
+                            }
+                            // If no span >= fileSpan, fallback to closest overall
+                            if (bestIdx === null) {
+                                minDiff = Infinity;
+                                for (let i = 0; i < zoomTable.length; ++i) {
+                                    let span = zoomTable[i].bin_width * zoomTable[i].bin_count;
+                                    let diff = Math.abs(span - fileSpan);
+                                    if (diff < minDiff) {
+                                        minDiff = diff;
+                                        bestIdx = i;
+                                        bestSpan = span;
+                                    }
+                                }
+                            }
+                            // (debug log removed)
+                        }
+                    if (zoomElem && bestIdx !== null) {
+                        zoomElem.value = bestIdx;
+                        if (typeof window.target_zoom_level !== 'undefined') {
+                            window.target_zoom_level = parseInt(zoomElem.value);
+                        }
+                        if (typeof window.setZoom === 'function') {
+                            window.setZoom();
+                        } else {
+                            zoomElem.dispatchEvent(new Event('input', { bubbles: true }));
+                            zoomElem.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    }
+                    if (fileLowHz) self.setLowHz(fileLowHz);
+                    if (fileHighHz) self.setHighHz(fileHighHz);
+                    if (fileBinCount && typeof self.wf_size === 'number') self.wf_size = fileBinCount;
+                    // Always set centerHz after zoom/span/low/high are set, so the spectrum is centered correctly
+                    if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                        self.setCenterHz(fileCenterHz);
+                    }
+                    // Set tuned frequency: only set to center if previous tuned freq is strictly outside new [min, max] range
+                    if (prevTuned !== null && newLow !== null && newHigh !== null) {
+                        if (prevTuned <= newLow || prevTuned >= newHigh) {
+                            if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                                console.log(`[Overlay CSV] prev tuned out of range Setting tuned frequency to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`, "currentFreq: ", (currentFreq/1000).toFixed(3));
+                                self.setFrequency(fileCenterHz);
+                            }
+                        }
+                        // else: do not change the tuned frequency, leave as is
+                    } else if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                        console.log(`[Overlay CSV] prev tuned in range Setting tuned frequency to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz,`, "currentFreq: ", (currentFreq/1000).toFixed(3));
+                        self.setFrequency(fileCenterHz);    // possibly set to currentFreq
+                    }
+                    // Only reset overlays if spectrum limits have changed
+                    const prev = self._overlayFirstLoadParams;
+                    const limitsChanged = !prev ||
+                        prev.centerHz !== fileCenterHz ||
+                        prev.lowHz !== fileLowHz ||
+                        prev.highHz !== fileHighHz ||
+                        prev.binCount !== fileBinCount;
+                    let resetMsg = '';
+                    if (limitsChanged) {
+                        self._overlayTraces = [];
+                        self._overlayTraceIndex = 0;
+                        resetMsg = ' (reset: overlays cleared, slot 0)';
+                    }
+                    self._overlayFirstLoadState = false;
+                    self._overlayFirstLoadParams = fileParams;
+                }
+
+                // If spectrum matches, just add overlay as next color
                 if (validEntries > 0) {
-                    //console.log('Calling showOverlayTrace with data');
-                    self.showOverlayTrace(data);
+                    self.showOverlayTrace(data, fileParams);
+                    // After showOverlayTrace, overlayTraceIndex points to the slot just loaded
+                    let slot = self._overlayTraceIndex;
+                    let msg = '';
+                    if (typeof resetMsg === 'string' && resetMsg.length > 0) {
+                        msg = resetMsg;
+                    }
+                    console.log(`[Overlay CSV] Loaded overlay into slot ${slot}: freq limits [${fileLowHz}, ${fileHighHz}], binCount ${fileBinCount}${msg}`);
                 } else {
-                    console.error('No valid data found in CSV');
                     alert('No valid data found in CSV file.');
                 }
             } catch (e) {
@@ -1400,18 +1626,16 @@ Spectrum.prototype.loadOverlayTrace = function() {
                 document.body.removeChild(input);
             }
         };
-        
+
         reader.onerror = function(evt) {
             console.error('Error reading file:', evt);
             alert('Error reading file');
             document.body.removeChild(input);
         };
-        
-        //console.log('Starting file read');
+
         reader.readAsText(file);
     });
-    
-    // Add timeout to ensure browser responds to the click
+
     setTimeout(function() {
         input.click();
     }, 50);
@@ -1426,20 +1650,11 @@ Spectrum.prototype.loadOverlayTrace = function() {
  * This function takes an array of amplitude values and displays them as an overlay
  * on the spectrum graph. The overlay is drawn in green.
  */
-Spectrum.prototype.showOverlayTrace = function(trace) {
-    //console.log('showOverlayTrace called');
-    var self = this;
-    
-    // Check for valid input
-    if (!trace || (Array.isArray(trace) && trace.length === 0)) {
-        console.error('Empty or invalid trace data');
-        return;
-    }
-    
+
+// Accepts optional traceParams (from file) for correct overlay slot management
+Spectrum.prototype.showOverlayTrace = function(trace, traceParams) {
     // Accepts either an array of values or an array of objects/arrays with bin/freq/value
-    // If input is an array of objects/arrays, extract only the value for each bin
     if (Array.isArray(trace) && trace.length > 0 && typeof trace[0] !== 'number') {
-        // Try to extract the value (3rd column) from each row
         var values = [];
         for (var i = 0; i < trace.length; ++i) {
             var row = trace[i];
@@ -1451,9 +1666,10 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
         }
         trace = values;
     }
-    
-    // Store the overlay trace data in the array (up to 3)
     if (!this._overlayTraces) this._overlayTraces = [];
+    if (typeof this._overlayTraceIndex !== 'number') this._overlayTraceIndex = 0;
+
+    // Always add as next slot, round robin, up to 3 overlays
     if (this._overlayTraces.length < 3) {
         this._overlayTraces.push(trace);
         this._overlayTraceIndex = this._overlayTraces.length - 1;
@@ -1461,15 +1677,11 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
         this._overlayTraceIndex = (this._overlayTraceIndex + 1) % 3;
         this._overlayTraces[this._overlayTraceIndex] = trace;
     }
-    //console.log('Overlay trace length:', trace.length, 'Defined values:', trace.filter(v => v !== undefined).length);
-    
+
     // Compute scaling for overlay trace to match spectrum scaling
-    // Use the same scaling as drawFFT: map min_db..max_db to spectrumHeight..0
     var min_db = this.min_db;
     var max_db = this.max_db;
     var spectrumHeight = this.spectrumHeight || this.canvas.height;
-    
-    // Precompute scaled values for overlay if needed by drawSpectrum
     this._overlayTraceScaled = [];
     if (Array.isArray(trace)) {
         for (var i = 0; i < trace.length; i++) {
@@ -1485,9 +1697,6 @@ Spectrum.prototype.showOverlayTrace = function(trace) {
             }
         }
     }
-    
-    // Trigger a redraw to show overlay immediately
-    //console.log('Triggering redraw with overlay');
     if (this.bin_copy) {
         this.drawSpectrumWaterfall(this.bin_copy, false);
     }
