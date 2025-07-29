@@ -621,6 +621,11 @@
     }
   
     function zoomin() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:+:"+document.getElementById('freq').value);
       //console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
@@ -630,6 +635,11 @@
     }
 
     function zoomout() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:-:"+document.getElementById('freq').value);
       //console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
@@ -651,6 +661,11 @@
     }
 
     function zoomcenter() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:c");
       //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
@@ -662,10 +677,29 @@
 
     function setZoom() {
       const v = document.getElementById("zoom_level").valueAsNumber;
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send(`Z:${v}`);
       //console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
       //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
-        autoAutoscale(100,false); 
+      autoAutoscale(100,false); 
+      saveSettings();
+    }
+
+    // Show alert when overlays may be misaligned due to zoom/center changes
+    function alertOverlayMisalignment() {
+      alert("Warning: The loaded overlay traces may no longer align with the spectrum due to a zoom or center change. Clear traces (Clear Data in Options) to remove this warning.");
+    }
+
+    window.setZoomDuringTraceLoad = setZoomDuringTraceLoad;
+    function setZoomDuringTraceLoad() {
+      const v = document.getElementById("zoom_level").valueAsNumber;
+      ws.send(`Z:${v}`);
+      // No alert for overlay misalignment here
+      autoAutoscale(100, false);
       saveSettings();
     }
 

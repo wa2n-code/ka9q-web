@@ -187,6 +187,12 @@ function Spectrum(id, options) {
 
         const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
         pendingCenterHz = startCenterHz - dx * hzPerPixel;
+
+        if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+            //alertOverlayMisalignment();
+            spectrum.clearOverlayTrace();
+        }
+        
         spectrum.setCenterHz(pendingCenterHz);
         console.log("Dragging spectrum to centerHz:", pendingCenterHz);
         // Keep cursor at center
@@ -1571,8 +1577,8 @@ Spectrum.prototype.loadOverlayTrace = function() {
                         if (typeof window.target_zoom_level !== 'undefined') {
                             window.target_zoom_level = parseInt(zoomElem.value);
                         }
-                        if (typeof window.setZoom === 'function') {
-                            window.setZoom();
+                        if (typeof window.setZoomDuringTraceLoad === 'function') {
+                            window.setZoomDuringTraceLoad();
                         } else {
                             zoomElem.dispatchEvent(new Event('input', { bubbles: true }));
                             zoomElem.dispatchEvent(new Event('change', { bubbles: true }));
