@@ -230,6 +230,7 @@
               calcFrequencies();
               spectrum.setLowHz(lowHz);
               spectrum.setHighHz(highHz);
+              console.log("[on_ws_msg] Spectrum updated: centerHz=",centerHz," frequencyHz=",frequencyHz);
               spectrum.setCenterHz(centerHz);
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);

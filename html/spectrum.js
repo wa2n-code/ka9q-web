@@ -188,7 +188,7 @@ function Spectrum(id, options) {
         const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
         pendingCenterHz = startCenterHz - dx * hzPerPixel;
         spectrum.setCenterHz(pendingCenterHz);
-
+        console.log("Dragging spectrum to centerHz:", pendingCenterHz);
         // Keep cursor at center
         spectrum.frequency = pendingCenterHz;
         document.getElementById("freq").value = (pendingCenterHz / 1000).toFixed(3);
@@ -209,7 +209,7 @@ function Spectrum(id, options) {
                 let step = increment / 1000  
                 let snapped_center = Math.round(freq_khz / step) * step * 1000;
                 spectrum.setCenterHz(snapped_center);
-
+                console.log("Snapped centerHz to:", snapped_center);
                 // Keep cursor at center
                 spectrum.frequency = snapped_center;
                 document.getElementById("freq").value = (snapped_center / 1000).toFixed(3);
@@ -1491,41 +1491,34 @@ Spectrum.prototype.loadOverlayTrace = function() {
                 }
 
                 if (treatAsFirstLoad) {
-                    // Only update GUI and backend if tuned frequency is outside new limits
+                    // Always update GUI and backend to match file center frequency
                     var newLow = (typeof fileLowHz === 'number') ? fileLowHz : self.lowHz;
                     var newHigh = (typeof fileHighHz === 'number') ? fileHighHz : self.highHz;
                     var prevTuned = self._overlayPrevTunedFreq;
                     console.log(`[Overlay CSV] First load or spectrum mismatch detected. Previous tuned frequency: ${prevTuned}, New low: ${newLow}, New high: ${newHigh}`);
-                    var freqOutOfRange = false;
-                    if (prevTuned !== null && newLow !== null && newHigh !== null) {
-                        if (prevTuned <= newLow || prevTuned >= newHigh) {
-                            freqOutOfRange = true;
-                        }
-                    } else {
-                        freqOutOfRange = true;
+                    
+                    // Always update frequency and span input boxes in the UI
+                    if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                        let freqElem = document.getElementById('freq');
+                        if (freqElem) freqElem.value = (fileCenterHz / 1000).toFixed(3);
                     }
-                    if (freqOutOfRange) {
-                        // Update frequency and span input boxes in the UI if present
+                    if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
+                        let spanElem = document.getElementById('span');
+                        if (spanElem) spanElem.value = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
+                    }
+                    
+                    var currentFreq = self.frequency;
+                    
+                    // ALWAYS send commands to backend to match file center frequency
+                    if (typeof ws !== 'undefined' && ws.readyState === 1) {
                         if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
-                            let freqElem = document.getElementById('freq');
-                            if (freqElem) freqElem.value = (fileCenterHz / 1000).toFixed(3);
+                            console.log(`[Overlay CSV] Sending center frequency to backend: ${(fileCenterHz / 1000).toFixed(3)}`);
+                            ws.send("F:" + (fileCenterHz / 1000).toFixed(3));
                         }
                         if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
-                            let spanElem = document.getElementById('span');
-                            if (spanElem) spanElem.value = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
-                        }
-                        var currentFreq = self.frequency;
-                        // After setting centerHz and span, send commands to backend
-                        if (typeof ws !== 'undefined' && ws.readyState === 1) {
-                            if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
-                                console.log(`[Overlay CSV] Sending center frequency to backend: ${(fileCenterHz / 1000).toFixed(3)}`);
-                                ws.send("F:" + (fileCenterHz / 1000).toFixed(3));  // Here is where the problem is
-                            }
-                            if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
-                                let spanKHz = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
-                                console.log(`[Overlay CSV] Sending span to backend: ${spanKHz} kHz`);
-                                ws.send("Z:" + spanKHz);
-                            }
+                            let spanKHz = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
+                            console.log(`[Overlay CSV] Sending span to backend: ${spanKHz} kHz`);
+                            ws.send("Z:" + spanKHz);
                         }
                     }
                     // Set spectrum to match file
@@ -1592,19 +1585,33 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     // Always set centerHz after zoom/span/low/high are set, so the spectrum is centered correctly
                     if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
                         self.setCenterHz(fileCenterHz);
+                        console.log(`[Overlay CSV] Setting center frequency to: ${(fileCenterHz / 1000).toFixed(3)} kHz`);
                     }
-                    // Set tuned frequency: only set to center if previous tuned freq is strictly outside new [min, max] range
+                    
+                    // Set tuned frequency: only change to center if previous tuned freq is outside new spectrum range
                     if (prevTuned !== null && newLow !== null && newHigh !== null) {
-                        if (prevTuned <= newLow || prevTuned >= newHigh) {
+                        if (prevTuned < newLow || prevTuned > newHigh) {
+                            // Previous tuned frequency is outside the new spectrum range, move to center
                             if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
-                                console.log(`[Overlay CSV] prev tuned out of range Setting tuned frequency to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`, "currentFreq: ", (currentFreq/1000).toFixed(3));
+                                console.log(`[Overlay CSV] Previous tuned frequency ${(prevTuned / 1000).toFixed(3)} kHz is outside range [${(newLow / 1000).toFixed(3)}, ${(newHigh / 1000).toFixed(3)}] kHz, setting to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`);
                                 self.setFrequency(fileCenterHz);
                             }
+                        } else {
+                            // Previous tuned frequency is within range, keep it
+                            console.log(`[Overlay CSV] Previous tuned frequency ${(prevTuned / 1000).toFixed(3)} kHz is within range [${(newLow / 1000).toFixed(3)}, ${(newHigh / 1000).toFixed(3)}] kHz, keeping current tuned frequency`);
+                            // Send command to backend to restore the original tuned frequency
+                            if (typeof ws !== 'undefined' && ws.readyState === 1) {
+                                console.log(`[Overlay CSV] Restoring tuned frequency to backend: ${(prevTuned / 1000).toFixed(3)} kHz`);
+                                ws.send("f:" + (prevTuned / 1000).toFixed(3));
+                            }
+                            self.setFrequency(prevTuned);
                         }
-                        // else: do not change the tuned frequency, leave as is
-                    } else if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
-                        console.log(`[Overlay CSV] prev tuned in range Setting tuned frequency to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz,`, "currentFreq: ", (currentFreq/1000).toFixed(3));
-                        self.setFrequency(fileCenterHz);    // possibly set to currentFreq
+                    } else {
+                        // If we don't have valid range info, default to setting center frequency
+                        if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
+                            console.log(`[Overlay CSV] No valid range info, setting tuned frequency to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`);
+                            self.setFrequency(fileCenterHz);
+                        }
                     }
                     // Only reset overlays if spectrum limits have changed
                     const prev = self._overlayFirstLoadParams;
