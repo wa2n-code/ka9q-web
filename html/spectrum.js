@@ -1408,12 +1408,10 @@ Spectrum.prototype.loadOverlayTrace = function() {
                         if (key === 'bins') fileBinCount = parseInt(value);
                     }
                 }
-
-                // ...existing code...
-
-                // If no metadata, scan data section for min/max freq
+                // Scan data section for min/max freq in case metadata is missing
                 let minFreq = null, maxFreq = null, binCountFromData = 0;
                 let frequencies = []; // Add this array to store all frequencies
+                // Load each line from file and get bin #, fequency, and amplitude value in dB
                 for (let i = dataStart + 1; i < lines.length; ++i) {
                     var line = lines[i].trim();
                     if (line === '') continue;
@@ -1449,11 +1447,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
                 if (fileCenterHz === null && fileBinCount !== null && frequencies[Math.floor(fileBinCount / 2)]) {
                     fileCenterHz = frequencies[Math.floor(fileBinCount / 2)]; // Use the middle frequency bin as center if not specified
                 }
-
                 console.log("fileBinCount:",fileBinCount,"fileCenterHz:", fileCenterHz,"at fileBinCount/2:", Math.floor(fileBinCount / 2), "minFreq:", minFreq, "maxFreq:", maxFreq);
-
-                // ...existing code...
-                // Remove all overlay debug logs except concise slot log
 
                 // --- Determine if spectrum matches ---
                 function spectrumParamsMatch(a, b) {
@@ -1476,6 +1470,8 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     highHz: typeof self.highHz === 'number' ? self.highHz : null,
                     binCount: typeof self.nbins === 'number' ? self.nbins : null
                 };
+
+                // /save tge file params for comparison
                 const fileParams = {
                     centerHz: fileCenterHz,
                     zoomLevel: fileZoomLevel,
@@ -1484,15 +1480,12 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     binCount: fileBinCount
                 };
 
-                // --- Overlay logic ---
+                // --- Overlay logic for one or more files ---
                 let treatAsFirstLoad = false;
-                self._overlayPrevTunedFreq = self.frequency;    // Save previous tuned frequency for comparison 
+                self._overlayPrevTunedFreq = self.frequency;    // Save previous tuned frequency for comparison always
                 if (self._overlayFirstLoadState) {
-                    // First overlay: save tuned freq, set spectrum to file
-                    //self._overlayPrevTunedFreq = self.frequency; wdr do it for any load state
                     treatAsFirstLoad = true;
-                } else if (!spectrumParamsMatch(currentParams, fileParams)) {
-                    // If spectrum does not match, treat as first load again
+                } else if (!spectrumParamsMatch(currentParams, fileParams)) { // If spectrum does not match, treat as first load again
                     treatAsFirstLoad = true;
                 }
 
@@ -1505,16 +1498,14 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     
                     // Always update frequency and span input boxes in the UI
                     if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
-                        let freqElem = document.getElementById('freq');
-                        if (freqElem) freqElem.value = (fileCenterHz / 1000).toFixed(3);
+                        let freqElem = document.getElementById('freq'); // get the current frequency input box
+                        if (freqElem) freqElem.value = (fileCenterHz / 1000).toFixed(3);    // set to file center frequency in kHz to start, may put it back later
                     }
                     if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
-                        let spanElem = document.getElementById('span');
+                        let spanElem = document.getElementById('span'); // get the current span input box   
                         if (spanElem) spanElem.value = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
                     }
-                    
-                    var currentFreq = self.frequency;
-                    
+                   
                     // ALWAYS send commands to backend to match file center frequency
                     if (typeof ws !== 'undefined' && ws.readyState === 1) {
                         if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
@@ -1570,20 +1561,19 @@ Spectrum.prototype.loadOverlayTrace = function() {
                                     }
                                 }
                             }
-                            // (debug log removed)
                         }
-                    if (zoomElem && bestIdx !== null) {
-                        zoomElem.value = bestIdx;
-                        if (typeof window.target_zoom_level !== 'undefined') {
-                            window.target_zoom_level = parseInt(zoomElem.value);
+                        if (zoomElem && bestIdx !== null) {
+                            zoomElem.value = bestIdx;
+                            if (typeof window.target_zoom_level !== 'undefined') {
+                                window.target_zoom_level = parseInt(zoomElem.value);
+                            }
+                            if (typeof window.setZoomDuringTraceLoad === 'function') {
+                                window.setZoomDuringTraceLoad();
+                            } else {
+                                zoomElem.dispatchEvent(new Event('input', { bubbles: true }));
+                                zoomElem.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
                         }
-                        if (typeof window.setZoomDuringTraceLoad === 'function') {
-                            window.setZoomDuringTraceLoad();
-                        } else {
-                            zoomElem.dispatchEvent(new Event('input', { bubbles: true }));
-                            zoomElem.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-                    }
                     }
                     if (fileLowHz) self.setLowHz(fileLowHz);
                     if (fileHighHz) self.setHighHz(fileHighHz);
@@ -1600,7 +1590,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
                             // Previous tuned frequency is outside the new spectrum range, move to center
                             if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
                                 console.log(`[Overlay CSV] Previous tuned frequency ${(prevTuned / 1000).toFixed(3)} kHz is outside range [${(newLow / 1000).toFixed(3)}, ${(newHigh / 1000).toFixed(3)}] kHz, setting to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`);
-                                self.setFrequency(fileCenterHz);
+                                self.setFrequency(fileCenterHz); // Set to file center frequency since it's outside the new range
                             }
                         } else {
                             // Previous tuned frequency is within range, keep it
