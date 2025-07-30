@@ -1598,6 +1598,9 @@ Spectrum.prototype.loadOverlayTrace = function() {
                             // Send command to backend to restore the original tuned frequency
                             if (typeof ws !== 'undefined' && ws.readyState === 1) {
                                 console.log(`[Overlay CSV] Restoring tuned frequency to backend: ${(prevTuned / 1000).toFixed(3)} kHz`);
+                                // update the frequency input box
+                                let freqElem = document.getElementById('freq');
+                                if (freqElem) freqElem.value = (prevTuned / 1000).toFixed(3);
                                 ws.send("f:" + (prevTuned / 1000).toFixed(3));
                             }
                             self.setFrequency(prevTuned);
