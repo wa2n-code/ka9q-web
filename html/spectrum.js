@@ -1586,24 +1586,26 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     
                     // Set tuned frequency: only change to center if previous tuned freq is outside new spectrum range
                     if (prevTuned !== null && newLow !== null && newHigh !== null) {
+                        let newTunedFreq = null;
                         if (prevTuned < newLow || prevTuned > newHigh) {
                             // Previous tuned frequency is outside the new spectrum range, move to center
                             if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
                                 console.log(`[Overlay CSV] Previous tuned frequency ${(prevTuned / 1000).toFixed(3)} kHz is outside range [${(newLow / 1000).toFixed(3)}, ${(newHigh / 1000).toFixed(3)}] kHz, setting to file center: ${(fileCenterHz / 1000).toFixed(3)} kHz`);
-                                self.setFrequency(fileCenterHz); // Set to file center frequency since it's outside the new range
+                                newTunedFreq = fileCenterHz;
                             }
                         } else {
                             // Previous tuned frequency is within range, keep it
                             console.log(`[Overlay CSV] Previous tuned frequency ${(prevTuned / 1000).toFixed(3)} kHz is within range [${(newLow / 1000).toFixed(3)}, ${(newHigh / 1000).toFixed(3)}] kHz, keeping current tuned frequency`);
-                            // Send command to backend to restore the original tuned frequency
+                            newTunedFreq = prevTuned;
+                        }
+                        if (newTunedFreq !== null && !isNaN(newTunedFreq)) {
+                            // Send command to backend to restore the tuned frequency
                             if (typeof ws !== 'undefined' && ws.readyState === 1) {
-                                console.log(`[Overlay CSV] Restoring tuned frequency to backend: ${(prevTuned / 1000).toFixed(3)} kHz`);
-                                // update the frequency input box
                                 let freqElem = document.getElementById('freq');
-                                if (freqElem) freqElem.value = (prevTuned / 1000).toFixed(3);
-                                ws.send("f:" + (prevTuned / 1000).toFixed(3));
+                                if (freqElem) freqElem.value = (newTunedFreq / 1000).toFixed(3);
+                                ws.send("f:" + (newTunedFreq / 1000).toFixed(3));
                             }
-                            self.setFrequency(prevTuned);
+                            self.setFrequency(newTunedFreq);
                         }
                     } else {
                         // If we don't have valid range info, default to setting center frequency
@@ -1718,6 +1720,13 @@ Spectrum.prototype.showOverlayTrace = function(trace, traceParams) {
             } else {
                 this._overlayTraceScaled[i] = spectrumHeight - ((v - min_db) / (max_db - min_db)) * spectrumHeight;
             }
+        }
+    }
+    // Use the global flag from radio.js for autoscale logic
+    if (!window.onlyAutoscaleByButton) {
+        if (typeof this.forceAutoscale === 'function') {
+            this.forceAutoscale(0, true); // 5 is typical for autoscale
+            console.log('Autoscale triggered after overlay trace load');
         }
     }
     if (this.bin_copy) {
