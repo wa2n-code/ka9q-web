@@ -931,7 +931,7 @@ function update_stats() {
   } catch (e) {
     // fallback to empty if any error
   }
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom: ${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   // Update the fft_avg_input value (number input)
   const fftAvgInput = document.getElementById('fft_avg_input');
@@ -975,10 +975,10 @@ function setupFftAvgInput() {
   // Set initial value
   fftAvgInput.value = spectrum.averaging;
   // Listen for user changes immediately (caret, typing, etc)
-  console.log(setupFftAvgInput, " called with initial value: ", spectrum.averaging);
+  //console.log(setupFftAvgInput, " called with initial value: ", spectrum.averaging);
   fftAvgInput.addEventListener('input', function () {
     let val = parseInt(fftAvgInput.value, 10);
-    console.log("FFT averaging input changed to: ", val);
+    //console.log("FFT averaging input changed to: ", val);
     if (isNaN(val) || val < 1) val = 1;
     if (val > fftAvgInput.max) val = fftAvgInput.max;
     if (val !== spectrum.averaging) {
@@ -988,7 +988,7 @@ function setupFftAvgInput() {
       }
       fftAvgInput.value = val; // Clamp value in UI
       //saveSettings();
-      console.log("FFT averaging set to: ", val);
+      //console.log("FFT averaging set to: ", val);
     }
     //update_stats(); // Refresh UI
   });
