@@ -940,7 +940,9 @@ function update_stats() {
   document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
-  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${(centerHz / 1000.0).toLocaleString(1)}`;
+  // Use Math.round and .toLocaleString for centerHz to avoid floating-point artifacts
+  const centerKHz = Math.round(centerHz / 10) / 100; // rounds to nearest 10 Hz, then divides to get kHz with 2 decimals
+  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${centerKHz.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
   // Show reordered info into ge_data left table column 1
 

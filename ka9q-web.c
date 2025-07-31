@@ -226,20 +226,15 @@ void websocket_closed(struct session *sp) {
 }
 
 static void check_frequency(struct session *sp) {
-  // check frequency is within zoomed span
-  // if not the center on the frequency
-  int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-  int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-  if(sp->frequency<min_f || sp->frequency>max_f) {
-    sp->center_frequency=sp->frequency;
-    min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-    max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-  }
-  if (min_f < 0) {
-    sp->center_frequency = (sp->bin_width * sp->bins) / 2;
-  } else if (max_f > (Frontend.samprate / 2)) {
-    sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
-  }
+    int32_t span = sp->bin_width * sp->bins;
+    int32_t min_f = sp->center_frequency - (span / 2);
+    int32_t max_f = sp->center_frequency + (span / 2);
+
+    if (min_f < 0) {
+        sp->center_frequency = span / 2;
+    } else if (max_f > (Frontend.samprate / 2)) {
+        sp->center_frequency = (Frontend.samprate / 2) - (span / 2);
+    }
 }
 
 struct zoom_table_t {
@@ -382,17 +377,29 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
       case 'F':
       case 'f':
         sp->frequency = strtod(&tmp[2],0) * 1000;
-        int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-        int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        if(sp->frequency<min_f || sp->frequency>max_f) {
-          sp->center_frequency=sp->frequency;
-          min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-          max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        }
-        if(min_f<0) {
-          sp->center_frequency=(sp->bin_width*sp->bins)/2;
-        } else if (max_f > (Frontend.samprate / 2)) {
-          sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
+        int32_t span = sp->bin_width * sp->bins;
+        int32_t min_f = sp->center_frequency - (span / 2);
+        int32_t max_f = sp->center_frequency + (span / 2);
+        int32_t edge_margin = 50 * sp->bin_width;
+        if (sp->bin_width < 10) {
+            // For very narrow bins, always jump to center
+            sp->center_frequency = sp->frequency;
+        } else {
+            if (sp->frequency < min_f) {
+                if (min_f - sp->frequency <= edge_margin) {
+                    int32_t shift = (min_f - sp->frequency + sp->bin_width - 1) / sp->bin_width;
+                    sp->center_frequency -= shift * sp->bin_width;
+                } else {
+                    sp->center_frequency = sp->frequency;
+                }
+            } else if (sp->frequency > max_f) {
+                if (sp->frequency - max_f <= edge_margin) {
+                    int32_t shift = (sp->frequency - max_f + sp->bin_width - 1) / sp->bin_width;
+                    sp->center_frequency += shift * sp->bin_width;
+                } else {
+                    sp->center_frequency = sp->frequency;
+                }
+            }
         }
         check_frequency(sp);
         control_set_frequency(sp,&tmp[2]);
