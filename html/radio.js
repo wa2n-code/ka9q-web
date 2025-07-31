@@ -1,6 +1,4 @@
-// --- FFT AVG input update delay logic ---
-let fftAvgInputUpdateDelay = 0; // Number of update_stats cycles to delay after user change
-let fftAvgInputUpdateCounter = 0;
+
 //
 // G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
@@ -935,17 +933,10 @@ function update_stats() {
   }
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
-  // Update the fft_avg_input value (number input), but delay after user change
+  // Update the fft_avg_input value (number input)
   const fftAvgInput = document.getElementById('fft_avg_input');
   if (fftAvgInput) {
-    //console.log("fftAvgInput: ", fftAvgInput.value, " spectrum.averaging: ", spectrum.averaging,"fftAvgInputUpdateCounter",fftAvgInputUpdateCounter);
-    if (fftAvgInputUpdateCounter > 0) {
-      console.log("fftAvgInputUpdateCounter: ", fftAvgInputUpdateCounter);
-      fftAvgInputUpdateCounter--;
-      // Do not update value while counter is active
-    } else {
-      fftAvgInput.value = spectrum.averaging;
-    }
+    fftAvgInput.value = spectrum.averaging;
   }
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
@@ -978,7 +969,8 @@ function setupFftAvgInput() {
   if (!fftAvgInput) return;
   // Set min/max if not already set
   fftAvgInput.min = 1;
-  fftAvgInput.max = 32;
+  fftAvgInput.max = 50; // Set max to 50 for more flexibility
+  // Set step to 1 for integer input
   fftAvgInput.step = 1;
   // Set initial value
   fftAvgInput.value = spectrum.averaging;
@@ -988,7 +980,7 @@ function setupFftAvgInput() {
     let val = parseInt(fftAvgInput.value, 10);
     console.log("FFT averaging input changed to: ", val);
     if (isNaN(val) || val < 1) val = 1;
-    if (val > 32) val = 32;
+    if (val > fftAvgInput.max) val = fftAvgInput.max;
     if (val !== spectrum.averaging) {
       spectrum.averaging = val;
       if (typeof spectrum.setAveraging === 'function') {
@@ -996,8 +988,7 @@ function setupFftAvgInput() {
       }
       fftAvgInput.value = val; // Clamp value in UI
       //saveSettings();
-      fftAvgInputUpdateCounter = fftAvgInputUpdateDelay; // Start delay counter
-      console.log("FFT averaging set to: ", val, " with update counter: ", fftAvgInputUpdateCounter);
+      console.log("FFT averaging set to: ", val);
     }
     //update_stats(); // Refresh UI
   });
