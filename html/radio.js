@@ -1,3 +1,6 @@
+// --- FFT AVG input update delay logic ---
+let fftAvgInputUpdateDelay = 0; // Number of update_stats cycles to delay after user change
+let fftAvgInputUpdateCounter = 0;
 //
 // G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
@@ -352,6 +355,7 @@
         centerHz = 10000000;
         binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
+        setupFftAvgInput();
         
         // Setup overlay buttons after spectrum is created
         document.addEventListener('DOMContentLoaded', function() {
@@ -888,7 +892,7 @@ function update_stats() {
   if (spectrum.paused)
     return;
 
-// GPS time isn't UTC
+  // GPS time isn't UTC
   var t = Number(gps_time) / 1e9;
   t+=315964800;
   t-=18;
@@ -931,7 +935,18 @@ function update_stats() {
   }
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
-  document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
+  // Update the fft_avg_input value (number input), but delay after user change
+  const fftAvgInput = document.getElementById('fft_avg_input');
+  if (fftAvgInput) {
+    //console.log("fftAvgInput: ", fftAvgInput.value, " spectrum.averaging: ", spectrum.averaging,"fftAvgInputUpdateCounter",fftAvgInputUpdateCounter);
+    if (fftAvgInputUpdateCounter > 0) {
+      console.log("fftAvgInputUpdateCounter: ", fftAvgInputUpdateCounter);
+      fftAvgInputUpdateCounter--;
+      // Do not update value while counter is active
+    } else {
+      fftAvgInput.value = spectrum.averaging;
+    }
+  }
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
@@ -956,6 +971,36 @@ function update_stats() {
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
   return;
+}
+// --- FFT Averaging input box event handler ---
+function setupFftAvgInput() {
+  const fftAvgInput = document.getElementById('fft_avg_input');
+  if (!fftAvgInput) return;
+  // Set min/max if not already set
+  fftAvgInput.min = 1;
+  fftAvgInput.max = 32;
+  fftAvgInput.step = 1;
+  // Set initial value
+  fftAvgInput.value = spectrum.averaging;
+  // Listen for user changes immediately (caret, typing, etc)
+  console.log(setupFftAvgInput, " called with initial value: ", spectrum.averaging);
+  fftAvgInput.addEventListener('input', function () {
+    let val = parseInt(fftAvgInput.value, 10);
+    console.log("FFT averaging input changed to: ", val);
+    if (isNaN(val) || val < 1) val = 1;
+    if (val > 32) val = 32;
+    if (val !== spectrum.averaging) {
+      spectrum.averaging = val;
+      if (typeof spectrum.setAveraging === 'function') {
+        spectrum.setAveraging(val);
+      }
+      fftAvgInput.value = val; // Clamp value in UI
+      //saveSettings();
+      fftAvgInputUpdateCounter = fftAvgInputUpdateDelay; // Start delay counter
+      console.log("FFT averaging set to: ", val, " with update counter: ", fftAvgInputUpdateCounter);
+    }
+    //update_stats(); // Refresh UI
+  });
 }
 
 async function getVersion() {

@@ -286,7 +286,10 @@
         <table id="stat_table">
             <tr>
                 <td><span id="rf_gain"></span></td>
-                <td><span id="snr"></span></td>
+                <td>
+                  <label for="fft_avg_input" style="margin-right:4px;">FFT avg:</label>
+                  <input type="number" id="fft_avg_input" min="1" max="100" step="1" style="width:50px;" title="Set FFT averaging" />
+                </td>
                 <td><span id="gps_time"></span></td>
             </tr>
             <tr>
@@ -306,7 +309,7 @@
             </tr>
             <tr>
                 <td><span id="if_power"></span></td>
-                <td><span id="fft_avg"></span></td>
+                <td><span id="snr"></span></td>
                 <td><span id="blocks"></span></td>
             </tr>
             <tr>
