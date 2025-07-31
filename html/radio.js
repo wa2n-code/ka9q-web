@@ -486,6 +486,7 @@
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
 
@@ -498,6 +499,7 @@
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
 
@@ -542,6 +544,7 @@
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
+        spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(f);
         autoAutoscale(asCount,waitToAutoscale);      
         saveSettings();
@@ -552,6 +555,7 @@
         var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
         spectrum.setFrequency(f);
+        spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
         ws.send("F:" + (freq / 1000).toFixed(3));
         autoAutoscale(0, true);  // wait for autoscale

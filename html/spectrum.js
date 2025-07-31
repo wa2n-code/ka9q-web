@@ -1734,6 +1734,19 @@ Spectrum.prototype.showOverlayTrace = function(trace, traceParams) {
     }
 };
 
+// Compares input frequency to current spectrum bounds and clears overlays if out of range
+Spectrum.prototype.checkFrequencyAndClearOverlays = function(freq) {
+    // Use lowHz and highHz if available, otherwise calculate from centerHz and spanHz
+    let minFreq = (typeof this.lowHz === 'number') ? this.lowHz : (this.centerHz - this.spanHz / 2);
+    let maxFreq = (typeof this.highHz === 'number') ? this.highHz : (this.centerHz + this.spanHz / 2);
+
+    if ((freq < minFreq || freq > maxFreq) &&
+        this._overlayTraces && this._overlayTraces.length > 0) {
+        console.log(`Frequency ${freq} is outside spectrum range [${minFreq}, ${maxFreq}]. Clearing overlays.`);
+        this.clearOverlayTrace();
+    }
+};
+
 /**
  * Clears the overlay trace from the spectrum.
  * 
