@@ -255,7 +255,7 @@ static void check_frequency(struct session *sp) {
     // After clamping, if frequency is above max_f, set frequency to center_frequency
     min_f = sp->center_frequency - (span / 2);
     max_f = sp->center_frequency + (span / 2);
-    if (sp->frequency > max_f) {
+    if ((sp->frequency > max_f) || (sp->frequency < min_f)) {
         sp->frequency = sp->center_frequency;
         //printf("[check_frequency] Adjusted frequency to center_frequency: %u\n", sp->frequency);
     }
