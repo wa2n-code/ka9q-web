@@ -229,11 +229,35 @@ static void check_frequency(struct session *sp) {
     int32_t span = sp->bin_width * sp->bins;
     int32_t min_f = sp->center_frequency - (span / 2);
     int32_t max_f = sp->center_frequency + (span / 2);
+ 
+    /*
+    int center_bin = (sp->center_frequency - min_f) / sp->bin_width;
+    int freq_bin = (sp->frequency - min_f) / sp->bin_width;
+
+    printf("[check_frequency] center_frequency=%u (bin %d), frequency=%u (bin %d), bin_width=%u, zoom_index=%d, min_bin_freq=%d, max_bin_freq=%d\n",
+        sp->center_frequency,
+        center_bin,
+        sp->frequency,
+        freq_bin,
+        sp->bin_width,
+        sp->zoom_index,
+        min_f,
+        max_f
+    );
+    */
 
     if (min_f < 0) {
         sp->center_frequency = span / 2;
     } else if (max_f > (Frontend.samprate / 2)) {
         sp->center_frequency = (Frontend.samprate / 2) - (span / 2);
+    }
+    
+    // After clamping, if frequency is above max_f, set frequency to center_frequency
+    min_f = sp->center_frequency - (span / 2);
+    max_f = sp->center_frequency + (span / 2);
+    if (sp->frequency > max_f) {
+        sp->frequency = sp->center_frequency;
+        //printf("[check_frequency] Adjusted frequency to center_frequency: %u\n", sp->frequency);
     }
 }
 
