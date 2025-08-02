@@ -126,6 +126,8 @@ function Spectrum(id, options) {
     let startY = 0;
     let startCenterHz = 0;
     let pendingCenterHz = null;
+    let startFreqHz = 0;
+    let pendingFreqHz = null;
     const spectrum = this;
 
     this.canvas.addEventListener('mousedown', function(e) {
@@ -152,18 +154,13 @@ function Spectrum(id, options) {
                     spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
                 }
             }
-        } else if (e.button === 2) { // Right mouse button: start drag, move cursor to center
+        } else if (e.button === 2) { // Right mouse button: start drag to move tuned frequency
             isDragging = true;
             dragStarted = false;
             startX = e.offsetX;
             startY = e.offsetY;
-            startCenterHz = spectrum.centerHz;
-            pendingCenterHz = null;
-            // Move cursor to center immediately
-            spectrum.frequency = spectrum.centerHz;
-            document.getElementById("freq").value = (spectrum.centerHz / 1000).toFixed(3);
-            ws.send("F:" + (spectrum.centerHz / 1000).toFixed(3));
-            ws.send("Z:c");
+            startFreqHz = spectrum.frequency;
+            pendingFreqHz = null;
             spectrum.canvas.style.cursor = "grabbing";
             e.preventDefault(); // Prevent context menu
         }
@@ -186,20 +183,15 @@ function Spectrum(id, options) {
         if (!dragStarted) return; // Don't start drag logic until threshold passed
 
         const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
-        pendingCenterHz = startCenterHz - dx * hzPerPixel;
+        pendingFreqHz = startFreqHz + dx * hzPerPixel;
 
         if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
-            //alertOverlayMisalignment();
             spectrum.clearOverlayTrace();
         }
-        
-        spectrum.setCenterHz(pendingCenterHz);
-        console.log("Dragging spectrum to centerHz:", pendingCenterHz);
-        // Keep cursor at center
-        spectrum.frequency = pendingCenterHz;
-        document.getElementById("freq").value = (pendingCenterHz / 1000).toFixed(3);
-        ws.send("F:" + (pendingCenterHz / 1000).toFixed(3));
-        ws.send("Z:c");
+
+        spectrum.setFrequency(pendingFreqHz);
+        document.getElementById("freq").value = (pendingFreqHz / 1000).toFixed(3);
+        ws.send("F:" + (pendingFreqHz / 1000).toFixed(3));
 
         if (spectrum.bin_copy) {
             spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
@@ -209,22 +201,18 @@ function Spectrum(id, options) {
     window.addEventListener('mouseup', function(e) {
         if (isDragging && e.button === 2) {
             spectrum.canvas.style.cursor = "";
-            if (pendingCenterHz !== null && dragStarted) {
-                // Snap centerHz to next 0.500 kHz step
-                let freq_khz = pendingCenterHz / 1000;
-                let step = increment / 1000  
-                let snapped_center = Math.round(freq_khz / step) * step * 1000;
-                spectrum.setCenterHz(snapped_center);
-                console.log("Snapped centerHz to:", snapped_center);
-                // Keep cursor at center
-                spectrum.frequency = snapped_center;
-                document.getElementById("freq").value = (snapped_center / 1000).toFixed(3);
-                ws.send("F:" + (snapped_center / 1000).toFixed(3));
-                ws.send("Z:c");
+            if (pendingFreqHz !== null && dragStarted) {
+                // Snap frequency to next 0.500 kHz step
+                let freq_khz = pendingFreqHz / 1000;
+                let step = increment / 1000;
+                let snapped_freq = Math.round(freq_khz / step) * step * 1000;
+                spectrum.setFrequency(snapped_freq);
+                document.getElementById("freq").value = (snapped_freq / 1000).toFixed(3);
+                ws.send("F:" + (snapped_freq / 1000).toFixed(3));
             }
             isDragging = false;
             dragStarted = false;
-            pendingCenterHz = null;
+            pendingFreqHz = null;
         }
     });
 }
