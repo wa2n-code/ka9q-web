@@ -525,6 +525,51 @@
         clearInterval(counter);
     }
 
+    // ...existing code...
+
+    let incrementing = false;
+    let decrementing = false;
+
+    document.addEventListener('keydown', function(e) {
+      // Shift + Right Arrow
+      if (e.shiftKey && e.code === 'ArrowRight') {
+        if (!incrementing) {
+          startIncrement();
+          incrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Left Arrow
+      if (e.shiftKey && e.code === 'ArrowLeft') {
+        if (!decrementing) {
+          startDecrement();
+          decrementing = true;
+        }
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener('keyup', function(e) {
+      // Shift + Right Arrow
+      if (e.code === 'ArrowRight') {
+        if (incrementing) {
+          stopIncrement();
+          incrementing = false;
+        }
+        e.preventDefault();
+      }
+      // Shift + Left Arrow
+      if (e.code === 'ArrowLeft') {
+        if (decrementing) {
+          stopDecrement();
+          decrementing = false;
+        }
+        e.preventDefault();
+      }
+    });
+
+    // ...existing code...
+
     function setFrequencyW(waitToAutoscale = true)
     {
         var asCount = 0;
