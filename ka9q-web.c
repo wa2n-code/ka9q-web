@@ -404,21 +404,25 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         int32_t span = sp->bin_width * sp->bins;
         int32_t min_f = sp->center_frequency - (span / 2);
         int32_t max_f = sp->center_frequency + (span / 2);
-        int32_t edge_margin = 50 * sp->bin_width;
+        int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
+        int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
         if (sp->bin_width < 10) {
             // For very narrow bins, always jump to center
             sp->center_frequency = sp->frequency;
         } else {
-            if (sp->frequency < min_f) {
-                if (min_f - sp->frequency <= edge_margin) {
-                    int32_t shift = (min_f - sp->frequency + sp->bin_width - 1) / sp->bin_width;
+            // Shift if frequency is within edge_bin_margin bins of the edge
+            if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
+                if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
+                    // Shift so that frequency is edge_bin_margin bins above the new min edge
+                    int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
                     sp->center_frequency -= shift * sp->bin_width;
                 } else {
                     sp->center_frequency = sp->frequency;
                 }
-            } else if (sp->frequency > max_f) {
-                if (sp->frequency - max_f <= edge_margin) {
-                    int32_t shift = (sp->frequency - max_f + sp->bin_width - 1) / sp->bin_width;
+            } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
+                if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
+                    // Shift so that frequency is edge_bin_margin bins below the new max edge
+                    int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
                     sp->center_frequency += shift * sp->bin_width;
                 } else {
                     sp->center_frequency = sp->frequency;
