@@ -130,6 +130,18 @@ function Spectrum(id, options) {
     let pendingFreqHz = null;
     const spectrum = this;
 
+    this.checkFrequencyIsValid = function(frequencyRequested) {
+        if (typeof this.input_samprate !== "number" || isNaN(this.input_samprate)) {
+            console.warn("input_samprate is not set on spectrum object.");
+            return false;
+        }
+        const validFrequency = frequencyRequested >= 0 && frequencyRequested <= this.input_samprate / 2;
+        if (!validFrequency) {
+            console.warn("Requested frequency is out of range: " + frequencyRequested);
+        }
+        return validFrequency;
+    };
+
     this.canvas.addEventListener('mousedown', function(e) {
         if (e.button === 0) { // Left mouse button: tune instantly or set cursor
             const rect = spectrum.canvas.getBoundingClientRect();
@@ -184,7 +196,9 @@ function Spectrum(id, options) {
 
         const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
         pendingFreqHz = startFreqHz + dx * hzPerPixel;
-
+        if (!spectrum.checkFrequencyIsValid(pendingFreqHz)) {
+            return;
+        }
         if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
             spectrum.clearOverlayTrace();
         }
@@ -206,6 +220,10 @@ function Spectrum(id, options) {
                 let freq_khz = pendingFreqHz / 1000;
                 let step = increment / 1000;
                 let snapped_freq = Math.round(freq_khz / step) * step * 1000;
+                if (!spectrum.checkFrequencyIsValid(snapped_freq)) {
+                    console.warn("Snapped frequency is out of range: " + snapped_freq);
+                    return;
+                }
                 spectrum.setFrequency(snapped_freq);
                 document.getElementById("freq").value = (snapped_freq / 1000).toFixed(3);
                 ws.send("F:" + (snapped_freq / 1000).toFixed(3));
@@ -1587,6 +1605,9 @@ Spectrum.prototype.loadOverlayTrace = function() {
                             newTunedFreq = prevTuned;
                         }
                         if (newTunedFreq !== null && !isNaN(newTunedFreq)) {
+                            if (!this.checkFrequencyIsValid(newTunedFreq)) {
+                                return;
+                            }
                             // Send command to backend to restore the tuned frequency
                             if (typeof ws !== 'undefined' && ws.readyState === 1) {
                                 let freqElem = document.getElementById('freq');
@@ -1917,3 +1938,5 @@ Spectrum.prototype.getExportSuffix = function() {
     const center = Math.round(centerHz / 1000);
     return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
 };
+
+

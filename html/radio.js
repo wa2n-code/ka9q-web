@@ -211,6 +211,7 @@
             // What a pleasant and unexpected surprise!
             // might want to refactor centerHz, frequencyHz, and binWidthHz, too
             input_samprate = view.getUint32(i,true); i+=4;
+            spectrum.input_samprate = input_samprate; 
             rf_agc = view.getUint32(i,true); i+=4;
             input_samples = view.getBigUint64(i,true); i+=8;
             ad_over = view.getBigUint64(i,true); i+=8;
@@ -483,6 +484,9 @@
     {
         var value = parseFloat(document.getElementById('freq').value,10);
         value = isNaN(value) ? 0 : (value * 1000.0) + increment;
+        if (!spectrum.checkFrequencyIsValid(value)) {
+            return;
+        }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
         ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
@@ -496,6 +500,10 @@
     {
         var value = parseFloat(document.getElementById('freq').value,10);
         value = isNaN(value) ? 0 : (value * 1000.0) - increment;
+        if (!spectrum.checkFrequencyIsValid(value)) {
+            console.warn("Requested frequency is out of range: " + value);
+            return;
+        }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
         ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
@@ -575,6 +583,9 @@
         var asCount = 0;
         // need to see how far away we'll move in frequency to set the waitToAutoscale value wdr
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
+        if (!spectrum.checkFrequencyIsValid(f)) {
+            return;
+        }
         let frequencyDifference = Math.abs(spectrum.frequency - f)
         if(frequencyDifference < 100000)
         {
@@ -601,6 +612,9 @@
         //console.log("setBand() called with freq=",freq);
         var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
+        if (!spectrum.checkFrequencyIsValid(f)) {
+            return;
+        }
         spectrum.setFrequency(f);
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
