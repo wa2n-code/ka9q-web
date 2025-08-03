@@ -230,9 +230,11 @@ static void check_frequency(struct session *sp) {
     int64_t min_f = (int64_t)sp->center_frequency - (span / 2);
     int64_t max_f = (int64_t)sp->center_frequency + (span / 2);
 
-    int center_bin = ((int64_t)sp->center_frequency - min_f) / sp->bin_width;
+    
+    //int center_bin;
     int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
 
+  /*    
     printf("[check_frequency] center_frequency=%u (bin %d), frequency=%u (bin %d), bin_width=%u, zoom_index=%d, min_bin_freq=%ld, max_bin_freq=%ld\n",
         sp->center_frequency/1000,
         center_bin,
@@ -243,6 +245,7 @@ static void check_frequency(struct session *sp) {
         min_f/1000,
         max_f/1000
     );
+    */
 
     // If tuned frequency is above the visible range, 
     // prioritize keeping max_f at fs/2, then get tuned freq as close as possible to bin (bins-30)
@@ -251,34 +254,36 @@ static void check_frequency(struct session *sp) {
         // Set center frequency so that max_f = fs/2
         sp->center_frequency = fs2 - (span / 2);
         
-        printf("[check_frequency] freq_bin %d >= bins %d, set center_frequency to %u (max_f = fs/2 = %ld)\n", 
+        /*printf("[check_frequency] freq_bin %d >= bins %d, set center_frequency to %u (max_f = fs/2 = %ld)\n", 
                freq_bin, sp->bins, sp->center_frequency/1000, fs2/1000);
+        */
         
         // Recompute min_f, max_f, bins
         min_f = sp->center_frequency - (span / 2);
         max_f = sp->center_frequency + (span / 2);
-        center_bin = (sp->center_frequency - min_f) / sp->bin_width;
+        //center_bin = (sp->center_frequency - min_f) / sp->bin_width;
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
         
-        printf("[check_frequency] After adjustment: tuned freq %u is now at bin %d (wanted bin %d)\n", 
+        /*printf("[check_frequency] After adjustment: tuned freq %u is now at bin %d (wanted bin %d)\n", 
                sp->frequency/1000, freq_bin, sp->bins-30);
+        */
     } else if (freq_bin < 0) {
         // Tuned frequency is below the visible range; move it to bin 30
         sp->center_frequency = sp->frequency - 30 * sp->bin_width;
-        printf("[check_frequency] freq_bin %d < 0, moved center_frequency to %u\n", freq_bin, sp->center_frequency/1000);
+        //printf("[check_frequency] freq_bin %d < 0, moved center_frequency to %u\n", freq_bin, sp->center_frequency/1000);
         // Recompute min_f, max_f, bins
         min_f = sp->center_frequency - (span / 2);
         max_f = sp->center_frequency + (span / 2);
-        center_bin = (sp->center_frequency - min_f) / sp->bin_width;
+        //center_bin = (sp->center_frequency - min_f) / sp->bin_width;
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
     }
 
     if (min_f < 0) {
         sp->center_frequency = 0 + (span / 2);
-        printf("[check_frequency] Clamped min_f from %ld to 0, center_frequency to: %u\n", min_f/1000, sp->center_frequency/1000);
+        //printf("[check_frequency] Clamped min_f from %ld to 0, center_frequency to: %u\n", min_f/1000, sp->center_frequency/1000);
     } else if (max_f > (Frontend.samprate / 2)) {
         sp->center_frequency = (Frontend.samprate / 2) - (span / 2);
-        printf("[check_frequency] Clamped max_f from %ld to fs/2=%d, center_frequency to: %u\n", max_f/1000, (Frontend.samprate/2)/1000, sp->center_frequency/1000);
+        //printf("[check_frequency] Clamped max_f from %ld to fs/2=%d, center_frequency to: %u\n", max_f/1000, (Frontend.samprate/2)/1000, sp->center_frequency/1000);
     }
     
     // Final recompute after any adjustments
