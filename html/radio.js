@@ -1,4 +1,3 @@
-
 //
 // G0ORX WebSDR using ka9q-radio uddated March 16, 2025 02:44Z WA2N WA2ZKD
 //
@@ -480,10 +479,10 @@
         saveSettings();
     }
 
-    function incrementFrequency()
+    function incrementFrequency(multiplier = 1)
     {
         var value = parseFloat(document.getElementById('freq').value,10);
-        value = isNaN(value) ? 0 : (value * 1000.0) + increment;
+        value = isNaN(value) ? 0 : (value * 1000.0) + increment * multiplier;
         if (!spectrum.checkFrequencyIsValid(value)) {
             return;
         }
@@ -496,10 +495,10 @@
         saveSettings();
     }
 
-    function decrementFrequency()
+    function decrementFrequency(multiplier = 1)
     {
         var value = parseFloat(document.getElementById('freq').value,10);
-        value = isNaN(value) ? 0 : (value * 1000.0) - increment;
+        value = isNaN(value) ? 0 : (value * 1000.0) - increment * multiplier;
         if (!spectrum.checkFrequencyIsValid(value)) {
             console.warn("Requested frequency is out of range: " + value);
             return;
@@ -513,19 +512,19 @@
         saveSettings();
     }
 
-    function startIncrement() {
-        incrementFrequency();
-        counter=setInterval(incrementFrequency,200);
-      saveSettings();
+    function startIncrement(multiplier = 1) {
+        incrementFrequency(multiplier);
+        counter=setInterval(function() { incrementFrequency(multiplier); },200);
+        saveSettings();
     }
 
     function stopIncrement() {
         clearInterval(counter);
     }
 
-    function startDecrement() {
-        decrementFrequency();
-        counter=setInterval(decrementFrequency,200);
+    function startDecrement(multiplier = 1) {
+        decrementFrequency(multiplier);
+        counter=setInterval(function() { decrementFrequency(multiplier); },200);
         saveSettings();
     }
 
@@ -537,20 +536,41 @@
 
     let incrementing = false;
     let decrementing = false;
+    let currentMultiplier = 1;
 
     document.addEventListener('keydown', function(e) {
-      // Shift + Right Arrow
-      if (e.shiftKey && e.code === 'ArrowRight') {
+      // Shift + Ctrl + Right Arrow
+      if (e.shiftKey && e.ctrlKey && e.code === 'ArrowRight') {
         if (!incrementing) {
-          startIncrement();
+          currentMultiplier = 10;
+          startIncrement(currentMultiplier);
           incrementing = true;
         }
         e.preventDefault();
       }
-      // Shift + Left Arrow
-      if (e.shiftKey && e.code === 'ArrowLeft') {
+      // Shift + Ctrl + Left Arrow
+      else if (e.shiftKey && e.ctrlKey && e.code === 'ArrowLeft') {
         if (!decrementing) {
-          startDecrement();
+          currentMultiplier = 10;
+          startDecrement(currentMultiplier);
+          decrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Right Arrow (no Ctrl)
+      else if (e.shiftKey && e.code === 'ArrowRight') {
+        if (!incrementing) {
+          currentMultiplier = 1;
+          startIncrement(currentMultiplier);
+          incrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Left Arrow (no Ctrl)
+      else if (e.shiftKey && e.code === 'ArrowLeft') {
+        if (!decrementing) {
+          currentMultiplier = 1;
+          startDecrement(currentMultiplier);
           decrementing = true;
         }
         e.preventDefault();
@@ -558,7 +578,7 @@
     });
 
     document.addEventListener('keyup', function(e) {
-      // Shift + Right Arrow
+      // Right Arrow
       if (e.code === 'ArrowRight') {
         if (incrementing) {
           stopIncrement();
@@ -566,7 +586,7 @@
         }
         e.preventDefault();
       }
-      // Shift + Left Arrow
+      // Left Arrow
       if (e.code === 'ArrowLeft') {
         if (decrementing) {
           stopDecrement();
