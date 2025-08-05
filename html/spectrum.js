@@ -1605,7 +1605,7 @@ Spectrum.prototype.loadOverlayTrace = function() {
                             newTunedFreq = prevTuned;
                         }
                         if (newTunedFreq !== null && !isNaN(newTunedFreq)) {
-                            if (!this.checkFrequencyIsValid(newTunedFreq)) {
+                            if (!self.checkFrequencyIsValid(newTunedFreq)) {
                                 return;
                             }
                             // Send command to backend to restore the tuned frequency
