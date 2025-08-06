@@ -163,11 +163,11 @@
                         </div>
                     </td>
                     <td align="center">
-                        <button onmousedown="startDecrement(10)" onmouseup="stopDecrement()" style="width:22px; font-size:14px; margin-right:2px;" title="Decrease frequency by 10× step size">&lt;</button>
-                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:22px; font-size:14px;" title="Decrease frequency by step size">-</button>
+                        <button onmousedown="startDecrement(10)" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px; margin-right:2px;" title="Decrease frequency by 10× step size">&lt;</button>
+                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px;" title="Decrease frequency by step size">-</button>
                         <button style="color:green; border:solid; padding-left:2px; padding-right:2px;" onclick="setFrequencyW()" title="Set frequency">Set</button>
-                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:22px; font-size:14px;" title="Increase frequency by step size">+</button>
-                        <button onmousedown="startIncrement(10)" onmouseup="stopIncrement()" style="width:22px; font-size:14px; margin-left:2px;" title="Increase frequency by 10× step size">&gt;</button>
+                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px;" title="Increase frequency by step size">+</button>
+                        <button onmousedown="startIncrement(10)" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px; margin-left:2px;" title="Increase frequency by 10× step size">&gt;</button>
                     </td>
                     <td rowspan=1 colspan=1 align="center">
                         <label for="meter">Meter:</label>
