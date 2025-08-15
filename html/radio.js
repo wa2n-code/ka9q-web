@@ -606,6 +606,8 @@
         if (!spectrum.checkFrequencyIsValid(f)) {
             return;
         }
+        stopDecrement();  // stop decrementing if runaway
+        stopIncrement();  // stop incrementing if runaway
         let frequencyDifference = Math.abs(spectrum.frequency - f)
         if(frequencyDifference < 100000)
         {
