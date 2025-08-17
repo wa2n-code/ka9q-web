@@ -227,82 +227,45 @@ void websocket_closed(struct session *sp) {
 
 static void check_frequency(struct session *sp) {
     int64_t span = (int64_t)sp->bin_width * sp->bins;
-    int64_t min_f = (int64_t)sp->center_frequency - (span / 2);
-    int64_t max_f = (int64_t)sp->center_frequency + (span / 2);
+    int64_t center_freq = (int64_t)sp->center_frequency;
+    int64_t min_f = center_freq - (span / 2);
+    int64_t max_f = center_freq + (span / 2);
 
-    
-    //int center_bin = ((int64_t)sp->center_frequency - min_f) / sp->bin_width;
     int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
 
-    /*  
-    printf("[check_frequency] center_frequency=%u (bin %d), frequency=%u (bin %d), bin_width=%u, zoom_index=%d, min_bin_freq=%ld, max_bin_freq=%ld\n",
-        sp->center_frequency/1000,
-        center_bin,
-        sp->frequency/1000,
-        freq_bin,
-        sp->bin_width,
-        sp->zoom_index,
-        min_f/1000,
-        max_f/1000
-    );
-    */
-
-    // If tuned frequency is above the visible range, 
-    // position it at bin (bins-30) and check fs/2 constraint
     int64_t fs2 = Frontend.samprate / 2;
-    if(freq_bin >= sp->bins) {
-        // Set center frequency so that tuned frequency is at bin (bins-30)
+    if (freq_bin >= sp->bins) {
         int64_t target_bin = sp->bins - 30;
         int64_t new_min_f = (int64_t)sp->frequency - target_bin * sp->bin_width;
         int64_t new_center = new_min_f + (span / 2);
-        
-        // Check if this would put max_f beyond fs/2
         int64_t new_max_f = new_center + (span / 2);
         if (new_max_f > fs2) {
-            // If so, set center so max_f = fs/2, which may put tuned freq closer to center
             new_center = fs2 - (span / 2);
             new_min_f = new_center - (span / 2);
-            //printf("[check_frequency] freq_bin %d >= bins %d, clamped to max_f = fs/2 = %ld\n", 
-            //       freq_bin, sp->bins, fs2/1000);
-        } else {
-            //printf("[check_frequency] freq_bin %d >= bins %d, positioned tuned freq at bin %ld\n", 
-            //       freq_bin, sp->bins, target_bin);
         }
-        
-        sp->center_frequency = new_center;
-        
-        // Recompute min_f, max_f, bins
-        min_f = sp->center_frequency - (span / 2);
-        max_f = sp->center_frequency + (span / 2);
-        //center_bin = (sp->center_frequency - min_f) / sp->bin_width;
+        center_freq = new_center;
+        min_f = center_freq - (span / 2);
+        max_f = center_freq + (span / 2);
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
-        
-        //printf("[check_frequency] After adjustment: tuned freq %u is now at bin %d\n", 
-        //      sp->frequency/1000, freq_bin);
-        
     } else if (freq_bin < 0) {
-        // Tuned frequency is below the visible range; move it to bin 30
-        sp->center_frequency = sp->frequency - 30 * sp->bin_width;
-        //printf("[check_frequency] freq_bin %d < 0, moved center_frequency to %u\n", freq_bin, sp->center_frequency/1000);
-        // Recompute min_f, max_f, bins
-        min_f = sp->center_frequency - (span / 2);
-        max_f = sp->center_frequency + (span / 2);
-        //center_bin = (sp->center_frequency - min_f) / sp->bin_width;
+        center_freq = (int64_t)sp->frequency - 30 * sp->bin_width;
+        min_f = center_freq - (span / 2);
+        max_f = center_freq + (span / 2);
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
     }
 
     if (min_f < 0) {
-        sp->center_frequency = 0 + (span / 2);
-        //printf("[check_frequency] Clamped min_f from %ld to 0, center_frequency to: %u\n", min_f/1000, sp->center_frequency/1000);
-    } else if (max_f > (Frontend.samprate / 2)) {
-        sp->center_frequency = (Frontend.samprate / 2) - (span / 2);
-        //printf("[check_frequency] Clamped max_f from %ld to fs/2=%d, center_frequency to: %u\n", max_f/1000, (Frontend.samprate/2)/1000, sp->center_frequency/1000);
+        center_freq = 0 + (span / 2);
+    } else if (max_f > fs2) {
+        center_freq = fs2 - (span / 2);
     }
-    
+
     // Final recompute after any adjustments
-    min_f = (int64_t)sp->center_frequency - (span / 2);
-    max_f = (int64_t)sp->center_frequency + (span / 2);
-    
+    min_f = center_freq - (span / 2);
+    max_f = center_freq + (span / 2);
+
+    sp->center_frequency = (uint32_t)center_freq;
+
     // Only log if the tuned frequency is outside the visible range after all adjustments
     if (((int64_t)sp->frequency > max_f) || ((int64_t)sp->frequency < min_f)) {
         int freq_bin_final = ((int64_t)sp->frequency - min_f) / sp->bin_width;

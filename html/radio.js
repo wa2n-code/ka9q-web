@@ -942,9 +942,9 @@ function level_to_string(f) {
   f /= 1e6;
   // Only call toFixed if amp is a finite number
   if (typeof amp === 'number' && isFinite(amp)) {
-    s = f.toFixed(4) + " MHz: " + amp.toFixed(1) + " dBm";
+    s = f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dBm";
   } else {
-    s = f.toFixed(4) + " MHz: N/A dBm";
+    s = f.toFixed(6) + " MHz: N/A dBm";
   }
   return s;
 }
@@ -1028,8 +1028,8 @@ function update_stats() {
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
   // Use Math.round and .toLocaleString for centerHz to avoid floating-point artifacts
-  const centerKHz = Math.round(centerHz / 10) / 100; // rounds to nearest 10 Hz, then divides to get kHz with 2 decimals
-  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${centerKHz.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+  const centerKHz = Math.round(centerHz) / 1000; // rounds , then divides to get kHz 
+  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${centerKHz.toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})}`;
 
   // Show reordered info into ge_data left table column 1
 
