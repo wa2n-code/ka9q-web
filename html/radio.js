@@ -210,6 +210,7 @@
             // What a pleasant and unexpected surprise!
             // might want to refactor centerHz, frequencyHz, and binWidthHz, too
             input_samprate = view.getUint32(i,true); i+=4;
+            spectrum.input_samprate = input_samprate; 
             rf_agc = view.getUint32(i,true); i+=4;
             input_samples = view.getBigUint64(i,true); i+=8;
             ad_over = view.getBigUint64(i,true); i+=8;
@@ -230,6 +231,7 @@
               calcFrequencies();
               spectrum.setLowHz(lowHz);
               spectrum.setHighHz(highHz);
+              console.log("[on_ws_msg] Spectrum updated: centerHz=",centerHz," frequencyHz=",frequencyHz);
               spectrum.setCenterHz(centerHz);
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
@@ -351,6 +353,7 @@
         centerHz = 10000000;
         binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
+        setupFftAvgInput();
         
         // Setup overlay buttons after spectrum is created
         document.addEventListener('DOMContentLoaded', function() {
@@ -476,43 +479,52 @@
         saveSettings();
     }
 
-    function incrementFrequency()
+    function incrementFrequency(multiplier = 1)
     {
         var value = parseFloat(document.getElementById('freq').value,10);
-        value = isNaN(value) ? 0 : (value * 1000.0) + increment;
+        value = isNaN(value) ? 0 : (value * 1000.0) + increment * multiplier;
+        if (!spectrum.checkFrequencyIsValid(value)) {
+            return;
+        }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
         ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
 
-    function decrementFrequency()
+    function decrementFrequency(multiplier = 1)
     {
         var value = parseFloat(document.getElementById('freq').value,10);
-        value = isNaN(value) ? 0 : (value * 1000.0) - increment;
+        value = isNaN(value) ? 0 : (value * 1000.0) - increment * multiplier;
+        if (!spectrum.checkFrequencyIsValid(value)) {
+            console.warn("Requested frequency is out of range: " + value);
+            return;
+        }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
         ws.send("F:" + (value / 1000.0).toFixed(3));
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
 
-    function startIncrement() {
-        incrementFrequency();
-        counter=setInterval(incrementFrequency,200);
-      saveSettings();
+    function startIncrement(multiplier = 1) {
+        incrementFrequency(multiplier);
+        counter=setInterval(function() { incrementFrequency(multiplier); },200);
+        saveSettings();
     }
 
     function stopIncrement() {
         clearInterval(counter);
     }
 
-    function startDecrement() {
-        decrementFrequency();
-        counter=setInterval(decrementFrequency,200);
+    function startDecrement(multiplier = 1) {
+        decrementFrequency(multiplier);
+        counter=setInterval(function() { decrementFrequency(multiplier); },200);
         saveSettings();
     }
 
@@ -520,11 +532,82 @@
         clearInterval(counter);
     }
 
+    // ...existing code...
+
+    let incrementing = false;
+    let decrementing = false;
+    let currentMultiplier = 1;
+
+    document.addEventListener('keydown', function(e) {
+      // Shift + Ctrl + Right Arrow
+      if (e.shiftKey && e.ctrlKey && e.code === 'ArrowRight') {
+        if (!incrementing) {
+          currentMultiplier = 10;
+          startIncrement(currentMultiplier);
+          incrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Ctrl + Left Arrow
+      else if (e.shiftKey && e.ctrlKey && e.code === 'ArrowLeft') {
+        if (!decrementing) {
+          currentMultiplier = 10;
+          startDecrement(currentMultiplier);
+          decrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Right Arrow (no Ctrl)
+      else if (e.shiftKey && e.code === 'ArrowRight') {
+        if (!incrementing) {
+          currentMultiplier = 1;
+          startIncrement(currentMultiplier);
+          incrementing = true;
+        }
+        e.preventDefault();
+      }
+      // Shift + Left Arrow (no Ctrl)
+      else if (e.shiftKey && e.code === 'ArrowLeft') {
+        if (!decrementing) {
+          currentMultiplier = 1;
+          startDecrement(currentMultiplier);
+          decrementing = true;
+        }
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener('keyup', function(e) {
+      // Right Arrow
+      if (e.code === 'ArrowRight') {
+        if (incrementing) {
+          stopIncrement();
+          incrementing = false;
+        }
+        e.preventDefault();
+      }
+      // Left Arrow
+      if (e.code === 'ArrowLeft') {
+        if (decrementing) {
+          stopDecrement();
+          decrementing = false;
+        }
+        e.preventDefault();
+      }
+    });
+
+    // ...existing code...
+
     function setFrequencyW(waitToAutoscale = true)
     {
         var asCount = 0;
         // need to see how far away we'll move in frequency to set the waitToAutoscale value wdr
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
+        if (!spectrum.checkFrequencyIsValid(f)) {
+            return;
+        }
+        stopDecrement();  // stop decrementing if runaway
+        stopIncrement();  // stop incrementing if runaway
         let frequencyDifference = Math.abs(spectrum.frequency - f)
         if(frequencyDifference < 100000)
         {
@@ -541,6 +624,7 @@
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
+        spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(f);
         autoAutoscale(asCount,waitToAutoscale);      
         saveSettings();
@@ -550,7 +634,11 @@
         //console.log("setBand() called with freq=",freq);
         var f = parseInt(freq);
         document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
+        if (!spectrum.checkFrequencyIsValid(f)) {
+            return;
+        }
         spectrum.setFrequency(f);
+        spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
         ws.send("F:" + (freq / 1000).toFixed(3));
         autoAutoscale(0, true);  // wait for autoscale
@@ -620,6 +708,11 @@
     }
   
     function zoomin() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:+:"+document.getElementById('freq').value);
       //console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
@@ -629,6 +722,11 @@
     }
 
     function zoomout() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:-:"+document.getElementById('freq').value);
       //console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
@@ -650,6 +748,11 @@
     }
 
     function zoomcenter() {
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send("Z:c");
       //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
@@ -661,10 +764,29 @@
 
     function setZoom() {
       const v = document.getElementById("zoom_level").valueAsNumber;
+      // Show warning if overlays are loaded
+      if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
+        //alertOverlayMisalignment();
+        spectrum.clearOverlayTrace();
+      }
       ws.send(`Z:${v}`);
       //console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
       //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
-        autoAutoscale(100,false); 
+      autoAutoscale(100,false); 
+      saveSettings();
+    }
+
+    // Show alert when overlays may be misaligned due to zoom/center changes
+    function alertOverlayMisalignment() {
+      alert("Warning: The loaded overlay traces may no longer align with the spectrum due to a zoom or center change. Clear traces (Clear Data in Options) to remove this warning.");
+    }
+
+    window.setZoomDuringTraceLoad = setZoomDuringTraceLoad;
+    function setZoomDuringTraceLoad() {
+      const v = document.getElementById("zoom_level").valueAsNumber;
+      ws.send(`Z:${v}`);
+      // No alert for overlay misalignment here
+      autoAutoscale(100, false);
       saveSettings();
     }
 
@@ -820,9 +942,9 @@ function level_to_string(f) {
   f /= 1e6;
   // Only call toFixed if amp is a finite number
   if (typeof amp === 'number' && isFinite(amp)) {
-    s = f.toFixed(4) + " MHz: " + amp.toFixed(1) + " dBm";
+    s = f.toFixed(6) + " MHz: " + amp.toFixed(1) + " dBm";
   } else {
-    s = f.toFixed(4) + " MHz: N/A dBm";
+    s = f.toFixed(6) + " MHz: N/A dBm";
   }
   return s;
 }
@@ -849,7 +971,7 @@ function update_stats() {
   if (spectrum.paused)
     return;
 
-// GPS time isn't UTC
+  // GPS time isn't UTC
   var t = Number(gps_time) / 1e9;
   t+=315964800;
   t-=18;
@@ -890,9 +1012,13 @@ function update_stats() {
   } catch (e) {
     // fallback to empty if any error
   }
-  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom level=${zoomLevel}` : '');
+  document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom: ${zoomLevel}` : '');
   document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
-  document.getElementById('fft_avg').innerHTML = "FFT avg: " + spectrum.averaging.toString();
+  // Update the fft_avg_input value (number input)
+  const fftAvgInput = document.getElementById('fft_avg_input');
+  if (fftAvgInput) {
+    fftAvgInput.value = spectrum.averaging;
+  }
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
@@ -901,7 +1027,9 @@ function update_stats() {
   document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
   document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
-  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${(centerHz / 1000.0).toLocaleString(1)}`;
+  // Use Math.round and .toLocaleString for centerHz to avoid floating-point artifacts
+  const centerKHz = Math.round(centerHz) / 1000; // rounds , then divides to get kHz 
+  document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${centerKHz.toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})}`;
 
   // Show reordered info into ge_data left table column 1
 
@@ -915,6 +1043,36 @@ function update_stats() {
   document.getElementById("pwr_units").textContent = "dBm | Signal:";
   // Show power in 2nd column and S Units in 4th column from computeSUnits function
   return;
+}
+// --- FFT Averaging input box event handler ---
+function setupFftAvgInput() {
+  const fftAvgInput = document.getElementById('fft_avg_input');
+  if (!fftAvgInput) return;
+  // Set min/max if not already set
+  fftAvgInput.min = 1;
+  fftAvgInput.max = 50; // Set max to 50 for more flexibility
+  // Set step to 1 for integer input
+  fftAvgInput.step = 1;
+  // Set initial value
+  fftAvgInput.value = spectrum.averaging;
+  // Listen for user changes immediately (caret, typing, etc)
+  //console.log(setupFftAvgInput, " called with initial value: ", spectrum.averaging);
+  fftAvgInput.addEventListener('input', function () {
+    let val = parseInt(fftAvgInput.value, 10);
+    //console.log("FFT averaging input changed to: ", val);
+    if (isNaN(val) || val < 1) val = 1;
+    if (val > fftAvgInput.max) val = fftAvgInput.max;
+    if (val !== spectrum.averaging) {
+      spectrum.averaging = val;
+      if (typeof spectrum.setAveraging === 'function') {
+        spectrum.setAveraging(val);
+      }
+      fftAvgInput.value = val; // Clamp value in UI
+      //saveSettings();
+      //console.log("FFT averaging set to: ", val);
+    }
+    //update_stats(); // Refresh UI
+  });
 }
 
 async function getVersion() {
@@ -1549,6 +1707,47 @@ async function fetchZoomTableSize() {
     }
 }
 
+// --- Zoom Table: Expose to global scope ---
+// Example: window.zoomTable = [ { index: 0, value: 0, label: 'Zoom 0' }, ... ]
+// If already present, skip this block. Otherwise, define it here or fetch from DOM/JS.
+// --- Hardcoded zoom table to match ka9q-web.c ---
+// This must be available before overlays or zoom logic is used
+window.zoomTable = [
+  { bin_width: 40000, bin_count: 1620 },
+  { bin_width: 20000, bin_count: 1620 },
+  { bin_width: 16000, bin_count: 1620 },
+  { bin_width: 8000, bin_count: 1620 },
+  { bin_width: 4000, bin_count: 1620 },
+  { bin_width: 2000, bin_count: 1620 },
+  { bin_width: 1000, bin_count: 1620 },
+  { bin_width: 800, bin_count: 1620 },
+  { bin_width: 400, bin_count: 1620 },
+  { bin_width: 200, bin_count: 1620 },
+  { bin_width: 120, bin_count: 1620 },
+  { bin_width: 80, bin_count: 1620 },
+  { bin_width: 40, bin_count: 1620 },
+  { bin_width: 20, bin_count: 1620 },
+  { bin_width: 10, bin_count: 1620 },
+  { bin_width: 5, bin_count: 1620 },
+  { bin_width: 2, bin_count: 1620 },
+  { bin_width: 1, bin_count: 1620 }
+];
+
+// Utility: Find closest zoom level index for a given value
+window.findClosestZoomIndex = function(requestedZoom) {
+  if (!window.zoomTable || window.zoomTable.length === 0) return null;
+  let closest = window.zoomTable[0];
+  let minDiff = Math.abs(requestedZoom - closest.value);
+  for (let i = 1; i < window.zoomTable.length; ++i) {
+    const diff = Math.abs(requestedZoom - window.zoomTable[i].value);
+    if (diff < minDiff) {
+      closest = window.zoomTable[i];
+      minDiff = diff;
+    }
+  }
+  return closest.index;
+};
+
 function setSkipWaterfallLines(val) {
   val = Math.max(0, Math.min(3, parseInt(val, 10) || 0));
   window.skipWaterfallLines = val;
@@ -1654,6 +1853,7 @@ window.addEventListener('DOMContentLoaded', function() {
             } else {
                 console.error('Dialog elements missing after loading optionsDialog.html');
             }
+
             // Initialize dialog event listeners
             if (typeof initializeDialogEventListeners === "function") {
                 initializeDialogEventListeners();

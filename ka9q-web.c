@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.74";
+const char *webserver_version = "2.75";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -226,20 +226,52 @@ void websocket_closed(struct session *sp) {
 }
 
 static void check_frequency(struct session *sp) {
-  // check frequency is within zoomed span
-  // if not the center on the frequency
-  int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-  int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-  if(sp->frequency<min_f || sp->frequency>max_f) {
-    sp->center_frequency=sp->frequency;
-    min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-    max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-  }
-  if (min_f < 0) {
-    sp->center_frequency = (sp->bin_width * sp->bins) / 2;
-  } else if (max_f > (Frontend.samprate / 2)) {
-    sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
-  }
+    int64_t span = (int64_t)sp->bin_width * sp->bins;
+    int64_t center_freq = (int64_t)sp->center_frequency;
+    int64_t min_f = center_freq - (span / 2);
+    int64_t max_f = center_freq + (span / 2);
+
+    int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
+
+    int64_t fs2 = Frontend.samprate / 2;
+    if (freq_bin >= sp->bins) {
+        int64_t target_bin = sp->bins - 30;
+        int64_t new_min_f = (int64_t)sp->frequency - target_bin * sp->bin_width;
+        int64_t new_center = new_min_f + (span / 2);
+        int64_t new_max_f = new_center + (span / 2);
+        if (new_max_f > fs2) {
+            new_center = fs2 - (span / 2);
+            new_min_f = new_center - (span / 2);
+        }
+        center_freq = new_center;
+        min_f = center_freq - (span / 2);
+        max_f = center_freq + (span / 2);
+        freq_bin = (sp->frequency - min_f) / sp->bin_width;
+    } else if (freq_bin < 0) {
+        center_freq = (int64_t)sp->frequency - 30 * sp->bin_width;
+        min_f = center_freq - (span / 2);
+        max_f = center_freq + (span / 2);
+        freq_bin = (sp->frequency - min_f) / sp->bin_width;
+    }
+
+    if (min_f < 0) {
+        center_freq = 0 + (span / 2);
+    } else if (max_f > fs2) {
+        center_freq = fs2 - (span / 2);
+    }
+
+    // Final recompute after any adjustments
+    min_f = center_freq - (span / 2);
+    max_f = center_freq + (span / 2);
+
+    sp->center_frequency = (uint32_t)center_freq;
+
+    // Only log if the tuned frequency is outside the visible range after all adjustments
+    if (((int64_t)sp->frequency > max_f) || ((int64_t)sp->frequency < min_f)) {
+        int freq_bin_final = ((int64_t)sp->frequency - min_f) / sp->bin_width;
+        printf("[check_frequency] Final: tuned freq %u is at bin %d (outside visible range [0-%d])\n", 
+               sp->frequency/1000, freq_bin_final, sp->bins-1);
+    }
 }
 
 struct zoom_table_t {
@@ -381,19 +413,30 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'F':
       case 'f':
-        sp->frequency = strtod(&tmp[2],0) * 1000;
-        int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-        int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        if(sp->frequency<min_f || sp->frequency>max_f) {
-          sp->center_frequency=sp->frequency;
-          min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
-          max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        }
-        if(min_f<0) {
-          sp->center_frequency=(sp->bin_width*sp->bins)/2;
-        } else if (max_f > (Frontend.samprate / 2)) {
-          sp->center_frequency = (Frontend.samprate / 2) - (sp->bin_width * sp->bins) / 2;
-        }
+    sp->frequency = strtod(&tmp[2],0) * 1000;
+    int32_t span = sp->bin_width * sp->bins;
+    int32_t min_f = sp->center_frequency - (span / 2);
+    int32_t max_f = sp->center_frequency + (span / 2);
+    int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
+    int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
+    // Shift if frequency is within edge_bin_margin bins of the edge
+    if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
+      if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
+        // Shift so that frequency is edge_bin_margin bins above the new min edge
+        int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
+        sp->center_frequency -= shift * sp->bin_width;
+      } else {
+        sp->center_frequency = sp->frequency;
+      }
+    } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
+      if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
+        // Shift so that frequency is edge_bin_margin bins below the new max edge
+        int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
+        sp->center_frequency += shift * sp->bin_width;
+      } else {
+        sp->center_frequency = sp->frequency;
+      }
+    }
         check_frequency(sp);
         control_set_frequency(sp,&tmp[2]);
         break;
@@ -426,7 +469,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
               sp->center_frequency = f;
             }
           }
-          //check_frequency(sp);
+          check_frequency(sp);
         } else if (strcmp(token, "SIZE") == 0) { // New command to get zoom table size
             int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
             char response[16];

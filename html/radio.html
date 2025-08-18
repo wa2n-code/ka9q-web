@@ -96,7 +96,9 @@
                         </div>
                     </td>
                     <td rowspan=2>
-                        <input type="text" id="freq" style="color:green; font-size:26px; height:32px;width:125px; border:solid" value="" onchange="setFrequencyW()" title="Frequency direct entry" />
+                        <div style="display: flex; justify-content: center; width: 100%;">
+                            <input type="text" id="freq" style="color:green; font-size:26px; height:32px;width:125px; border:solid" value="" onchange="setFrequencyW()" title="Frequency direct entry" />
+                        </div>
                     </td>
                     <td rowspan=1 align="center">
                         <label for="mode">Mode:</label>
@@ -161,9 +163,11 @@
                         </div>
                     </td>
                     <td align="center">
-                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" style="width:45px" title="Decrease frequency"> - </button>
-                        <button style="color:green; border:solid; width:40px" onclick="setFrequencyW()" title="Set frequency">Set</button>
-                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" style="width:40px" title="Increase frequency"> + </button>
+                        <button onmousedown="startDecrement(10)" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px; margin-right:2px;" title="Decrease frequency by 10× step size">&lt;</button>
+                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px;" title="Decrease frequency by step size">-</button>
+                        <button style="color:green; border:solid; padding-left:2px; padding-right:2px;" onclick="setFrequencyW()" title="Set frequency">Set</button>
+                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px;" title="Increase frequency by step size">+</button>
+                        <button onmousedown="startIncrement(10)" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px; margin-left:2px;" title="Increase frequency by 10× step size">&gt;</button>
                     </td>
                     <td rowspan=1 colspan=1 align="center">
                         <label for="meter">Meter:</label>
@@ -286,7 +290,10 @@
         <table id="stat_table">
             <tr>
                 <td><span id="rf_gain"></span></td>
-                <td><span id="snr"></span></td>
+                <td>
+                  <label for="fft_avg_input" style="margin-right:4px;">FFT average:</label>
+                  <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging from 1 to 50" />
+                </td>
                 <td><span id="gps_time"></span></td>
             </tr>
             <tr>
@@ -306,7 +313,7 @@
             </tr>
             <tr>
                 <td><span id="if_power"></span></td>
-                <td><span id="fft_avg"></span></td>
+                <td><span id="snr"></span></td>
                 <td><span id="blocks"></span></td>
             </tr>
             <tr>
@@ -319,7 +326,6 @@
                 <td><span id="adc_samp_rate"></span></td>
                 <td><span id="rx_rate"></span></td>
             </tr>
-
             <tr>
                 <td colspan="3"><a id="wwv_solar" href="https://www.hamqsl.com/solar.html" target="_blank" style="text-decoration: underline; color: inherit;"></a></td>
             </tr>
@@ -336,9 +342,10 @@
     <h4>Help:</h4>
     <ul>
         <li>Use left mouse to click to a frequency.</li>
-        <li>Drag right mouse to shift spectrum, tune will move to center of spectrum.</li>
+        <li>Drag right mouse to shift frequency</li>
         <li>Use mouse wheel to increment/decrement frequency by Step amount.</li>
         <li>Enter frequency in kHz and hit Return or press <b>Set Frequency (kHz)</b>.</li>
+        <li>Hold keyboard Shift and right or left arrow to shift frequency by step size, Control-Shift for 10x step size</li>
         <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location.</li>
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
@@ -361,13 +368,12 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
+            <li>v2.75: Overlay trace load aligns spectrum, spectrum slides to follow mouse at ends, new keyboard shortcuts, up/down input boxes for spectrum floor and fft averaging</li>
             <li>v2.74: Added export to disk of max, min & current spectrum with load from disk to new trace and clear buttons, Freeze checkbox, Solar conditions and link</li>
             <li>v2.73: Increased maximum volume by 12 dB, save volume level</li>
             <li>v2.72: Added channel memories, added band category selector and related channels</li>
             <li>v2.71: Added analog S Meter, band change to same band resets frequency on firefox, SNR shows negative values, SNR meter is red if SNR is &lt; 0, right click and drag shifts spectrum</li>
             <li>v2.70: Improved autoscale, added option to slow the waterfall, added tighter zoom levels</li>
-            <li>v2.69: Major UI update</li>
-            <li>v2.68: Bugfix: RTP header offset was wrong</li>
         </ul>
         <b>Credits:</b>
         <ul>
