@@ -684,6 +684,56 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // Restore scale
     this.ctx.restore();
 
+    // --- Enunciator: show arrow if tuned frequency is outside current window ---
+    try {
+        var start_freq = this.centerHz - (this.spanHz / 2.0);
+        var end_freq = this.centerHz + (this.spanHz / 2.0);
+
+    // draw in unscaled canvas space, slightly lower so it doesn't overlap frequency labels
+    var arrowSize = 12;
+    var textY = 28; // moved down from 14
+    this.ctx.fillStyle = "#ff0000";
+    this.ctx.strokeStyle = "#ffffff";
+    this.ctx.lineWidth = 1;
+    this.ctx.font = "13px sans-serif";
+
+        if (typeof this.frequency === 'number') {
+            if (this.frequency < start_freq) {
+                // tuned is left: left-pointing arrow at left edge
+                var ax = 8;
+                var ay = 20; // moved down from 6
+                this.ctx.beginPath();
+                this.ctx.moveTo(ax + arrowSize, ay);
+                this.ctx.lineTo(ax, ay + arrowSize / 2);
+                this.ctx.lineTo(ax + arrowSize, ay + arrowSize);
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+                this.ctx.fillStyle = "#ff0000";
+                this.ctx.textAlign = "left";
+                this.ctx.fillText("Tuned ←", ax + arrowSize + 6, textY);
+            } else if (this.frequency > end_freq) {
+                // tuned is right: right-pointing arrow at right edge
+                var ax = this.canvas.width - 8 - arrowSize;
+                var ay = 20; // moved down from 6
+                this.ctx.beginPath();
+                this.ctx.moveTo(ax, ay);
+                this.ctx.lineTo(ax + arrowSize, ay + arrowSize / 2);
+                this.ctx.lineTo(ax, ay + arrowSize);
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+                this.ctx.fillStyle = "#ff0000";
+                this.ctx.textAlign = "right";
+                this.ctx.fillText("Tuned →", ax - 6, textY);
+                this.ctx.textAlign = "left";
+            }
+        }
+    } catch (e) {
+        // don't let debugging UI break drawing
+        console.debug("enunciator draw error", e);
+    }
+
     // Copy axes from offscreen canvas
     this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
 }
