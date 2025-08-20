@@ -128,6 +128,15 @@ function Spectrum(id, options) {
     let pendingCenterHz = null;
     let startFreqHz = 0;
     let pendingFreqHz = null;
+    // Left-button drag / click state
+    let leftDown = false;
+    let leftDragStarted = false;
+    let leftStartX = 0;
+    let leftStartTime = 0;
+    let leftStartCenterHz = 0;
+    // Throttle sending center requests to backend during drag (ms)
+    let lastCenterSend = 0;
+    const centerSendInterval = 150; // ms
     const spectrum = this;
 
     this.checkFrequencyIsValid = function(frequencyRequested) {
@@ -143,29 +152,12 @@ function Spectrum(id, options) {
     };
 
     this.canvas.addEventListener('mousedown', function(e) {
-        if (e.button === 0) { // Left mouse button: tune instantly or set cursor
-            const rect = spectrum.canvas.getBoundingClientRect();
-            const mouseX = e.offsetX;
-            const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
-            let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
-            let freq_khz = clickedHz / 1000;
-            let step = increment / 1000; 
-            let snapped_khz = Math.round(freq_khz / step) * step;
-
-            if (spectrum.cursor_active) {
-                // Set the cursor frequency instead of tuning
-                spectrum.cursor_freq = clickedHz;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            } else {
-                document.getElementById("freq").value = snapped_khz.toFixed(3);
-                ws.send("F:" + snapped_khz.toFixed(3));
-                spectrum.frequency = snapped_khz * 1000;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            }
+        if (e.button === 0) { // Left mouse button: start possible click or drag
+            leftDown = true;
+            leftDragStarted = false;
+            leftStartX = e.offsetX;
+            leftStartTime = Date.now();
+            leftStartCenterHz = spectrum.centerHz;
         } else if (e.button === 2) { // Right mouse button: start drag to move tuned frequency
             isDragging = true;
             dragStarted = false;
@@ -184,9 +176,36 @@ function Spectrum(id, options) {
     });
 
     window.addEventListener('mousemove', function(e) {
-        // Only process if right mouse button is being dragged
-        if (!isDragging || (e.buttons & 2) === 0) return;
         const rect = spectrum.canvas.getBoundingClientRect();
+        // Left mouse drag: shift spectrum center
+        if (leftDown && (e.buttons & 1)) {
+            const mouseX = e.clientX - rect.left;
+            const dx = mouseX - leftStartX;
+            if (!leftDragStarted && Math.abs(dx) > dragThreshold) {
+                leftDragStarted = true;
+            }
+            if (leftDragStarted) {
+                const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+                let newCenterHz = leftStartCenterHz - dx * hzPerPixel;
+                spectrum.setCenterHz(newCenterHz);
+                // Throttled request to backend to re-center spectrum bins
+                try {
+                    const now = Date.now();
+                    if ((now - lastCenterSend) >= centerSendInterval) {
+                            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send("Z:c:" + (newCenterHz / 1000.0).toFixed(3));
+                            }
+                        lastCenterSend = now;
+                    }
+                } catch (err) {
+                    console.warn('Failed to send center update during drag', err);
+                }
+            }
+            return;
+        }
+
+        // Right mouse drag: change tuned frequency
+        if (!isDragging || (e.buttons & 2) === 0) return;
         const mouseX = e.clientX - rect.left;
         const dx = mouseX - startX;
         if (!dragStarted && Math.abs(dx) > dragThreshold) {
@@ -211,12 +230,52 @@ function Spectrum(id, options) {
             spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
         }
     });
-
     window.addEventListener('mouseup', function(e) {
+        // Left mouse quick click: change tuned frequency
+        if (leftDown && e.button === 0) {
+            const dragDuration = Date.now() - leftStartTime;
+            // compute distance in canvas coords
+            const rect = spectrum.canvas.getBoundingClientRect();
+            const mouseX = (typeof e.offsetX === 'number') ? e.offsetX : (e.clientX - rect.left);
+            const dragDistance = Math.abs(mouseX - leftStartX);
+            if (!leftDragStarted && dragDuration < 250 && dragDistance < dragThreshold) {
+                const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+                let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - leftStartX) * hzPerPixel);
+                let freq_khz = clickedHz / 1000;
+                let step = increment / 1000;
+                let snapped_khz = Math.round(freq_khz / step) * step;
+                if (spectrum.cursor_active) {
+                    spectrum.cursor_freq = clickedHz;
+                    if (spectrum.bin_copy) {
+                        spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                    }
+                } else {
+                    document.getElementById("freq").value = snapped_khz.toFixed(3);
+                    ws.send("F:" + snapped_khz.toFixed(3));
+                    spectrum.frequency = snapped_khz * 1000;
+                    if (spectrum.bin_copy) {
+                        spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                    }
+                }
+            } else if (leftDragStarted) {
+                // Drag finished — send final center to backend so it will return freshly centered bins
+                try {
+                    if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send("Z:c:" + (spectrum.centerHz / 1000.0).toFixed(3));
+                    }
+                } catch (err) {
+                    console.warn('Failed to send final center update', err);
+                }
+            }
+            leftDown = false;
+            leftDragStarted = false;
+        }
+
+        // Right mouse drag end
         if (isDragging && e.button === 2) {
             spectrum.canvas.style.cursor = "";
             if (pendingFreqHz !== null && dragStarted) {
-                // Snap frequency to next 0.500 kHz step
+                // Snap frequency to step
                 let freq_khz = pendingFreqHz / 1000;
                 let step = increment / 1000;
                 let snapped_freq = Math.round(freq_khz / step) * step * 1000;
