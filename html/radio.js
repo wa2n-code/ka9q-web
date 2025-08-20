@@ -753,7 +753,8 @@
         //alertOverlayMisalignment();
         spectrum.clearOverlayTrace();
       }
-      ws.send("Z:c");
+  // Send explicit center (kHz) so backend will center on the tuned frequency
+  ws.send("Z:c:" + document.getElementById('freq').value);
       //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
       saveSettings();

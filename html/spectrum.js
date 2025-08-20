@@ -114,6 +114,19 @@ function Spectrum(id, options) {
             if (typeof self.setupOverlayButtons === 'function') {
                 self.setupOverlayButtons();
             }
+            // Attach zoom-center button if present: send explicit center (tuned freq)
+            try {
+                var zbtn = document.getElementById('zoom_center');
+                if (zbtn) {
+                    zbtn.addEventListener('click', function() {
+                        if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send("Z:c:" + (self.frequency / 1000.0).toFixed(3));
+                        }
+                    });
+                }
+            } catch (err) {
+                // ignore
+            }
         }, 100); // Small delay to ensure DOM is fully loaded
     });
 
@@ -1262,7 +1275,14 @@ Spectrum.prototype.onKeypress = function(e) {
     } else if (e.key == "m") {
         this.toggleMaxHold();
     } else if (e.key == "z") {
-        ws.send("Z:c");
+        // Send explicit center = tuned frequency in kHz so server centers where we expect
+        try {
+            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+            }
+        } catch (err) {
+            // ignore
+        }
         saveSettings();
     } else if (e.key == "i") {
         ws.send("Z:+:"+document.getElementById('freq').value);
