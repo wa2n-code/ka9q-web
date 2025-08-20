@@ -140,6 +140,31 @@ function Spectrum(id, options) {
     const centerSendInterval = 150; // ms
     const spectrum = this;
 
+    // Helper to save and set FFT averaging for the duration of a drag
+    this._savedAveraging = undefined;
+    this._saveAndSetAveraging = function(val) {
+        // prefer the existing 'averaging' property which is used elsewhere
+        if (typeof this.averaging !== 'undefined') {
+            if (typeof this._savedAveraging === 'undefined') this._savedAveraging = this.averaging;
+            this.averaging = val;
+            // update alpha if used elsewhere
+            if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
+            //console.log('Saved averaging:', this._savedAveraging, ' set to', val);
+        } else {
+            // Fallback: create property
+            if (typeof this._savedAveraging === 'undefined') this._savedAveraging = undefined;
+            this.averaging = val;
+        }
+    };
+    this._restoreAveraging = function() {
+        if (typeof this._savedAveraging !== 'undefined') {
+            this.averaging = this._savedAveraging;
+            if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
+            //console.log('Restored averaging to', this._savedAveraging);
+            this._savedAveraging = undefined;
+        }
+    };
+
     this.checkFrequencyIsValid = function(frequencyRequested) {
         if (typeof this.input_samprate !== "number" || isNaN(this.input_samprate)) {
             console.warn("input_samprate is not set on spectrum object.");
@@ -184,6 +209,8 @@ function Spectrum(id, options) {
             const dx = mouseX - leftStartX;
             if (!leftDragStarted && Math.abs(dx) > dragThreshold) {
                 leftDragStarted = true;
+                // begin drag: lower FFT averaging to make visual updates smoother
+                try { spectrum._saveAndSetAveraging(4); } catch (e) { }
             }
             if (leftDragStarted) {
                 const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
@@ -267,6 +294,10 @@ function Spectrum(id, options) {
                 } catch (err) {
                     console.warn('Failed to send final center update', err);
                 }
+            }
+            // End of left mouse interaction: restore averaging if it was changed
+            if (leftDragStarted) {
+                try { spectrum._restoreAveraging(); } catch (e) { }
             }
             leftDown = false;
             leftDragStarted = false;
