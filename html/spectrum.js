@@ -114,19 +114,7 @@ function Spectrum(id, options) {
             if (typeof self.setupOverlayButtons === 'function') {
                 self.setupOverlayButtons();
             }
-            // Attach zoom-center button if present: send explicit center (tuned freq)
-            try {
-                var zbtn = document.getElementById('zoom_center');
-                if (zbtn) {
-                    zbtn.addEventListener('click', function() {
-                        if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send("Z:c:" + (self.frequency / 1000.0).toFixed(3));
-                        }
-                    });
-                }
-            } catch (err) {
-                // ignore
-            }
+            // (Removed legacy listener for 'zoom_center' button - zoom is handled via `radio.js`)
         }, 100); // Small delay to ensure DOM is fully loaded
     });
 
@@ -1145,6 +1133,25 @@ Spectrum.prototype.rangeDecrease = function() {
 }
 
 Spectrum.prototype.setCenterHz = function(hz) {
+    // Ensure span/center do not exceed hardware limits when input_samprate is known
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const nyquist = this.input_samprate / 2;
+        let halfSpan = Math.max(0, this.spanHz / 2);
+        // If requested span is larger than the available sample bandwidth, clamp span
+        if (halfSpan > nyquist) {
+            halfSpan = nyquist;
+            this.spanHz = 2 * nyquist;
+        }
+        const minCenter = halfSpan;
+        const maxCenter = nyquist - halfSpan;
+        if (minCenter > maxCenter) {
+            // Degenerate case: force center to mid-Nyquist
+            hz = nyquist / 2;
+        } else {
+            if (hz < minCenter) hz = minCenter;
+            if (hz > maxCenter) hz = maxCenter;
+        }
+    }
     console.log("spectrum.setCenterHz: ", hz);
     this.centerHz = hz;
     this.updateAxes();
@@ -1152,7 +1159,26 @@ Spectrum.prototype.setCenterHz = function(hz) {
 }
 
 Spectrum.prototype.setSpanHz = function(hz) {
+    // Clamp span to available sample rate if known, and adjust center if needed
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const maxSpan = this.input_samprate; // cannot exceed sample rate
+        if (hz > maxSpan) hz = maxSpan;
+        if (hz < 0) hz = 0;
+    }
     this.spanHz = hz;
+    // After changing span, ensure current center still yields min/max within limits
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const nyquist = this.input_samprate / 2;
+        let halfSpan = Math.max(0, this.spanHz / 2);
+        if (halfSpan > nyquist) {
+            halfSpan = nyquist;
+            this.spanHz = 2 * nyquist;
+        }
+        const minCenter = halfSpan;
+        const maxCenter = nyquist - halfSpan;
+        if (this.centerHz < minCenter) this.centerHz = minCenter;
+        if (this.centerHz > maxCenter) this.centerHz = maxCenter;
+    }
     this.updateAxes();
     this.saveSettings();
 }
