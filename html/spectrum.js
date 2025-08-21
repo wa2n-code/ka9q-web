@@ -75,6 +75,15 @@ function Spectrum(id, options) {
     this.wf.height = this.wf_rows;
     this.wf.width = this.wf_size;
     this.ctx_wf = this.wf.getContext("2d");
+    // Backup canvas for shifting operations while dragging
+    this._wf_backup = document.createElement("canvas");
+    this._wf_backup.width = this.wf.width;
+    this._wf_backup.height = this.wf.height;
+    this._ctx_wf_backup = this._wf_backup.getContext('2d');
+
+    // Left-drag state for waterfall shifting
+    this._leftDragging = false;
+    this._dragShiftPx = 0;
 
     this.autoscale = false;
     this.autoscaleWait = 0;
@@ -90,6 +99,7 @@ function Spectrum(id, options) {
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+    // debug flag for waterfall shift diagnostics (removed)
     
     // Initialize overlay trace functionality
     this._overlayTrace = null;
@@ -211,11 +221,45 @@ function Spectrum(id, options) {
                 leftDragStarted = true;
                 // begin drag: lower FFT averaging to make visual updates smoother
                 try { spectrum._saveAndSetAveraging(4); } catch (e) { }
+                // mark left-dragging for waterfall shift and snapshot current waterfall so shifts don't accumulate
+                try {
+                    spectrum._leftDragging = true;
+                    spectrum._dragShiftPx = 0;
+                    spectrum._leftStartCenterHz = leftStartCenterHz;
+                    if (spectrum._ctx_wf_backup) {
+                        spectrum._ctx_wf_backup.clearRect(0,0,spectrum._wf_backup.width,spectrum._wf_backup.height);
+                        spectrum._ctx_wf_backup.drawImage(spectrum.ctx_wf.canvas, 0, 0);
+                    }
+                } catch (e) {}
             }
             if (leftDragStarted) {
                 const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
                 let newCenterHz = leftStartCenterHz - dx * hzPerPixel;
                 spectrum.setCenterHz(newCenterHz);
+                // compute drag shift from the change in centerHz so sign and magnitude match the visual shift
+                try {
+                    // compute integer bin shift directly from center frequency delta to avoid
+                    // fractional pixel/canvas scaling errors. Round toward the drag direction
+                    // to bias alignment in the direction the user is moving.
+                    const hzPerWfBin = (spectrum.spanHz && spectrum.wf && spectrum.wf.width) ? (spectrum.spanHz / spectrum.wf.width) : hzPerPixel;
+                    const centerDeltaHz = (spectrum._leftStartCenterHz - spectrum.centerHz);
+                    const rawShift = centerDeltaHz / hzPerWfBin;
+                    let binShift;
+                    if (typeof dx === 'number') {
+                        if (dx > 0) binShift = Math.ceil(rawShift);
+                        else if (dx < 0) binShift = Math.floor(rawShift);
+                        else binShift = Math.round(rawShift);
+                    } else {
+                        binShift = Math.round(rawShift);
+                    }
+                    // debug logging removed
+                    spectrum._wfShiftBins = binShift;
+                    // keep an approximate display-pixel value for drawing (not authoritative)
+                    try {
+                        const canvasDisplayWidth = spectrum.ctx.canvas.width || spectrum.wf.width;
+                        spectrum._dragShiftPx = Math.round(binShift * (canvasDisplayWidth / spectrum.wf.width));
+                    } catch (e2) {}
+                } catch (e) { }
                 // Throttled request to backend to re-center spectrum bins
                 try {
                     const now = Date.now();
@@ -299,6 +343,41 @@ function Spectrum(id, options) {
             if (leftDragStarted) {
                 try { spectrum._restoreAveraging(); } catch (e) { }
             }
+            // If we were left-dragging, apply the final frozen shift to the live waterfall canvas
+            if (leftDragStarted) {
+                try {
+                    const w = spectrum.wf.width;
+                    const h = spectrum.wf.height;
+                    let shiftPx = 0;
+                    if (typeof spectrum._wfShiftBins === 'number') {
+                        shiftPx = spectrum._wfShiftBins;
+                    } else {
+                        const displayShift = Math.round(spectrum._dragShiftPx || 0);
+                        const canvasDisplayWidth = spectrum.ctx.canvas.width || w;
+                        shiftPx = Math.round(displayShift * (w / canvasDisplayWidth));
+                    }
+
+                    if (shiftPx > 0) {
+                        const s = Math.min(shiftPx, w);
+                        spectrum.ctx_wf.fillStyle = 'black';
+                        spectrum.ctx_wf.fillRect(0, 0, s, h);
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, 0, 0, w - s, h, s, 0, w - s, h);
+                    } else if (shiftPx < 0) {
+                        const s = Math.min(Math.abs(shiftPx), w);
+                        spectrum.ctx_wf.fillStyle = 'black';
+                        spectrum.ctx_wf.fillRect(w - s, 0, s, h);
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, s, 0, w - s, h, 0, 0, w - s, h);
+                    } else {
+                        // no shift
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, 0, 0);
+                    }
+                } catch (err) {
+                    console.warn('Failed to apply final waterfall shift', err);
+                }
+                // debug logging removed
+            }
+            // clear dragging flags so waterfall returns to normal updates
+            try { spectrum._leftDragging = false; spectrum._dragShiftPx = 0; spectrum._leftStartCenterHz = undefined; spectrum._lastDragDx = undefined; } catch (e) {}
             leftDown = false;
             leftDragStarted = false;
         }
@@ -424,15 +503,60 @@ Spectrum.prototype.addWaterfallRow = function(bins) {
     // Only draw a new row if lineDecimation is 0
     let skip = (window.skipWaterfallLines > 0) && (lineDecimation++ % (window.skipWaterfallLines + 1) !== 0);
     if (!skip) {
-        //console.log("Drawing row at lineDecimation =", lineDecimation, "skipWaterfallLines =", window.skipWaterfallLines);
-        // Shift waterfall 1 row down
-        this.ctx_wf.drawImage(this.ctx_wf.canvas,
-            0, 0, this.wf_size, this.wf_rows - 1,
-            0, 1, this.wf_size, this.wf_rows - 1);
+        // If left-dragging, shift the existing waterfall horizontally instead of adding a new top row
+        if (this._leftDragging) {
+                try {
+                // prefer integer bin shift if available
+                const w = this.wf.width;
+                const h = this.wf.height;
+                let shiftPx = 0;
+                if (typeof this._wfShiftBins === 'number') {
+                    shiftPx = this._wfShiftBins; // already in waterfall pixels
+                } else {
+                    // fallback: map display pixels to waterfall pixels
+                    const displayShift = Math.round(this._dragShiftPx || 0);
+                    const canvasDisplayWidth = this.ctx.canvas.width || w;
+                    shiftPx = Math.round(displayShift * (w / canvasDisplayWidth));
+                }
 
-        // Draw new line on waterfall canvas
-        this.rowToImageData(bins);
-        this.ctx_wf.putImageData(this.imagedata, 0, 0);
+                if (shiftPx > 0) {
+                    const s = Math.min(shiftPx, w);
+                    // clear left strip (newly exposed area) and draw remaining content shifted right from backup
+                    this.ctx_wf.fillStyle = 'black';
+                    this.ctx_wf.fillRect(0, 0, s, h);
+                    this.ctx_wf.drawImage(this._wf_backup, 0, 0, w - s, h, s, 0, w - s, h);
+                } else if (shiftPx < 0) {
+                    const s = Math.min(Math.abs(shiftPx), w);
+                    // clear right strip and draw remaining content shifted left from backup
+                    this.ctx_wf.fillStyle = 'black';
+                    this.ctx_wf.fillRect(w - s, 0, s, h);
+                    this.ctx_wf.drawImage(this._wf_backup, s, 0, w - s, h, 0, 0, w - s, h);
+                } else {
+                    // no shift: copy backup
+                    this.ctx_wf.drawImage(this._wf_backup, 0, 0);
+                }
+                // Do not add a new row while dragging
+            } catch (err) {
+                // fallback to normal behavior if something fails
+                console.warn('Waterfall drag shift failed, falling back to normal add row', err);
+                this.ctx_wf.drawImage(this.ctx_wf.canvas,
+                    0, 0, this.wf_size, this.wf_rows - 1,
+                    0, 1, this.wf_size, this.wf_rows - 1);
+
+                // Draw new line on waterfall canvas
+                this.rowToImageData(bins);
+                this.ctx_wf.putImageData(this.imagedata, 0, 0);
+            }
+        } else {
+            // Normal behavior: shift down and add new top row
+            this.ctx_wf.drawImage(this.ctx_wf.canvas,
+                0, 0, this.wf_size, this.wf_rows - 1,
+                0, 1, this.wf_size, this.wf_rows - 1);
+
+            // Draw new line on waterfall canvas
+            this.rowToImageData(bins);
+            this.ctx_wf.putImageData(this.imagedata, 0, 0);
+        }
     }
 
     // Always copy the waterfall to the main canvas
@@ -1102,6 +1226,16 @@ Spectrum.prototype.resize = function() {
         this.axes.height = this.spectrumHeight;
         this.updateAxes();
     }
+    // Keep backup waterfall canvas in sync if present
+    try {
+        if (this._wf_backup) {
+            if (this._wf_backup.width != this.wf.width || this._wf_backup.height != this.wf.height) {
+                this._wf_backup.width = this.wf.width;
+                this._wf_backup.height = this.wf.height;
+                if (this._ctx_wf_backup) this._ctx_wf_backup = this._wf_backup.getContext('2d');
+            }
+        }
+    } catch (e) { }
     this.saveSettings();
 }
 
@@ -1233,7 +1367,7 @@ Spectrum.prototype.setCenterHz = function(hz) {
             if (hz > maxCenter) hz = maxCenter;
         }
     }
-    console.log("spectrum.setCenterHz: ", hz);
+    //console.log("spectrum.setCenterHz: ", hz);
     this.centerHz = hz;
     this.updateAxes();
     this.saveSettings();
