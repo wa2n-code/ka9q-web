@@ -1374,6 +1374,13 @@ Spectrum.prototype.setCenterHz = function(hz) {
 }
 
 Spectrum.prototype.setSpanHz = function(hz) {
+    // Remember previous span and visibility of tuned frequency so we can detect
+    // zoom-in events that push the tuned frequency off-screen.
+    const prevSpan = (typeof this.spanHz === 'number') ? this.spanHz : 0;
+    const prevStart = this.centerHz - (prevSpan / 2);
+    const prevEnd = this.centerHz + (prevSpan / 2);
+    const wasVisible = (typeof this.frequency === 'number') && (this.frequency >= prevStart && this.frequency <= prevEnd);
+
     // Clamp span to available sample rate if known, and adjust center if needed
     if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
         const maxSpan = this.input_samprate; // cannot exceed sample rate
@@ -1394,6 +1401,26 @@ Spectrum.prototype.setSpanHz = function(hz) {
         if (this.centerHz < minCenter) this.centerHz = minCenter;
         if (this.centerHz > maxCenter) this.centerHz = maxCenter;
     }
+    // If this was a zoom-in (span shrank) and the tuned frequency was visible
+    // before but is now outside the new window, request the backend to center
+    // the zoom on the tuned frequency so it comes back into view.
+    try {
+        const zoomIn = (prevSpan > 0) && (this.spanHz < prevSpan);
+        if (zoomIn && wasVisible && typeof this.frequency === 'number') {
+            const newStart = this.centerHz - (this.spanHz / 2);
+            const newEnd = this.centerHz + (this.spanHz / 2);
+            if (this.frequency < newStart || this.frequency > newEnd) {
+                // Optionally, we could update the center locally for immediate UI feedback:
+                // this.setCenterHz(this.frequency);
+                if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('setSpanHz: zoom-center detection failed', e);
+    }
+
     this.updateAxes();
     this.saveSettings();
 }
