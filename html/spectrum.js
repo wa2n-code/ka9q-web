@@ -243,16 +243,13 @@ function Spectrum(id, options) {
                     // to bias alignment in the direction the user is moving.
                     const hzPerWfBin = (spectrum.spanHz && spectrum.wf && spectrum.wf.width) ? (spectrum.spanHz / spectrum.wf.width) : hzPerPixel;
                     const centerDeltaHz = (spectrum._leftStartCenterHz - spectrum.centerHz);
+                    // Compute raw fractional shift and immediate integer bin shift for preview
                     const rawShift = centerDeltaHz / hzPerWfBin;
                     let binShift;
-                    if (typeof dx === 'number') {
-                        if (dx > 0) binShift = Math.ceil(rawShift);
-                        else if (dx < 0) binShift = Math.floor(rawShift);
-                        else binShift = Math.round(rawShift);
-                    } else {
-                        binShift = Math.round(rawShift);
-                    }
-                    // debug logging removed
+                    if (rawShift > 0) binShift = Math.ceil(rawShift);
+                    else if (rawShift < 0) binShift = Math.floor(rawShift);
+                    else binShift = Math.round(rawShift);
+                    // assign immediate preview integer shift so the cursor/preview matches the waterfall drawing
                     spectrum._wfShiftBins = binShift;
                     // keep an approximate display-pixel value for drawing (not authoritative)
                     try {
@@ -506,36 +503,53 @@ Spectrum.prototype.addWaterfallRow = function(bins) {
         // If left-dragging, shift the existing waterfall horizontally instead of adding a new top row
         if (this._leftDragging) {
                 try {
-                // prefer integer bin shift if available
+                // Live-insert incoming rows into the backup at an x-offset so the backup represents
+                // the waterfall as if it were produced for the left-drag snapshot center. Then draw
+                // the shifted backup into the visible waterfall so the user sees a live waterfall while
+                // panning without committing tuning changes.
                 const w = this.wf.width;
                 const h = this.wf.height;
-                let shiftPx = 0;
-                if (typeof this._wfShiftBins === 'number') {
-                    shiftPx = this._wfShiftBins; // already in waterfall pixels
-                } else {
-                    // fallback: map display pixels to waterfall pixels
-                    const displayShift = Math.round(this._dragShiftPx || 0);
-                    const canvasDisplayWidth = this.ctx.canvas.width || w;
-                    shiftPx = Math.round(displayShift * (w / canvasDisplayWidth));
-                }
+
+                // compute integer bin offset between server center for this incoming row and the left-drag snapshot
+                let serverCenter = (typeof this._lastServerCenterHz === 'number') ? this._lastServerCenterHz : this.centerHz;
+                let leftStart = (typeof this._leftStartCenterHz === 'number') ? this._leftStartCenterHz : this.centerHz;
+                const hzPerWfBin = (this.spanHz && this.wf && this.wf.width) ? (this.spanHz / this.wf.width) : (this.spanHz / this.canvas.width);
+                const centerDeltaHz = (serverCenter - leftStart);
+                // fractional bin offset; bias rounding toward the direction of the shift to
+                // reduce small off-by-one artifacts when the center drifts between frames.
+                const rawBinShift = centerDeltaHz / hzPerWfBin;
+                let binOffset;
+                if (rawBinShift > 0) binOffset = Math.ceil(rawBinShift);
+                else if (rawBinShift < 0) binOffset = Math.floor(rawBinShift);
+                else binOffset = Math.round(rawBinShift);
+
+                // convert bin offset to pixel offset in backup coordinates (1 bin == 1 pixel in wf canvas)
+                let offsetPx = binOffset; // wf canvas width == bins
+
+                // While left-dragging we intentionally do NOT append new rows to the backup.
+                // This avoids painting any new (noisy) pixels during the preview. The backup
+                // image remains frozen as a snapshot taken at drag start and is simply drawn
+                // shifted into the visible waterfall canvas below.
+
+                // Now draw the backup into the live waterfall canvas shifted by the user's current bin shift
+                let shiftPx = (typeof this._wfShiftBins === 'number') ? this._wfShiftBins : Math.round(this._dragShiftPx || 0);
+                // clamp shiftPx to [-w, w]
+                if (shiftPx > w) shiftPx = w;
+                if (shiftPx < -w) shiftPx = -w;
 
                 if (shiftPx > 0) {
                     const s = Math.min(shiftPx, w);
-                    // clear left strip (newly exposed area) and draw remaining content shifted right from backup
                     this.ctx_wf.fillStyle = 'black';
                     this.ctx_wf.fillRect(0, 0, s, h);
                     this.ctx_wf.drawImage(this._wf_backup, 0, 0, w - s, h, s, 0, w - s, h);
                 } else if (shiftPx < 0) {
                     const s = Math.min(Math.abs(shiftPx), w);
-                    // clear right strip and draw remaining content shifted left from backup
                     this.ctx_wf.fillStyle = 'black';
                     this.ctx_wf.fillRect(w - s, 0, s, h);
                     this.ctx_wf.drawImage(this._wf_backup, s, 0, w - s, h, 0, 0, w - s, h);
                 } else {
-                    // no shift: copy backup
                     this.ctx_wf.drawImage(this._wf_backup, 0, 0);
                 }
-                // Do not add a new row while dragging
             } catch (err) {
                 // fallback to normal behavior if something fails
                 console.warn('Waterfall drag shift failed, falling back to normal add row', err);

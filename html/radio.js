@@ -231,8 +231,15 @@
               calcFrequencies();
               spectrum.setLowHz(lowHz);
               spectrum.setHighHz(highHz);
-              //console.log("[on_ws_msg] Spectrum updated: centerHz=",centerHz," frequencyHz=",frequencyHz);
-              spectrum.setCenterHz(centerHz);
+              // record the server-provided center so the UI can align incoming waterfall rows
+              try {
+                spectrum._lastServerCenterHz = centerHz;
+              } catch (e) {}
+              // If the user is left-dragging (previewing a transient center), avoid stomping the
+              // spectrum's transient center with the server center; otherwise apply normally.
+              if (!spectrum._leftDragging) {
+                spectrum.setCenterHz(centerHz);
+              }
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
