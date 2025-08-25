@@ -7,10 +7,16 @@
            <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
            <label for="cksbFrequency">Switch Modes by Frequency</label>
         </div>
-        <div style="margin-top: 5px;">
-           <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
-           <label for="ckonlyAutoscaleButton">Autoscale, manual only with button press</label>
-        </div>
+            <div style="margin-top: 5px; display:flex; align-items:center; gap:23px;">
+                <div>
+                   <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
+                   <label for="ckonlyAutoscaleButton">Autoscale, manual only</label>
+                </div>
+                <div>
+                   <input type="checkbox" id="ckShowBandEdges" name="ckShowBandEdges" title="Show or hide ham band edge markers" onchange="setShowBandEdges(this.checked)">
+                   <label for="ckShowBandEdges">Show Band Edges</label>
+                </div>
+            </div>
         <div style="margin-top: 5px;">
            <input type="checkbox" id="ckAnalogSMeter" name="ckAnalogSMeter" onchange="setAnalogMeterVisible(this.checked)" title="Show or hide the analog S meter">
            <label for="ckAnalogSMeter">Enable Analog S Meter</label>
@@ -60,3 +66,4 @@
       </div>
      </form>
 </div>
+   <!-- Script for Show Band Edges moved to radio.js: setShowBandEdges, persistence and initialization are handled centrally in radio.js -->

@@ -93,6 +93,21 @@ function Spectrum(id, options) {
     this.cursor_step = 1000;
     this.cursor_freq = 10000000;
 
+    // Show band edges by default; actual default/value comes from global enableBandEdges set by radio.js
+    this.showBandEdges = false;
+    try {
+        if (typeof window.enableBandEdges !== 'undefined') {
+            this.showBandEdges = !!window.enableBandEdges;
+        } else {
+            // backward compatibility: fall back to previous localStorage key
+            var _v = localStorage.getItem('showBandEdges');
+            if (_v === '0' || _v === 'false') this.showBandEdges = false;
+            else if (_v === '1' || _v === 'true') this.showBandEdges = true;
+        }
+    } catch (e) {
+        // ignore storage errors and keep default
+    }
+
     this.radio_pointer = undefined;
 
     // Trigger first render
@@ -929,6 +944,9 @@ Spectrum.prototype.updateAxes = function() {
     this.start_freq = this.centerHz - (this.spanHz / 2);
     var hz_per_pixel = this.spanHz / width;
 
+    // Band edges labels are provided by Spectrum.prototype.getHamBandEdges()
+    // which returns an array of objects: { hz: <number>, label: <string> }
+
     // Draw axes
     this.ctx_axes.font = "12px sans-serif";
     this.ctx_axes.fillStyle = "white";
@@ -1014,6 +1032,7 @@ Spectrum.prototype.updateAxes = function() {
     // The variable inc determines the frequency spacing between vertical grid lines and frequency labels on the spectrum display
     var freq=this.start_freq-(this.start_freq%inc); // aligns the first frequency grid line to the nearest lower multiple of inc.
     var text;
+    var regularGridDrawn = false;
     while(freq<=this.highHz) {
         this.ctx_axes.textAlign = "center";
         var x = (freq-this.start_freq)/hz_per_pixel;
@@ -1025,7 +1044,49 @@ Spectrum.prototype.updateAxes = function() {
         this.ctx_axes.lineTo(x, height);
         this.ctx_axes.strokeStyle = "rgba(200, 200, 200, 0.30)";
         this.ctx_axes.stroke();
+        regularGridDrawn = true;
         freq=freq+inc;
+    }
+
+    // Draw ham band edge markers in bright green if enabled.
+    if (this.showBandEdges) {
+        try {
+            var bands = this.getHamBands();
+            var anyEdgeDrawn = false;
+            // First draw vertical lines for all band edges that are in view
+            for (var bi = 0; bi < bands.length; bi++) {
+                var b = bands[bi];
+                if (b.highHz < this.start_freq || b.lowHz > this.highHz) continue;
+                // left edge
+                var lx = (b.lowHz - this.start_freq) / hz_per_pixel;
+                var rx = (b.highHz - this.start_freq) / hz_per_pixel;
+                this.ctx_axes.beginPath();
+                this.ctx_axes.moveTo(lx, 0);
+                this.ctx_axes.lineTo(lx, height);
+                this.ctx_axes.moveTo(rx, 0);
+                this.ctx_axes.lineTo(rx, height);
+                this.ctx_axes.strokeStyle = "rgba(0, 255, 0, 1.0)"; // bright green
+                this.ctx_axes.lineWidth = 1.2;
+                this.ctx_axes.stroke();
+                anyEdgeDrawn = true;
+            }
+            // Now draw one label per band (centered) for bands overlapping view
+            for (var bi2 = 0; bi2 < bands.length; bi2++) {
+                var bb = bands[bi2];
+                if (bb.highHz < this.start_freq || bb.lowHz > this.highHz) continue;
+                var centerHz = Math.max(bb.lowHz, this.start_freq) + (Math.min(bb.highHz, this.highHz) - Math.max(bb.lowHz, this.start_freq)) / 2;
+                var cx = (centerHz - this.start_freq) / hz_per_pixel;
+                this.ctx_axes.fillStyle = "#00FF00";
+                this.ctx_axes.textAlign = "center";
+                var bandLabelY = (typeof freqLabelBottom === 'number') ? (freqLabelBottom + 4) : 16;
+                this.ctx_axes.fillText(bb.label, cx, bandLabelY);
+            }
+            // Reset strokeStyle/lineWidth to defaults
+            this.ctx_axes.strokeStyle = "rgba(200, 200, 200, 0.30)";
+            this.ctx_axes.lineWidth = 1;
+        } catch (e) {
+            console.warn('Failed to draw ham band edges', e);
+        }
     }
 }
 
@@ -2300,4 +2361,42 @@ Spectrum.prototype.getExportSuffix = function() {
     return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
 };
 
+// Returns an array of band edge objects { hz: <Number>, label: <String> }
+// Labels use common ham band wavelength names (e.g., "160m", "80m", "60m", ...)
+Spectrum.prototype.getHamBandEdges = function() {
+    // List of edges with representative label for the band containing that edge.
+    // The label chosen corresponds to the commonly used wavelength band name.
+    var edges = [
+        { mhz: 1.8, label: '160m' }, { mhz: 2.0, label: '160m' },
+        { mhz: 3.5, label: '80m' },  { mhz: 4.0, label: '80m' },
+        { mhz: 5.0, label: '60m' },  { mhz: 5.4, label: '60m' },
+        { mhz: 7.0, label: '40m' },  { mhz: 7.30, label: '40m' },
+        { mhz: 10.1, label: '30m' }, { mhz: 10.15, label: '30m' },
+        { mhz: 14.0, label: '20m' }, { mhz: 14.35, label: '20m' },
+        { mhz: 18.068, label: '17m' }, { mhz: 18.168, label: '17m' },
+        { mhz: 21.0, label: '15m' }, { mhz: 21.45, label: '15m' },
+        { mhz: 24.89, label: '12m' }, { mhz: 24.99, label: '12m' },
+        { mhz: 28.0, label: '10m' }, { mhz: 29.7, label: '10m' },
+        { mhz: 50.0, label: '6m' }, { mhz: 54.0, label: '6m' }
+    ];
+    return edges.map(function(e) { return { hz: e.mhz * 1e6, label: e.label }; });
+};
+
+// Return bands as { lowHz, highHz, label } for one-label-per-band rendering
+Spectrum.prototype.getHamBands = function() {
+    var bands_mhz = [
+        { low: 1.8, high: 2.0, label: '160m' },
+        { low: 3.5, high: 4.0, label: '80m' },
+        { low: 5.0, high: 5.4, label: '60m' },
+        { low: 7.0, high: 7.30, label: '40m' },
+        { low: 10.1, high: 10.15, label: '30m' },
+        { low: 14.0, high: 14.35, label: '20m' },
+        { low: 18.068, high: 18.168, label: '17m' },
+        { low: 21.0, high: 21.45, label: '15m' },
+        { low: 24.89, high: 24.99, label: '12m' },
+        { low: 28.0, high: 29.7, label: '10m' },
+        { low: 50.0, high: 54.0, label: '6m' }
+    ];
+    return bands_mhz.map(function(b) { return { lowHz: b.low * 1e6, highHz: b.high * 1e6, label: b.label }; });
+};
 

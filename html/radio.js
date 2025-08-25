@@ -57,6 +57,7 @@
       var switchModesByFrequency = false;
       var onlyAutoscaleByButton = false;
       var enableAnalogSMeter = false;
+      var enableBandEdges = false;
 
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
@@ -1254,6 +1255,7 @@ function saveSettings() {
   localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
+  localStorage.setItem("enableBandEdges", enableBandEdges);
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -1303,9 +1305,12 @@ function setDefaultSettings() {
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
   document.getElementById("ckonlyAutoscaleButton").checked = false;
-  enableAnalogSMeter = false; // Default to digital S-Meter
-  document.getElementById("ckAnalogSMeter").checked = false;
+  enableAnalogSMeter = true; // Default to analog S-Meter on
+  document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the default setting
+  enableBandEdges = false; // Default to not show band edges
+  var beEl = document.getElementById('ckShowBandEdges');
+  if (beEl) beEl.checked = enableBandEdges;
   const MEMORY_KEY = 'frequency_memories';
   let memories = Array(20).fill("");
   localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
@@ -1316,7 +1321,7 @@ function setDefaultSettings() {
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 26) {
+ if ((localStorage.length == 0) || localStorage.length != 27) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1364,6 +1369,15 @@ function loadSettings() {
   enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
   document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
+  // Band edges persistence: mirror analog S-meter behavior
+  enableBandEdges = (localStorage.getItem("enableBandEdges") == "true");
+  var beEl = document.getElementById('ckShowBandEdges');
+  if (beEl) beEl.checked = enableBandEdges;
+  // apply to spectrum if present
+  if (typeof spectrum !== 'undefined' && spectrum) {
+      spectrum.showBandEdges = enableBandEdges;
+      spectrum.updateAxes();
+  }
   //console.log("Loaded volume settings: ",parseFloat(localStorage.getItem("volume_control")));
   var vc = parseFloat(localStorage.getItem("volume_control"));
   document.getElementById("volume_control").value = vc;
@@ -1450,6 +1464,25 @@ function setAnalogMeterVisible(visible) {
     }
     enableAnalogSMeter = visible; // Update the global variable
     saveSettings();
+}
+
+// Ensure a global setShowBandEdges exists so inline onchange handlers won't fail
+function setShowBandEdges(checked) {
+  try {
+    window.enableBandEdges = !!checked;
+  } catch (e) {}
+  try {
+    enableBandEdges = !!checked;
+  } catch (e) {}
+  try {
+    if (typeof spectrum !== 'undefined' && spectrum) {
+      spectrum.showBandEdges = !!checked;
+      spectrum.updateAxes();
+      if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+    }
+  } catch (e) {}
+  try { localStorage.setItem('enableBandEdges', checked ? 'true' : 'false'); } catch (e) {}
+  try { if (typeof saveSettings === 'function') saveSettings(); } catch (e) {}
 }
 
 // --- Frequency Memories logic: must be defined before use ---
