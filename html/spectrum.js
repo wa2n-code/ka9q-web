@@ -2361,27 +2361,6 @@ Spectrum.prototype.getExportSuffix = function() {
     return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
 };
 
-// Returns an array of band edge objects { hz: <Number>, label: <String> }
-// Labels use common ham band wavelength names (e.g., "160m", "80m", "60m", ...)
-Spectrum.prototype.getHamBandEdges = function() {
-    // List of edges with representative label for the band containing that edge.
-    // The label chosen corresponds to the commonly used wavelength band name.
-    var edges = [
-        { mhz: 1.8, label: '160m' }, { mhz: 2.0, label: '160m' },
-        { mhz: 3.5, label: '80m' },  { mhz: 4.0, label: '80m' },
-        { mhz: 5.0, label: '60m' },  { mhz: 5.4, label: '60m' },
-        { mhz: 7.0, label: '40m' },  { mhz: 7.30, label: '40m' },
-        { mhz: 10.1, label: '30m' }, { mhz: 10.15, label: '30m' },
-        { mhz: 14.0, label: '20m' }, { mhz: 14.35, label: '20m' },
-        { mhz: 18.068, label: '17m' }, { mhz: 18.168, label: '17m' },
-        { mhz: 21.0, label: '15m' }, { mhz: 21.45, label: '15m' },
-        { mhz: 24.89, label: '12m' }, { mhz: 24.99, label: '12m' },
-        { mhz: 28.0, label: '10m' }, { mhz: 29.7, label: '10m' },
-        { mhz: 50.0, label: '6m' }, { mhz: 54.0, label: '6m' }
-    ];
-    return edges.map(function(e) { return { hz: e.mhz * 1e6, label: e.label }; });
-};
-
 // Return bands as { lowHz, highHz, label } for one-label-per-band rendering
 Spectrum.prototype.getHamBands = function() {
     var bands_mhz = [
