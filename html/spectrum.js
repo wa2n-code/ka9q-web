@@ -1385,11 +1385,19 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // min_db + some bias to darken the waterfall 
         this.wf_max_db = max_db;
-        // Update the waterfall min/max display sliders
-        document.getElementById("waterfall_min").value = this.wf_min_db;
-        document.getElementById("waterfall_max").value = this.wf_max_db;
+    // Update the waterfall min/max display text boxes
+    var wfMinText = document.getElementById("waterfall_min");
+    var wfMaxText = document.getElementById("waterfall_max");
+    if (wfMinText) wfMinText.value = this.wf_min_db;
+    if (wfMaxText) wfMaxText.value = this.wf_max_db;
 
-        //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
+    // Also update the corresponding range input controls so the sliders reflect the new values
+    var wfMinRange = document.getElementById("waterfall_min_range");
+    var wfMaxRange = document.getElementById("waterfall_max_range");
+    if (wfMinRange) wfMinRange.value = this.wf_min_db;
+    if (wfMaxRange) wfMaxRange.value = this.wf_max_db;
+
+    //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
     this.updateAxes();
     this.saveSettings();
