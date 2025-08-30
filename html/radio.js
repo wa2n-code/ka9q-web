@@ -603,6 +603,21 @@
         e.preventDefault();
       }
     });
+ 
+    // Space bar toggles audio (calls audio_start_stop defined in radio.html)
+    // Placed here next to other keyboard handlers for readability.
+    document.addEventListener('keydown', function(e) {
+      // Prefer e.code when available; fall back to e.key for older browsers
+      if (e.code === 'Space' || e.key === ' ') {
+        // Prevent default scrolling when Space is pressed
+        e.preventDefault();
+        try {
+          audio_start_stop();
+        } catch (err) {
+          console.error('audio_start_stop() not available:', err);
+        }
+      }
+    }, false);
 
     // ...existing code...
 
@@ -1877,7 +1892,7 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             dialogPlaceholder.innerHTML = data;
             
-            // Setup overlay buttons if spectrum exists
+            // Setup the overlay buttons if spectrum exists
             if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
                 spectrum.setupOverlayButtons();
             }
