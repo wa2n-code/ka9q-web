@@ -604,12 +604,52 @@
       }
     });
  
+    // Allow 'f' to toggle spectrum fullscreen even when the waterfall/canvas does not have focus.
+    // If the waterfall canvas already has focus, Spectrum.prototype.onKeypress will handle 'f'.
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'f' || e.code === 'KeyF') {
+        try {
+          const waterfall = document.getElementById('waterfall');
+          const active = document.activeElement;
+          // Only handle here when the waterfall does NOT have focus
+          if (!(waterfall && active === waterfall)) {
+            if (typeof spectrum !== 'undefined' && spectrum) {
+              spectrum.toggleFullscreen();
+              e.preventDefault();
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+    }, false);
+
+    // When an element enters fullscreen, ensure the waterfall canvas receives keyboard focus
+    // so subsequent keypresses are handled by Spectrum.prototype.onKeypress.
+    document.addEventListener('fullscreenchange', function() {
+      try {
+        const wf = document.getElementById('waterfall');
+        if (document.fullscreenElement === wf) {
+          // give it focus so it receives keyboard events
+          wf.focus();
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+
     // Space bar toggles audio (calls audio_start_stop defined in radio.html)
     // Placed here next to other keyboard handlers for readability.
     document.addEventListener('keydown', function(e) {
       // Prefer e.code when available; fall back to e.key for older browsers
       if (e.code === 'Space' || e.key === ' ') {
-        // Prevent default scrolling when Space is pressed
+        // If the spectrum is fullscreen, prevent page scrolling but do not toggle audio here.
+        // Let Spectrum.prototype.onKeypress handle keys while fullscreen.
+        if (typeof spectrum !== 'undefined' && spectrum && spectrum.fullscreen) {
+          e.preventDefault();
+          return;
+        }
+        // Prevent default scrolling when Space is pressed and we're handling it
         e.preventDefault();
         try {
           audio_start_stop();

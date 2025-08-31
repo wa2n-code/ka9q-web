@@ -1601,6 +1601,16 @@ Spectrum.prototype.toggleFullscreen = function() {
             document.msExitFullscreen();
         }
         this.fullscreen = false;
+        // If the user exits fullscreen and the spectrum was paused, resume it so
+        // the display updates continue (user likely wants to return to live view).
+        try {
+            if (this.paused) {
+                this.togglePaused();
+            }
+        } catch (e) {
+            // don't let errors prevent fullscreen exit
+            console.warn('Failed to auto-resume after exiting fullscreen', e);
+        }
     }
 }
 
@@ -1614,6 +1624,12 @@ Spectrum.prototype.forceAutoscale = function(autoScaleCounterStart,waitToAutosca
 }
 
 Spectrum.prototype.onKeypress = function(e) {
+    // Allow 'f' to toggle fullscreen at any time. All other keys should only respond
+    // when the spectrum is in fullscreen mode to avoid accidental key actions.
+    if (e.key !== "f" && !this.fullscreen) {
+        return;
+    }
+
     if (e.key == " ") {
         this.togglePaused();
     } else if (e.key == "f") {
@@ -1650,10 +1666,17 @@ Spectrum.prototype.onKeypress = function(e) {
         saveSettings();
     } else if (e.key == "i") {
         ws.send("Z:+:"+document.getElementById('freq').value);
-    saveSettings();
+        saveSettings();
     } else if (e.key == "o") {
         ws.send("Z:-:"+document.getElementById('freq').value);
         saveSettings();
+    } else if (e.key == "a") {
+        // In fullscreen, 'a' triggers autoscale as if the Autoscale button was pressed
+        try {
+            this.forceAutoscale(100, false);
+        } catch (err) {
+            console.warn('Autoscale failed from keypress', err);
+        }
     }
 }
 

@@ -350,25 +350,28 @@
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
         <li>The Channel Memory box saves / restores up to 50 current frequencies and modes with descriptions.</li>
+        <li> Space bar toggles audio (when not in full screen mode)</li>
+        <li>'f' to toggle fullscreen mode on and off</li>
     </ul>
-   <p><b>If the spectrum display/waterfall is focused, keyboard shortcuts are active:</b></p>
+   <p><b>If the spectrum display/waterfall is full screen, these keyboard shortcuts are active:</b></p>
    <ul>
-      <li>Press space to toggle pause/run mode</li>
-      <li>'f' to toggle fullscreen mode</li>
-      <li>'c' to step through the colormap options</li>
-      <li>up/down arrow shifts the spectrum trace up/down</li>
-      <li>left/right arrow increases/decreases amplitude range</li>
-      <li>'s'/'w' to increase/decrease size of spectrum display</li>
-      <li>'+'/'-' to increase/decrease FFT averaging</li>
-      <li>'m' to toggle max hold mode</li>
-      <li>'z' to center spectrum</li>
-      <li>'i' to zoom in spectrum</li>
-      <li>'o' to zoom out spectrum</li>
+        <li>Press space to toggle pause/run mode (only when focused on the spectrum display, otherwise audio is toggled)</li>
+        <li>'f' to toggle fullscreen mode on and off</li>
+        <li>'c' to step through the colormap options</li>
+        <li>up/down arrow shifts the spectrum trace up/down</li>
+        <li>left/right arrow increases/decreases amplitude range</li>
+        <li>'s'/'w' to increase/decrease size of spectrum display</li>
+        <li>'+'/'-' to increase/decrease FFT averaging</li>
+        <li>'m' to toggle max hold mode</li>
+        <li>'z' to center spectrum</li>f
+        <li>'i' to zoom in spectrum</li>
+        <li>'o' to zoom out spectrum</li>
+        <li>'a' to autoscale</li>
    </ul>    
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge marker option</li>
+            <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge markers, space toggles audio</li>
             <li>v2.75: Overlay trace load aligns spectrum, spectrum slides to follow mouse at ends, new keyboard shortcuts, up/down input boxes for spectrum floor and fft averaging</li>
             <li>v2.74: Added export to disk of max, min & current spectrum with load from disk to new trace and clear buttons, Freeze checkbox, Solar conditions and link</li>
             <li>v2.73: Increased maximum volume by 12 dB, save volume level</li>
