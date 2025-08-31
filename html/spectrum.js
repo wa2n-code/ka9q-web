@@ -1176,9 +1176,10 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
                 this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
             }
             else{ 
-                this.measureMinMax(data);
-                //console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1),"getNewMinMax=", getNewMinMax);
-                this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                if(this.measureMinMax(data) == true) {
+                    //console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1),"getNewMinMax=", getNewMinMax);
+                    this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                }
             }
         }
         this.drawSpectrum(data);
@@ -1201,6 +1202,16 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
 Spectrum.prototype.measureMinMax = function(data) {
             var range_scale_increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
+            // Ensure currentFreqBin is valid for the current zoom/bin selection
+            if (!Number.isFinite(currentFreqBin) || typeof this.nbins !== 'number' || this.nbins <= 0 ||
+                currentFreqBin < 0 || currentFreqBin >= this.nbins) {
+                //console.log('measureMinMax: currentFreqBin out of range - return early', {
+                //    currentFreqBin: currentFreqBin,
+                //    nbins: this.nbins,
+                //    frequency: this.frequency
+                //});
+                return false;
+            }
             var binsToBracket = 1600;  // look at the whole spectrum   // Math.floor(this.bins / this.spanHz * frequencyToBracket);
             var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
             var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
@@ -1270,6 +1281,7 @@ Spectrum.prototype.measureMinMax = function(data) {
             if(this.maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 this.maximum = minimum_spectral_gain;
             //console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum.toFixed(1), " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
+            return true;
 }
 
 Spectrum.prototype.updateSpectrumRatio = function() {
@@ -1497,6 +1509,7 @@ Spectrum.prototype.setSpanHz = function(hz) {
                 // this.setCenterHz(this.frequency);
                 if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
                     ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+                    //console.log("Zoomed center on frequency: " + this.frequency);
                 }
             }
         }
