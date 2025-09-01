@@ -117,6 +117,9 @@ int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connec
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
 
+/* sleep time for spectrum polling and related retries (microseconds) */
+useconds_t spectrum_poll_us = 100000; // default 100 ms
+
 #define MAX_BINS 1620
 
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
@@ -1107,7 +1110,7 @@ void stop_spectrum_stream(struct session *sp) {
       perror("command send: Spectrum");
     }
     pthread_mutex_unlock(&ctl_mutex);
-    usleep(100000);
+    usleep(spectrum_poll_us);
   }
 }
 
@@ -1459,8 +1462,8 @@ void *spectrum_thread(void *arg) {
     control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
     pthread_mutex_unlock(&sp->spectrum_mutex);
     control_poll(sp);
-    if(usleep(100000) !=0) {
-      perror("spectrum_thread: usleep(100000)");
+    if(usleep(spectrum_poll_us) != 0) {
+      perror("spectrum_thread: usleep(spectrum_poll_us)");
     }
   }
   //fprintf(stderr,"%s: %d EXIT\n",__FUNCTION__,sp->ssrc);
