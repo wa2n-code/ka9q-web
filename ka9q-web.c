@@ -468,6 +468,19 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         control_set_mode(sp,&tmp[2]);
         control_poll(sp);
         break;
+      case 'R':
+      case 'r':
+        /* Set spectrum poll interval. Client sends milliseconds; server stores microseconds */
+        {
+          char *endptr;
+          long v = strtol(&tmp[2], &endptr, 10);
+          if (&tmp[2] != endptr && v > 0) {
+            spectrum_poll_us = (useconds_t)(v * 1000L);
+            if (verbose)
+              fprintf(stderr, "%s: set spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)spectrum_poll_us, v);
+          }
+        }
+        break;
       case 'Z':
       case 'z':
         token=strtok(NULL,":");

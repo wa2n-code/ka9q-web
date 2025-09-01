@@ -15,8 +15,10 @@
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
-      let binCount = 1620;
-      let spanHz = binCount * binWidthHz;
+  let binCount = 1620;
+  let spanHz = binCount * binWidthHz;
+  // Spectrum poll interval in milliseconds (client-side default)
+  var spectrumPoll = 100;
       var counter = 0;
       var filter_low = -5000;
       var filter_high = 5000;
@@ -124,6 +126,28 @@
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         fetchZoomTableSize(); // Fetch and store the zoom table size
+      }
+      
+      // Send a request to the server to change the spectrum poll interval (milliseconds).
+      function sendSpectrumPoll() {
+        const elm = document.getElementById('spectrumPollInput');
+        if (!elm) return;
+        const v = parseInt(elm.value, 10);
+        if (isNaN(v) || v <= 0) {
+          console.warn('Invalid spectrum poll value', elm.value);
+          return;
+        }
+        spectrumPoll = v;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send('r:' + v.toString());
+            console.log('Sent spectrum poll request:', v);
+          } catch (e) {
+            console.error('Failed to send spectrum poll:', e);
+          }
+        } else {
+          console.warn('WebSocket not open, cannot send spectrum poll');
+        }
       }
       
       function on_ws_close(evt) {
