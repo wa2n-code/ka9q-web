@@ -15,10 +15,10 @@
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
-  let binCount = 1620;
-  let spanHz = binCount * binWidthHz;
-  // Spectrum poll interval in milliseconds (client-side default)
-  var spectrumPoll = 100;
+      let binCount = 1620;
+      let spanHz = binCount * binWidthHz;
+      // Spectrum poll interval in milliseconds (client-side default)
+      var spectrumPoll = 100;
       var counter = 0;
       var filter_low = -5000;
       var filter_high = 5000;
@@ -131,7 +131,7 @@
           setFilterEdgesForMode(target_preset);
         } catch (e) {}
   // Attach listeners so spinner/caret presses auto-send
-  try { attachEdgeInputListeners(); } catch (e) {}
+      try { attachEdgeInputListeners(); } catch (e) {}
       }
       
       // Send a request to the server to change the spectrum poll interval (milliseconds).
@@ -659,8 +659,8 @@
         e.preventDefault();
       }
     });
- 
-    // Allow 'f' to toggle spectrum fullscreen even when the waterfall/canvas does not have focus.
+
+     // Allow 'f' to toggle spectrum fullscreen even when the waterfall/canvas does not have focus.
     // If the waterfall canvas already has focus, Spectrum.prototype.onKeypress will handle 'f'.
     document.addEventListener('keydown', function(e) {
       if (e.key === 'f' || e.code === 'KeyF') {
@@ -817,8 +817,8 @@
       }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
-  // Update filter edge inputs to sensible defaults for this mode
-  setFilterEdgesForMode(selected_mode);
+    // Update filter edge inputs to sensible defaults for this mode
+    setFilterEdgesForMode(selected_mode);
   }
 
     function selectMode(mode) {
@@ -856,8 +856,8 @@
           highEl.value = 5000;
           break;
         case 'fm':
-          lowEl.value = -6000;
-          highEl.value = 6000;
+          lowEl.value = -8000;
+          highEl.value = 8000;
           break;
         case 'iq':
           lowEl.value = -5000;
@@ -870,8 +870,8 @@
       // re-enable auto-send after programmatic change
       suppressEdgeAutoSend = false;
   // programmatic change isn't manual typing
-  edgeManualDirty = false;
-  updateEdgeButtonState();
+      edgeManualDirty = false;
+      updateEdgeButtonState();
     }
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
@@ -2128,7 +2128,7 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             dialogPlaceholder.innerHTML = data;
             
-            // Setup the overlay buttons if spectrum exists
+            // Setup overlay buttons if spectrum exists
             if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
                 spectrum.setupOverlayButtons();
             }
@@ -2387,3 +2387,105 @@ window.addEventListener('DOMContentLoaded', function() {
     fetchAndDisplayWWVSolarData();
     setInterval(fetchAndDisplayWWVSolarData, 60 * 60 * 1000);
 });
+
+(function() {
+  function getCurrentDemodMode() {
+    // Prefer the explicit #mode select value.
+    try {
+      var primary = document.getElementById('mode');
+      if (primary && typeof primary.value !== 'undefined') return String(primary.value).toLowerCase();
+    } catch (e) {
+      // fall through to other checks
+    }
+    // If a global variable 'mode' exists and is a string, return it.
+    if (typeof mode === 'string' && mode) return mode.toLowerCase();
+    // If currentMode is a string, return it.
+    if (typeof currentMode === 'string' && currentMode) return currentMode.toLowerCase();
+    var ids = ['mode_select','demod','preset','demodulator'];
+    for (var i = 0; i < ids.length; i++){
+      var el = document.getElementById(ids[i]);
+      if (el) {
+        if (typeof el.value !== 'undefined') return String(el.value).toLowerCase();
+        // If the element itself was passed around as a global, try returning its id
+        if (typeof el.id !== 'undefined') return String(el.id).toLowerCase();
+      }
+    }
+    return '';
+  }
+
+  function isFMMode(modeStr) {
+    if (!modeStr) return false;
+    modeStr = String(modeStr).toLowerCase();
+    return modeStr.indexOf('fm') !== -1 || modeStr.indexOf('wfm') !== -1 || modeStr.indexOf('efm') !== -1;
+  }
+
+  function updateFilterEdgeLimits() {
+    var modeStr = getCurrentDemodMode();
+    var limit = isFMMode(modeStr) ? 8000 : 6000;
+    var low = document.getElementById('filterLowInput');
+    var high = document.getElementById('filterHighInput');
+    console.log('Updating filter edge limits for mode:', modeStr, 'limit:', limit);
+    if (low) {
+      low.min = -limit;
+      low.max = limit;
+      // if current value is out of range, clamp it visually
+      var v = parseFloat(low.value);
+      if (!isNaN(v)) {
+        if (v < -limit) low.value = -limit;
+        if (v > limit) low.value = limit;
+      }
+    }
+    if (high) {
+      high.min = -limit;
+      high.max = limit;
+      var w = parseFloat(high.value);
+      if (!isNaN(w)) {
+        if (w < -limit) high.value = -limit;
+        if (w > limit) high.value = limit;
+      }
+    }
+  }
+
+  function clampValue(v, min, max) {
+    var n = parseFloat(v);
+    if (isNaN(n)) return 0;
+    if (n < min) return min;
+    if (n > max) return max;
+    return n;
+  }
+
+  // Override or define sendFilterEdges to enforce limits before sending to server
+  window.sendFilterEdges = function() {
+    var lowEl = document.getElementById('filterLowInput');
+    var highEl = document.getElementById('filterHighInput');
+    if (!lowEl || !highEl) return;
+    updateFilterEdgeLimits();
+    var modeStr = getCurrentDemodMode();
+    var limit = isFMMode(modeStr) ? 8000 : 6000;
+    var low = clampValue(lowEl.value, -limit, limit);
+    var high = clampValue(highEl.value, -limit, limit);
+    // ensure low <= high if that's desired; otherwise leave as-is
+    lowEl.value = low;
+    highEl.value = high;
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('e:' + low + ':' + high);
+      }
+    } catch (err) {
+      console.error('sendFilterEdges: websocket send failed', err);
+    }
+  };
+
+  // Attach listeners to update limits when mode selection changes
+  document.addEventListener('DOMContentLoaded', function() {
+    updateFilterEdgeLimits();
+    var ids = ['mode','mode_select','demod','preset','demodulator'];
+    ids.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('change', updateFilterEdgeLimits);
+    });
+    // also update when zoom or other UI may change mode state
+    // expose update function globally for debugging
+    window.updateFilterEdgeLimits = updateFilterEdgeLimits;
+  });
+})();
