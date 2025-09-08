@@ -55,11 +55,10 @@
    <div style="font-size:12px;margin-top:5px; display:flex; align-items:center; gap:8px;">
     <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset Settings</button>
     <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; width:74px;" title="Write Info and/or start/stop periodic info export">Write Info</button>
-    <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:4px;" title="Enter minutes for periodic Write Info. 0 = off.">
-    <!-- Spectrum poll input (milliseconds) and send button -->
-    <label for="spectrumPollInput" style="font-size:12px; margin-left:8px;">Poll ms:</label>
-    <input type="number" id="spectrumPollInput" min="1" value="100" style="width:60px; font-size:12px;" title="Spectrum poll interval in milliseconds">
-    <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 6px; height:24px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Set Poll</button>
+   <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:4px;" title="Enter minutes for periodic Write Info. 0 = off.">
+   <!-- Spectrum poll input (milliseconds) and send button -->
+   <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 6px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Set Poll</button>
+   <input type="number" id="spectrumPollInput" min="30" max="200" step="1" value="100" style="width:44px; font-size:12px; margin-left:4px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
    </div>
         <div style="font-size:12px;margin-top:5px">
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" id="ExportMax" title="Export Max Hold as CSV File" onclick="spectrum.exportMaxHoldCSV()">Export Max</button>
