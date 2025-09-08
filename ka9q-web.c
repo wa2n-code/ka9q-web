@@ -89,6 +89,7 @@ int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
 extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
+extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -432,6 +433,17 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           sp->audio_active=true;
         } else if(strcmp(&tmp[2],"STOP")==0) {
           sp->audio_active=false;
+        }
+        break;
+      case 'e':
+      case 'E':
+        {
+          // Expect format: e:<low>:<high>
+          char *low = strtok(NULL, ":");
+          char *high = strtok(NULL, ":");
+          if (low != NULL && high != NULL) {
+            control_set_filter_edges(sp, low, high);
+          }
         }
         break;
       case 'F':
@@ -1040,6 +1052,40 @@ void control_set_frequency(struct session *sp,char *str) {
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
+}
+
+/* Send filter edge settings (low and high) to the control socket for this session.
+   low_str and high_str are strings containing values in Hz (or kHz?) - follow same units as client.
+*/
+void control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  float lowf = 0.0f;
+  float highf = 0.0f;
+
+  if (low_str && strlen(low_str) > 0)
+    lowf = strtof(low_str, NULL);
+  if (high_str && strlen(high_str) > 0)
+    highf = strtof(high_str, NULL);
+
+  /* Debug: print the parsed filter edge values and original strings */
+//  fprintf(stderr, "control_set_filter_edges: SSRC=%u low_str='%s' high_str='%s' lowf=%f highf=%f\n",
+//          sp ? sp->ssrc : 0, low_str ? low_str : "", high_str ? high_str : "", lowf, highf);
+
+  *bp++ = CMD; // Command
+  /* Encode LOW_EDGE then HIGH_EDGE as floats */
+  encode_float(&bp, LOW_EDGE, lowf);
+  encode_float(&bp, HIGH_EDGE, highf);
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  encode_eol(&bp);
+
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
+  }
+  pthread_mutex_unlock(&ctl_mutex);
 }
 
 /*

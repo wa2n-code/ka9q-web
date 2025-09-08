@@ -59,8 +59,9 @@
               </div>
               <!-- Row 2: Selector -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
-                <select id="memory_select" title="Select memory channel" style="width: 126px; min-width: 126px; max-width: 120px; padding: 1px 2px;"></select>
-              </div>
+                                <select id="memory_select" title="Select memory channel" style="width: 126px; min-width: 126px; max-width: 120px; padding: 1px 2px;"></select>
+                            </div>
+                              <!-- Row 2b: (Set Edges button moved next to band select to save vertical space) -->
               <!-- Row 3: Description textbox below selector, matching width -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
                 <input id="memory_desc" title="Memory channel description, 20 characters max" type="text" maxlength="20" placeholder="Description" style="width: 120px; min-width: 120px; max-width: 120px; font-size: 13px; margin: 0 auto;" autocomplete="off" />
@@ -118,6 +119,13 @@
                             <option value="user2">USER2</option>
                             <option value="user3">USER3</option>
                         </select>
+                        <!-- Filter edge controls: compact inputs. Tight margins to save space -->
+                        <div style="display: inline-block; margin-left: 0px; vertical-align: middle;">
+                            <!-- Width increased to allow for numeric text + spinner; step set to 100 Hz for caret increments -->
+                            <input id="filterLowInput" type="number" step="100" inputmode="numeric" placeholder="Low" title="Filter low edge (units sent-as-is); arrows change by 100" style="width:8ch; margin-left:2px;" />
+                            <input id="filterHighInput" type="number" step="100" inputmode="numeric" placeholder="High" title="Filter high edge (units sent-as-is); arrows change by 100" style="width:8ch; margin-left:2px;" />
+                            <!-- Set button moved to memories box to save horizontal space -->
+                        </div>
                     </td>
                     <td rowspan=2 colspan=2>
                         <label for="zoom_level">Zoom:</label>
@@ -152,6 +160,7 @@
                         <select name="band" id="band" title="Select Channel.">
                             <option value="" disabled selected hidden>Band</option>
                         </select>
+                            <button id="edge_button" onclick="sendFilterEdges()" title="Send filter low/high edges" style="margin-left:2px; padding:2px 6px; font-size:90%">Edge</button>
                     </td>
                 </tr>
                 <tr>
