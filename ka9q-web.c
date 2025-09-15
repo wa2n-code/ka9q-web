@@ -41,7 +41,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.75";
+const char *webserver_version = "2.76";
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
@@ -89,6 +89,7 @@ int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
 extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
+extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -116,6 +117,9 @@ int verbose = 0;
 int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
+
+/* sleep time for spectrum polling and related retries (microseconds) */
+useconds_t spectrum_poll_us = 100000; // default 100 ms
 
 #define MAX_BINS 1620
 
@@ -319,6 +323,26 @@ static void zoom(struct session *sp, int shift) {
   zoom_to(sp,sp->zoom_index+shift);
 }
 
+/* Clamp center frequency so the visible span stays within [0, fs/2]
+   but do not force the tuned frequency to be inside the visible window. */
+static void adjust_center_within_bounds(struct session *sp) {
+  int64_t span = (int64_t)sp->bin_width * sp->bins;
+  int64_t center_freq = (int64_t)sp->center_frequency;
+  int64_t fs2 = Frontend.samprate / 2;
+  if (span >= (fs2 * 2)) {
+    /* span covers full range; center must be clamped to middle */
+    center_freq = fs2;
+  } else {
+    int64_t half = span / 2;
+    if (center_freq - half < 0) {
+      center_freq = half;
+    } else if (center_freq + half > fs2) {
+      center_freq = fs2 - half;
+    }
+  }
+  sp->center_frequency = (uint32_t)center_freq;
+}
+
 /*
 The `websocket_cb` function is the central callback for handling all WebSocket communication between the web client 
 and the SDR server. It is invoked whenever a message is received from a client or when the connection state changes. 
@@ -411,9 +435,20 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           sp->audio_active=false;
         }
         break;
+      case 'e':
+      case 'E':
+        {
+          // Expect format: e:<low>:<high>
+          char *low = strtok(NULL, ":");
+          char *high = strtok(NULL, ":");
+          if (low != NULL && high != NULL) {
+            control_set_filter_edges(sp, low, high);
+          }
+        }
+        break;
       case 'F':
       case 'f':
-    sp->frequency = strtod(&tmp[2],0) * 1000;
+  sp->frequency = strtod(&tmp[2],0) * 1000;
     int32_t span = sp->bin_width * sp->bins;
     int32_t min_f = sp->center_frequency - (span / 2);
     int32_t max_f = sp->center_frequency + (span / 2);
@@ -445,6 +480,19 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         control_set_mode(sp,&tmp[2]);
         control_poll(sp);
         break;
+      case 'R':
+      case 'r':
+        /* Set spectrum poll interval. Client sends milliseconds; server stores microseconds */
+        {
+          char *endptr;
+          long v = strtol(&tmp[2], &endptr, 10);
+          if (&tmp[2] != endptr && v > 0) {
+            spectrum_poll_us = (useconds_t)(v * 1000L);
+            if (verbose)
+              fprintf(stderr, "%s: set spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)spectrum_poll_us, v);
+          }
+        }
+        break;
       case 'Z':
       case 'z':
         token=strtok(NULL,":");
@@ -459,7 +507,10 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           pthread_mutex_unlock(&sp->spectrum_mutex);
           check_frequency(sp);
         } else if(strcmp(token,"c")==0) {
-          sp->center_frequency=sp->frequency;
+          /* If a center value follows, use it; otherwise do not force the
+             center to the tuned frequency. This allows client panning to
+             move the visible window past the tuned frequency without the
+             server nudging it back into view. */
           token = strtok(NULL,":");
           if (token)
           {
@@ -469,7 +520,16 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
               sp->center_frequency = f;
             }
           }
-          check_frequency(sp);
+       /* Ensure center stays within sample-rate bounds. Do NOT call
+         check_frequency() here because it will move the center to
+         include the tuned frequency; we want client panning to be
+         respected. */
+       adjust_center_within_bounds(sp);
+          /* Immediately request updated spectrum bins for the new center */
+          pthread_mutex_lock(&sp->spectrum_mutex);
+          control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
+          pthread_mutex_unlock(&sp->spectrum_mutex);
+          control_poll(sp);
         } else if (strcmp(token, "SIZE") == 0) { // New command to get zoom table size
             int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
             char response[16];
@@ -980,7 +1040,7 @@ void control_set_frequency(struct session *sp,char *str) {
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
-    sp->frequency = f;
+  sp->frequency = f;
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
@@ -992,6 +1052,40 @@ void control_set_frequency(struct session *sp,char *str) {
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
+}
+
+/* Send filter edge settings (low and high) to the control socket for this session.
+   low_str and high_str are strings containing values in Hz (or kHz?) - follow same units as client.
+*/
+void control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  float lowf = 0.0f;
+  float highf = 0.0f;
+
+  if (low_str && strlen(low_str) > 0)
+    lowf = strtof(low_str, NULL);
+  if (high_str && strlen(high_str) > 0)
+    highf = strtof(high_str, NULL);
+
+  /* Debug: print the parsed filter edge values and original strings */
+//  fprintf(stderr, "control_set_filter_edges: SSRC=%u low_str='%s' high_str='%s' lowf=%f highf=%f\n",
+//          sp ? sp->ssrc : 0, low_str ? low_str : "", high_str ? high_str : "", lowf, highf);
+
+  *bp++ = CMD; // Command
+  /* Encode LOW_EDGE then HIGH_EDGE as floats */
+  encode_float(&bp, LOW_EDGE, lowf);
+  encode_float(&bp, HIGH_EDGE, highf);
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  encode_eol(&bp);
+
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
+  }
+  pthread_mutex_unlock(&ctl_mutex);
 }
 
 /*
@@ -1075,7 +1169,7 @@ void stop_spectrum_stream(struct session *sp) {
       perror("command send: Spectrum");
     }
     pthread_mutex_unlock(&ctl_mutex);
-    usleep(100000);
+    usleep(spectrum_poll_us);
   }
 }
 
@@ -1427,8 +1521,8 @@ void *spectrum_thread(void *arg) {
     control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
     pthread_mutex_unlock(&sp->spectrum_mutex);
     control_poll(sp);
-    if(usleep(100000) !=0) {
-      perror("spectrum_thread: usleep(100000)");
+    if(usleep(spectrum_poll_us) != 0) {
+      perror("spectrum_thread: usleep(spectrum_poll_us)");
     }
   }
   //fprintf(stderr,"%s: %d EXIT\n",__FUNCTION__,sp->ssrc);

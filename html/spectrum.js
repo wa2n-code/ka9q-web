@@ -75,6 +75,15 @@ function Spectrum(id, options) {
     this.wf.height = this.wf_rows;
     this.wf.width = this.wf_size;
     this.ctx_wf = this.wf.getContext("2d");
+    // Backup canvas for shifting operations while dragging
+    this._wf_backup = document.createElement("canvas");
+    this._wf_backup.width = this.wf.width;
+    this._wf_backup.height = this.wf.height;
+    this._ctx_wf_backup = this._wf_backup.getContext('2d');
+
+    // Left-drag state for waterfall shifting
+    this._leftDragging = false;
+    this._dragShiftPx = 0;
 
     this.autoscale = false;
     this.autoscaleWait = 0;
@@ -84,12 +93,28 @@ function Spectrum(id, options) {
     this.cursor_step = 1000;
     this.cursor_freq = 10000000;
 
+    // Show band edges by default; actual default/value comes from global enableBandEdges set by radio.js
+    this.showBandEdges = false;
+    try {
+        if (typeof window.enableBandEdges !== 'undefined') {
+            this.showBandEdges = !!window.enableBandEdges;
+        } else {
+            // backward compatibility: fall back to previous localStorage key
+            var _v = localStorage.getItem('showBandEdges');
+            if (_v === '0' || _v === 'false') this.showBandEdges = false;
+            else if (_v === '1' || _v === 'true') this.showBandEdges = true;
+        }
+    } catch (e) {
+        // ignore storage errors and keep default
+    }
+
     this.radio_pointer = undefined;
 
     // Trigger first render
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+    // debug flag for waterfall shift diagnostics (removed)
     
     // Initialize overlay trace functionality
     this._overlayTrace = null;
@@ -114,6 +139,7 @@ function Spectrum(id, options) {
             if (typeof self.setupOverlayButtons === 'function') {
                 self.setupOverlayButtons();
             }
+            // (Removed legacy listener for 'zoom_center' button - zoom is handled via `radio.js`)
         }, 100); // Small delay to ensure DOM is fully loaded
     });
 
@@ -128,7 +154,41 @@ function Spectrum(id, options) {
     let pendingCenterHz = null;
     let startFreqHz = 0;
     let pendingFreqHz = null;
+    // Left-button drag / click state
+    let leftDown = false;
+    let leftDragStarted = false;
+    let leftStartX = 0;
+    let leftStartTime = 0;
+    let leftStartCenterHz = 0;
+    // Throttle sending center requests to backend during drag (ms)
+    let lastCenterSend = 0;
+    const centerSendInterval = 150; // ms
     const spectrum = this;
+
+    // Helper to save and set FFT averaging for the duration of a drag
+    this._savedAveraging = undefined;
+    this._saveAndSetAveraging = function(val) {
+        // prefer the existing 'averaging' property which is used elsewhere
+        if (typeof this.averaging !== 'undefined') {
+            if (typeof this._savedAveraging === 'undefined') this._savedAveraging = this.averaging;
+            this.averaging = val;
+            // update alpha if used elsewhere
+            if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
+            //console.log('Saved averaging:', this._savedAveraging, ' set to', val);
+        } else {
+            // Fallback: create property
+            if (typeof this._savedAveraging === 'undefined') this._savedAveraging = undefined;
+            this.averaging = val;
+        }
+    };
+    this._restoreAveraging = function() {
+        if (typeof this._savedAveraging !== 'undefined') {
+            this.averaging = this._savedAveraging;
+            if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
+            //console.log('Restored averaging to', this._savedAveraging);
+            this._savedAveraging = undefined;
+        }
+    };
 
     this.checkFrequencyIsValid = function(frequencyRequested) {
         if (typeof this.input_samprate !== "number" || isNaN(this.input_samprate)) {
@@ -143,29 +203,12 @@ function Spectrum(id, options) {
     };
 
     this.canvas.addEventListener('mousedown', function(e) {
-        if (e.button === 0) { // Left mouse button: tune instantly or set cursor
-            const rect = spectrum.canvas.getBoundingClientRect();
-            const mouseX = e.offsetX;
-            const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
-            let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - mouseX) * hzPerPixel);
-            let freq_khz = clickedHz / 1000;
-            let step = increment / 1000; 
-            let snapped_khz = Math.round(freq_khz / step) * step;
-
-            if (spectrum.cursor_active) {
-                // Set the cursor frequency instead of tuning
-                spectrum.cursor_freq = clickedHz;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            } else {
-                document.getElementById("freq").value = snapped_khz.toFixed(3);
-                ws.send("F:" + snapped_khz.toFixed(3));
-                spectrum.frequency = snapped_khz * 1000;
-                if (spectrum.bin_copy) {
-                    spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                }
-            }
+        if (e.button === 0) { // Left mouse button: start possible click or drag
+            leftDown = true;
+            leftDragStarted = false;
+            leftStartX = e.offsetX;
+            leftStartTime = Date.now();
+            leftStartCenterHz = spectrum.centerHz;
         } else if (e.button === 2) { // Right mouse button: start drag to move tuned frequency
             isDragging = true;
             dragStarted = false;
@@ -184,9 +227,69 @@ function Spectrum(id, options) {
     });
 
     window.addEventListener('mousemove', function(e) {
-        // Only process if right mouse button is being dragged
-        if (!isDragging || (e.buttons & 2) === 0) return;
         const rect = spectrum.canvas.getBoundingClientRect();
+        // Left mouse drag: shift spectrum center
+        if (leftDown && (e.buttons & 1)) {
+            const mouseX = e.clientX - rect.left;
+            const dx = mouseX - leftStartX;
+            if (!leftDragStarted && Math.abs(dx) > dragThreshold) {
+                leftDragStarted = true;
+                // begin drag: lower FFT averaging to make visual updates smoother
+                try { spectrum._saveAndSetAveraging(4); } catch (e) { }
+                // mark left-dragging for waterfall shift and snapshot current waterfall so shifts don't accumulate
+                try {
+                    spectrum._leftDragging = true;
+                    spectrum._dragShiftPx = 0;
+                    spectrum._leftStartCenterHz = leftStartCenterHz;
+                    if (spectrum._ctx_wf_backup) {
+                        spectrum._ctx_wf_backup.clearRect(0,0,spectrum._wf_backup.width,spectrum._wf_backup.height);
+                        spectrum._ctx_wf_backup.drawImage(spectrum.ctx_wf.canvas, 0, 0);
+                    }
+                } catch (e) {}
+            }
+            if (leftDragStarted) {
+                const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+                let newCenterHz = leftStartCenterHz - dx * hzPerPixel;
+                spectrum.setCenterHz(newCenterHz);
+                // compute drag shift from the change in centerHz so sign and magnitude match the visual shift
+                try {
+                    // compute integer bin shift directly from center frequency delta to avoid
+                    // fractional pixel/canvas scaling errors. Round toward the drag direction
+                    // to bias alignment in the direction the user is moving.
+                    const hzPerWfBin = (spectrum.spanHz && spectrum.wf && spectrum.wf.width) ? (spectrum.spanHz / spectrum.wf.width) : hzPerPixel;
+                    const centerDeltaHz = (spectrum._leftStartCenterHz - spectrum.centerHz);
+                    // Compute raw fractional shift and immediate integer bin shift for preview
+                    const rawShift = centerDeltaHz / hzPerWfBin;
+                    let binShift;
+                    if (rawShift > 0) binShift = Math.ceil(rawShift);
+                    else if (rawShift < 0) binShift = Math.floor(rawShift);
+                    else binShift = Math.round(rawShift);
+                    // assign immediate preview integer shift so the cursor/preview matches the waterfall drawing
+                    spectrum._wfShiftBins = binShift;
+                    // keep an approximate display-pixel value for drawing (not authoritative)
+                    try {
+                        const canvasDisplayWidth = spectrum.ctx.canvas.width || spectrum.wf.width;
+                        spectrum._dragShiftPx = Math.round(binShift * (canvasDisplayWidth / spectrum.wf.width));
+                    } catch (e2) {}
+                } catch (e) { }
+                // Throttled request to backend to re-center spectrum bins
+                try {
+                    const now = Date.now();
+                    if ((now - lastCenterSend) >= centerSendInterval) {
+                            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send("Z:c:" + (newCenterHz / 1000.0).toFixed(3));
+                            }
+                        lastCenterSend = now;
+                    }
+                } catch (err) {
+                    console.warn('Failed to send center update during drag', err);
+                }
+            }
+            return;
+        }
+
+        // Right mouse drag: change tuned frequency
+        if (!isDragging || (e.buttons & 2) === 0) return;
         const mouseX = e.clientX - rect.left;
         const dx = mouseX - startX;
         if (!dragStarted && Math.abs(dx) > dragThreshold) {
@@ -211,12 +314,91 @@ function Spectrum(id, options) {
             spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
         }
     });
-
     window.addEventListener('mouseup', function(e) {
+        // Left mouse quick click: change tuned frequency
+        if (leftDown && e.button === 0) {
+            const dragDuration = Date.now() - leftStartTime;
+            // compute distance in canvas coords
+            const rect = spectrum.canvas.getBoundingClientRect();
+            const mouseX = (typeof e.offsetX === 'number') ? e.offsetX : (e.clientX - rect.left);
+            const dragDistance = Math.abs(mouseX - leftStartX);
+            if (!leftDragStarted && dragDuration < 250 && dragDistance < dragThreshold) {
+                const hzPerPixel = spectrum.spanHz / spectrum.canvas.width;
+                let clickedHz = spectrum.centerHz - ((spectrum.canvas.width / 2 - leftStartX) * hzPerPixel);
+                let freq_khz = clickedHz / 1000;
+                let step = increment / 1000;
+                let snapped_khz = Math.round(freq_khz / step) * step;
+                if (spectrum.cursor_active) {
+                    spectrum.cursor_freq = clickedHz;
+                    if (spectrum.bin_copy) {
+                        spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                    }
+                } else {
+                    document.getElementById("freq").value = snapped_khz.toFixed(3);
+                    ws.send("F:" + snapped_khz.toFixed(3));
+                    spectrum.frequency = snapped_khz * 1000;
+                    if (spectrum.bin_copy) {
+                        spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                    }
+                }
+            } else if (leftDragStarted) {
+                // Drag finished — send final center to backend so it will return freshly centered bins
+                try {
+                    if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send("Z:c:" + (spectrum.centerHz / 1000.0).toFixed(3));
+                    }
+                } catch (err) {
+                    console.warn('Failed to send final center update', err);
+                }
+            }
+            // End of left mouse interaction: restore averaging if it was changed
+            if (leftDragStarted) {
+                try { spectrum._restoreAveraging(); } catch (e) { }
+            }
+            // If we were left-dragging, apply the final frozen shift to the live waterfall canvas
+            if (leftDragStarted) {
+                try {
+                    const w = spectrum.wf.width;
+                    const h = spectrum.wf.height;
+                    let shiftPx = 0;
+                    if (typeof spectrum._wfShiftBins === 'number') {
+                        shiftPx = spectrum._wfShiftBins;
+                    } else {
+                        const displayShift = Math.round(spectrum._dragShiftPx || 0);
+                        const canvasDisplayWidth = spectrum.ctx.canvas.width || w;
+                        shiftPx = Math.round(displayShift * (w / canvasDisplayWidth));
+                    }
+
+                    if (shiftPx > 0) {
+                        const s = Math.min(shiftPx, w);
+                        spectrum.ctx_wf.fillStyle = 'black';
+                        spectrum.ctx_wf.fillRect(0, 0, s, h);
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, 0, 0, w - s, h, s, 0, w - s, h);
+                    } else if (shiftPx < 0) {
+                        const s = Math.min(Math.abs(shiftPx), w);
+                        spectrum.ctx_wf.fillStyle = 'black';
+                        spectrum.ctx_wf.fillRect(w - s, 0, s, h);
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, s, 0, w - s, h, 0, 0, w - s, h);
+                    } else {
+                        // no shift
+                        spectrum.ctx_wf.drawImage(spectrum._wf_backup, 0, 0);
+                    }
+                } catch (err) {
+                    console.warn('Failed to apply final waterfall shift', err);
+                }
+                // debug logging removed
+            }
+            // clear dragging flags so waterfall returns to normal updates
+            try { spectrum._leftDragging = false; spectrum._dragShiftPx = 0; spectrum._leftStartCenterHz = undefined; spectrum._lastDragDx = undefined; } catch (e) {}
+            leftDown = false;
+            leftDragStarted = false;
+        }
+
+        // Right mouse drag end
         if (isDragging && e.button === 2) {
             spectrum.canvas.style.cursor = "";
             if (pendingFreqHz !== null && dragStarted) {
-                // Snap frequency to next 0.500 kHz step
+                // Snap frequency to step
                 let freq_khz = pendingFreqHz / 1000;
                 let step = increment / 1000;
                 let snapped_freq = Math.round(freq_khz / step) * step * 1000;
@@ -333,15 +515,77 @@ Spectrum.prototype.addWaterfallRow = function(bins) {
     // Only draw a new row if lineDecimation is 0
     let skip = (window.skipWaterfallLines > 0) && (lineDecimation++ % (window.skipWaterfallLines + 1) !== 0);
     if (!skip) {
-        //console.log("Drawing row at lineDecimation =", lineDecimation, "skipWaterfallLines =", window.skipWaterfallLines);
-        // Shift waterfall 1 row down
-        this.ctx_wf.drawImage(this.ctx_wf.canvas,
-            0, 0, this.wf_size, this.wf_rows - 1,
-            0, 1, this.wf_size, this.wf_rows - 1);
+        // If left-dragging, shift the existing waterfall horizontally instead of adding a new top row
+        if (this._leftDragging) {
+                try {
+                // Live-insert incoming rows into the backup at an x-offset so the backup represents
+                // the waterfall as if it were produced for the left-drag snapshot center. Then draw
+                // the shifted backup into the visible waterfall so the user sees a live waterfall while
+                // panning without committing tuning changes.
+                const w = this.wf.width;
+                const h = this.wf.height;
 
-        // Draw new line on waterfall canvas
-        this.rowToImageData(bins);
-        this.ctx_wf.putImageData(this.imagedata, 0, 0);
+                // compute integer bin offset between server center for this incoming row and the left-drag snapshot
+                let serverCenter = (typeof this._lastServerCenterHz === 'number') ? this._lastServerCenterHz : this.centerHz;
+                let leftStart = (typeof this._leftStartCenterHz === 'number') ? this._leftStartCenterHz : this.centerHz;
+                const hzPerWfBin = (this.spanHz && this.wf && this.wf.width) ? (this.spanHz / this.wf.width) : (this.spanHz / this.canvas.width);
+                const centerDeltaHz = (serverCenter - leftStart);
+                // fractional bin offset; bias rounding toward the direction of the shift to
+                // reduce small off-by-one artifacts when the center drifts between frames.
+                const rawBinShift = centerDeltaHz / hzPerWfBin;
+                let binOffset;
+                if (rawBinShift > 0) binOffset = Math.ceil(rawBinShift);
+                else if (rawBinShift < 0) binOffset = Math.floor(rawBinShift);
+                else binOffset = Math.round(rawBinShift);
+
+                // convert bin offset to pixel offset in backup coordinates (1 bin == 1 pixel in wf canvas)
+                let offsetPx = binOffset; // wf canvas width == bins
+
+                // While left-dragging we intentionally do NOT append new rows to the backup.
+                // This avoids painting any new (noisy) pixels during the preview. The backup
+                // image remains frozen as a snapshot taken at drag start and is simply drawn
+                // shifted into the visible waterfall canvas below.
+
+                // Now draw the backup into the live waterfall canvas shifted by the user's current bin shift
+                let shiftPx = (typeof this._wfShiftBins === 'number') ? this._wfShiftBins : Math.round(this._dragShiftPx || 0);
+                // clamp shiftPx to [-w, w]
+                if (shiftPx > w) shiftPx = w;
+                if (shiftPx < -w) shiftPx = -w;
+
+                if (shiftPx > 0) {
+                    const s = Math.min(shiftPx, w);
+                    this.ctx_wf.fillStyle = 'black';
+                    this.ctx_wf.fillRect(0, 0, s, h);
+                    this.ctx_wf.drawImage(this._wf_backup, 0, 0, w - s, h, s, 0, w - s, h);
+                } else if (shiftPx < 0) {
+                    const s = Math.min(Math.abs(shiftPx), w);
+                    this.ctx_wf.fillStyle = 'black';
+                    this.ctx_wf.fillRect(w - s, 0, s, h);
+                    this.ctx_wf.drawImage(this._wf_backup, s, 0, w - s, h, 0, 0, w - s, h);
+                } else {
+                    this.ctx_wf.drawImage(this._wf_backup, 0, 0);
+                }
+            } catch (err) {
+                // fallback to normal behavior if something fails
+                console.warn('Waterfall drag shift failed, falling back to normal add row', err);
+                this.ctx_wf.drawImage(this.ctx_wf.canvas,
+                    0, 0, this.wf_size, this.wf_rows - 1,
+                    0, 1, this.wf_size, this.wf_rows - 1);
+
+                // Draw new line on waterfall canvas
+                this.rowToImageData(bins);
+                this.ctx_wf.putImageData(this.imagedata, 0, 0);
+            }
+        } else {
+            // Normal behavior: shift down and add new top row
+            this.ctx_wf.drawImage(this.ctx_wf.canvas,
+                0, 0, this.wf_size, this.wf_rows - 1,
+                0, 1, this.wf_size, this.wf_rows - 1);
+
+            // Draw new line on waterfall canvas
+            this.rowToImageData(bins);
+            this.ctx_wf.putImageData(this.imagedata, 0, 0);
+        }
     }
 
     // Always copy the waterfall to the main canvas
@@ -624,6 +868,56 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     // Restore scale
     this.ctx.restore();
 
+    // --- Enunciator: show arrow if tuned frequency is outside current window ---
+    try {
+        var start_freq = this.centerHz - (this.spanHz / 2.0);
+        var end_freq = this.centerHz + (this.spanHz / 2.0);
+
+    // draw in unscaled canvas space, slightly lower so it doesn't overlap frequency labels
+    var arrowSize = 12;
+    var textY = 28; // moved down from 14
+    this.ctx.fillStyle = "#ff0000";
+    this.ctx.strokeStyle = "#ffffff";
+    this.ctx.lineWidth = 1;
+    this.ctx.font = "13px sans-serif";
+
+        if (typeof this.frequency === 'number') {
+            if (this.frequency < start_freq) {
+                // tuned is left: left-pointing arrow at left edge
+                var ax = 8;
+                var ay = 20; // moved down from 6
+                this.ctx.beginPath();
+                this.ctx.moveTo(ax + arrowSize, ay);
+                this.ctx.lineTo(ax, ay + arrowSize / 2);
+                this.ctx.lineTo(ax + arrowSize, ay + arrowSize);
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+                this.ctx.fillStyle = "#ff0000";
+                this.ctx.textAlign = "left";
+                this.ctx.fillText("Tuned ←", ax + arrowSize + 6, textY);
+            } else if (this.frequency > end_freq) {
+                // tuned is right: right-pointing arrow at right edge
+                var ax = this.canvas.width - 8 - arrowSize;
+                var ay = 20; // moved down from 6
+                this.ctx.beginPath();
+                this.ctx.moveTo(ax, ay);
+                this.ctx.lineTo(ax + arrowSize, ay + arrowSize / 2);
+                this.ctx.lineTo(ax, ay + arrowSize);
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+                this.ctx.fillStyle = "#ff0000";
+                this.ctx.textAlign = "right";
+                this.ctx.fillText("Tuned →", ax - 6, textY);
+                this.ctx.textAlign = "left";
+            }
+        }
+    } catch (e) {
+        // don't let debugging UI break drawing
+        console.debug("enunciator draw error", e);
+    }
+
     // Copy axes from offscreen canvas
     this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
 }
@@ -649,6 +943,9 @@ Spectrum.prototype.updateAxes = function() {
 
     this.start_freq = this.centerHz - (this.spanHz / 2);
     var hz_per_pixel = this.spanHz / width;
+
+    // Band edges labels are provided by Spectrum.prototype.getHamBandEdges()
+    // which returns an array of objects: { hz: <number>, label: <string> }
 
     // Draw axes
     this.ctx_axes.font = "12px sans-serif";
@@ -735,6 +1032,7 @@ Spectrum.prototype.updateAxes = function() {
     // The variable inc determines the frequency spacing between vertical grid lines and frequency labels on the spectrum display
     var freq=this.start_freq-(this.start_freq%inc); // aligns the first frequency grid line to the nearest lower multiple of inc.
     var text;
+    var regularGridDrawn = false;
     while(freq<=this.highHz) {
         this.ctx_axes.textAlign = "center";
         var x = (freq-this.start_freq)/hz_per_pixel;
@@ -746,7 +1044,49 @@ Spectrum.prototype.updateAxes = function() {
         this.ctx_axes.lineTo(x, height);
         this.ctx_axes.strokeStyle = "rgba(200, 200, 200, 0.30)";
         this.ctx_axes.stroke();
+        regularGridDrawn = true;
         freq=freq+inc;
+    }
+
+    // Draw ham band edge markers in bright green if enabled.
+    if (this.showBandEdges) {
+        try {
+            var bands = this.getHamBands();
+            var anyEdgeDrawn = false;
+            // First draw vertical lines for all band edges that are in view
+            for (var bi = 0; bi < bands.length; bi++) {
+                var b = bands[bi];
+                if (b.highHz < this.start_freq || b.lowHz > this.highHz) continue;
+                // left edge
+                var lx = (b.lowHz - this.start_freq) / hz_per_pixel;
+                var rx = (b.highHz - this.start_freq) / hz_per_pixel;
+                this.ctx_axes.beginPath();
+                this.ctx_axes.moveTo(lx, 0);
+                this.ctx_axes.lineTo(lx, height);
+                this.ctx_axes.moveTo(rx, 0);
+                this.ctx_axes.lineTo(rx, height);
+                this.ctx_axes.strokeStyle = "rgba(0, 255, 0, 1.0)"; // bright green
+                this.ctx_axes.lineWidth = 1.2;
+                this.ctx_axes.stroke();
+                anyEdgeDrawn = true;
+            }
+            // Now draw one label per band (centered) for bands overlapping view
+            for (var bi2 = 0; bi2 < bands.length; bi2++) {
+                var bb = bands[bi2];
+                if (bb.highHz < this.start_freq || bb.lowHz > this.highHz) continue;
+                var centerHz = Math.max(bb.lowHz, this.start_freq) + (Math.min(bb.highHz, this.highHz) - Math.max(bb.lowHz, this.start_freq)) / 2;
+                var cx = (centerHz - this.start_freq) / hz_per_pixel;
+                this.ctx_axes.fillStyle = "#00FF00";
+                this.ctx_axes.textAlign = "center";
+                var bandLabelY = (typeof freqLabelBottom === 'number') ? (freqLabelBottom + 4) : 16;
+                this.ctx_axes.fillText(bb.label, cx, bandLabelY);
+            }
+            // Reset strokeStyle/lineWidth to defaults
+            this.ctx_axes.strokeStyle = "rgba(200, 200, 200, 0.30)";
+            this.ctx_axes.lineWidth = 1;
+        } catch (e) {
+            console.warn('Failed to draw ham band edges', e);
+        }
     }
 }
 
@@ -836,9 +1176,10 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
                 this.setRange(this.minimum,this.maximum + 5, true,12);  // Bias max up so peak isn't touching top of graph,  // Just set the range to what it was???
             }
             else{ 
-                this.measureMinMax(data);
-                //console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1),"getNewMinMax=", getNewMinMax);
-                this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                if(this.measureMinMax(data) == true) {
+                    //console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1),"getNewMinMax=", getNewMinMax);
+                    this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                }
             }
         }
         this.drawSpectrum(data);
@@ -861,6 +1202,16 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
 Spectrum.prototype.measureMinMax = function(data) {
             var range_scale_increment = 5.0;    // range scaling increment in dB
             var currentFreqBin = this.hz_to_bin(this.frequency);
+            // Ensure currentFreqBin is valid for the current zoom/bin selection
+            if (!Number.isFinite(currentFreqBin) || typeof this.nbins !== 'number' || this.nbins <= 0 ||
+                currentFreqBin < 0 || currentFreqBin >= this.nbins) {
+                //console.log('measureMinMax: currentFreqBin out of range - return early', {
+                //    currentFreqBin: currentFreqBin,
+                //    nbins: this.nbins,
+                //    frequency: this.frequency
+                //});
+                return false;
+            }
             var binsToBracket = 1600;  // look at the whole spectrum   // Math.floor(this.bins / this.spanHz * frequencyToBracket);
             var lowBin = Math.max(20, currentFreqBin - binsToBracket); // binsToBracket bins to the left of the current frequency
             var highBin = Math.min(this.nbins-20, currentFreqBin + binsToBracket); // binsToBracket bins to the right of the current frequency
@@ -930,6 +1281,7 @@ Spectrum.prototype.measureMinMax = function(data) {
             if(this.maximum < minimum_spectral_gain)  // Don't range too far into the weeds.
                 this.maximum = minimum_spectral_gain;
             //console.log("data_min =",data_min.toFixed(1),"data_stat_low = ",data_stat_low.toFixed(1)," minimum=", this.minimum.toFixed(1), " maximum=", this.maximum," sdev=", this.std_dev.toFixed(2));
+            return true;
 }
 
 Spectrum.prototype.updateSpectrumRatio = function() {
@@ -961,6 +1313,16 @@ Spectrum.prototype.resize = function() {
         this.axes.height = this.spectrumHeight;
         this.updateAxes();
     }
+    // Keep backup waterfall canvas in sync if present
+    try {
+        if (this._wf_backup) {
+            if (this._wf_backup.width != this.wf.width || this._wf_backup.height != this.wf.height) {
+                this._wf_backup.width = this.wf.width;
+                this._wf_backup.height = this.wf.height;
+                if (this._ctx_wf_backup) this._ctx_wf_backup = this._wf_backup.getContext('2d');
+            }
+        }
+    } catch (e) { }
     this.saveSettings();
 }
 
@@ -1035,11 +1397,19 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     if (adjust_waterfall) {
         this.wf_min_db = min_db + wf_min_adjust;    // min_db + some bias to darken the waterfall 
         this.wf_max_db = max_db;
-        // Update the waterfall min/max display sliders
-        document.getElementById("waterfall_min").value = this.wf_min_db;
-        document.getElementById("waterfall_max").value = this.wf_max_db;
+    // Update the waterfall min/max display text boxes
+    var wfMinText = document.getElementById("waterfall_min");
+    var wfMaxText = document.getElementById("waterfall_max");
+    if (wfMinText) wfMinText.value = this.wf_min_db;
+    if (wfMaxText) wfMaxText.value = this.wf_max_db;
 
-        //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
+    // Also update the corresponding range input controls so the sliders reflect the new values
+    var wfMinRange = document.getElementById("waterfall_min_range");
+    var wfMaxRange = document.getElementById("waterfall_max_range");
+    if (wfMinRange) wfMinRange.value = this.wf_min_db;
+    if (wfMaxRange) wfMaxRange.value = this.wf_max_db;
+
+    //console.log("adjust_waterfall true, min_adjust = ",wf_min_adjust," min to: ",this.wf_min_db,"Max to: ",this.wf_max_db);
     }
     this.updateAxes();
     this.saveSettings();
@@ -1073,14 +1443,80 @@ Spectrum.prototype.rangeDecrease = function() {
 }
 
 Spectrum.prototype.setCenterHz = function(hz) {
-    console.log("spectrum.setCenterHz: ", hz);
+    // Ensure span/center do not exceed hardware limits when input_samprate is known
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const nyquist = this.input_samprate / 2;
+        let halfSpan = Math.max(0, this.spanHz / 2);
+        // If requested span is larger than the available sample bandwidth, clamp span
+        if (halfSpan > nyquist) {
+            halfSpan = nyquist;
+            this.spanHz = 2 * nyquist;
+        }
+        const minCenter = halfSpan;
+        const maxCenter = nyquist - halfSpan;
+        if (minCenter > maxCenter) {
+            // Degenerate case: force center to mid-Nyquist
+            hz = nyquist / 2;
+        } else {
+            if (hz < minCenter) hz = minCenter;
+            if (hz > maxCenter) hz = maxCenter;
+        }
+    }
+    //console.log("spectrum.setCenterHz: ", hz);
     this.centerHz = hz;
     this.updateAxes();
     this.saveSettings();
 }
 
 Spectrum.prototype.setSpanHz = function(hz) {
+    // Remember previous span and visibility of tuned frequency so we can detect
+    // zoom-in events that push the tuned frequency off-screen.
+    const prevSpan = (typeof this.spanHz === 'number') ? this.spanHz : 0;
+    const prevStart = this.centerHz - (prevSpan / 2);
+    const prevEnd = this.centerHz + (prevSpan / 2);
+    const wasVisible = (typeof this.frequency === 'number') && (this.frequency >= prevStart && this.frequency <= prevEnd);
+
+    // Clamp span to available sample rate if known, and adjust center if needed
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const maxSpan = this.input_samprate; // cannot exceed sample rate
+        if (hz > maxSpan) hz = maxSpan;
+        if (hz < 0) hz = 0;
+    }
     this.spanHz = hz;
+    // After changing span, ensure current center still yields min/max within limits
+    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
+        const nyquist = this.input_samprate / 2;
+        let halfSpan = Math.max(0, this.spanHz / 2);
+        if (halfSpan > nyquist) {
+            halfSpan = nyquist;
+            this.spanHz = 2 * nyquist;
+        }
+        const minCenter = halfSpan;
+        const maxCenter = nyquist - halfSpan;
+        if (this.centerHz < minCenter) this.centerHz = minCenter;
+        if (this.centerHz > maxCenter) this.centerHz = maxCenter;
+    }
+    // If this was a zoom-in (span shrank) and the tuned frequency was visible
+    // before but is now outside the new window, request the backend to center
+    // the zoom on the tuned frequency so it comes back into view.
+    try {
+        const zoomIn = (prevSpan > 0) && (this.spanHz < prevSpan);
+        if (zoomIn && wasVisible && typeof this.frequency === 'number') {
+            const newStart = this.centerHz - (this.spanHz / 2);
+            const newEnd = this.centerHz + (this.spanHz / 2);
+            if (this.frequency < newStart || this.frequency > newEnd) {
+                // Optionally, we could update the center locally for immediate UI feedback:
+                // this.setCenterHz(this.frequency);
+                if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+                    //console.log("Zoomed center on frequency: " + this.frequency);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('setSpanHz: zoom-center detection failed', e);
+    }
+
     this.updateAxes();
     this.saveSettings();
 }
@@ -1165,6 +1601,16 @@ Spectrum.prototype.toggleFullscreen = function() {
             document.msExitFullscreen();
         }
         this.fullscreen = false;
+        // If the user exits fullscreen and the spectrum was paused, resume it so
+        // the display updates continue (user likely wants to return to live view).
+        try {
+            if (this.paused) {
+                this.togglePaused();
+            }
+        } catch (e) {
+            // don't let errors prevent fullscreen exit
+            console.warn('Failed to auto-resume after exiting fullscreen', e);
+        }
     }
 }
 
@@ -1178,6 +1624,12 @@ Spectrum.prototype.forceAutoscale = function(autoScaleCounterStart,waitToAutosca
 }
 
 Spectrum.prototype.onKeypress = function(e) {
+    // Allow 'f' to toggle fullscreen at any time. All other keys should only respond
+    // when the spectrum is in fullscreen mode to avoid accidental key actions.
+    if (e.key !== "f" && !this.fullscreen) {
+        return;
+    }
+
     if (e.key == " ") {
         this.togglePaused();
     } else if (e.key == "f") {
@@ -1203,14 +1655,28 @@ Spectrum.prototype.onKeypress = function(e) {
     } else if (e.key == "m") {
         this.toggleMaxHold();
     } else if (e.key == "z") {
-        ws.send("Z:c");
+        // Send explicit center = tuned frequency in kHz so server centers where we expect
+        try {
+            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+            }
+        } catch (err) {
+            // ignore
+        }
         saveSettings();
     } else if (e.key == "i") {
         ws.send("Z:+:"+document.getElementById('freq').value);
-    saveSettings();
+        saveSettings();
     } else if (e.key == "o") {
         ws.send("Z:-:"+document.getElementById('freq').value);
         saveSettings();
+    } else if (e.key == "a") {
+        // In fullscreen, 'a' triggers autoscale as if the Autoscale button was pressed
+        try {
+            this.forceAutoscale(100, false);
+        } catch (err) {
+            console.warn('Autoscale failed from keypress', err);
+        }
     }
 }
 
@@ -1939,4 +2405,21 @@ Spectrum.prototype.getExportSuffix = function() {
     return `_min${min}kHz_max${max}kHz_center${center}kHz_zoom${zoom}`;
 };
 
+// Return bands as { lowHz, highHz, label } for one-label-per-band rendering
+Spectrum.prototype.getHamBands = function() {
+    var bands_mhz = [
+        { low: 1.8, high: 2.0, label: '160m' },
+        { low: 3.5, high: 4.0, label: '80m' },
+        { low: 5.0, high: 5.4, label: '60m' },
+        { low: 7.0, high: 7.30, label: '40m' },
+        { low: 10.1, high: 10.15, label: '30m' },
+        { low: 14.0, high: 14.35, label: '20m' },
+        { low: 18.068, high: 18.168, label: '17m' },
+        { low: 21.0, high: 21.45, label: '15m' },
+        { low: 24.89, high: 24.99, label: '12m' },
+        { low: 28.0, high: 29.7, label: '10m' },
+        { low: 50.0, high: 54.0, label: '6m' }
+    ];
+    return bands_mhz.map(function(b) { return { lowHz: b.low * 1e6, highHz: b.high * 1e6, label: b.label }; });
+};
 

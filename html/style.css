@@ -121,3 +121,11 @@ h4#heading {
   text-align: left;
   display: inline-block;
 }
+
+/* Remove browser default focus ring on the waterfall canvas (keyboard focus)
+   Keeping this hidden avoids the white outline shown when the canvas receives
+   keyboard focus via the Space key or Tab. If you want an accessible
+   indicator instead, replace with a subtle outline in :focus-visible. */
+#waterfall:focus, #waterfall:focus-visible {
+  outline: none;
+}

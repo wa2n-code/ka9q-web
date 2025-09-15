@@ -15,8 +15,10 @@
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
-      let binCount = 1620;
-      let spanHz = binCount * binWidthHz;
+  let binCount = 1620;
+  let spanHz = binCount * binWidthHz;
+  // Spectrum poll interval in milliseconds (client-side default)
+  var spectrumPoll = 100;
       var counter = 0;
       var filter_low = -5000;
       var filter_high = 5000;
@@ -57,6 +59,7 @@
       var switchModesByFrequency = false;
       var onlyAutoscaleByButton = false;
       var enableAnalogSMeter = false;
+      var enableBandEdges = false;
 
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
@@ -123,6 +126,60 @@
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         fetchZoomTableSize(); // Fetch and store the zoom table size
+        // Initialize filter edge inputs based on the target preset
+        try {
+          setFilterEdgesForMode(target_preset);
+        } catch (e) {}
+  // Attach listeners so spinner/caret presses auto-send
+  try { attachEdgeInputListeners(); } catch (e) {}
+      }
+      
+      // Send a request to the server to change the spectrum poll interval (milliseconds).
+      function sendSpectrumPoll() {
+        const elm = document.getElementById('spectrumPollInput');
+        if (!elm) return;
+        const v = parseInt(elm.value, 10);
+        if (isNaN(v) || v <= 0) {
+          console.warn('Invalid spectrum poll value', elm.value);
+          return;
+        }
+        spectrumPoll = v;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send('r:' + v.toString());
+            console.log('Sent spectrum poll request:', v);
+          } catch (e) {
+            console.error('Failed to send spectrum poll:', e);
+          }
+        } else {
+          console.warn('WebSocket not open, cannot send spectrum poll');
+        }
+      }
+      
+      // Send filter edge settings (low and high) to the server via websocket
+      function sendFilterEdges() {
+        const lowEl = document.getElementById('filterLowInput');
+        const highEl = document.getElementById('filterHighInput');
+        if (!lowEl || !highEl) return;
+        const low = parseFloat(lowEl.value);
+        const high = parseFloat(highEl.value);
+        if (isNaN(low) || isNaN(high)) {
+          console.warn('Invalid filter edge values', lowEl.value, highEl.value);
+          return;
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send('e:' + low.toString() + ':' + high.toString());
+            console.log('Sent filter edges:', low, high);
+            // Clear manual-dirty flag and update Edge button state when edges are sent
+            edgeManualDirty = false;
+            updateEdgeButtonState();
+          } catch (e) {
+            console.error('Failed to send filter edges:', e);
+          }
+        } else {
+          console.warn('WebSocket not open, cannot send filter edges');
+        }
       }
       
       function on_ws_close(evt) {
@@ -231,8 +288,15 @@
               calcFrequencies();
               spectrum.setLowHz(lowHz);
               spectrum.setHighHz(highHz);
-              console.log("[on_ws_msg] Spectrum updated: centerHz=",centerHz," frequencyHz=",frequencyHz);
-              spectrum.setCenterHz(centerHz);
+              // record the server-provided center so the UI can align incoming waterfall rows
+              try {
+                spectrum._lastServerCenterHz = centerHz;
+              } catch (e) {}
+              // If the user is left-dragging (previewing a transient center), avoid stomping the
+              // spectrum's transient center with the server center; otherwise apply normally.
+              if (!spectrum._leftDragging) {
+                spectrum.setCenterHz(centerHz);
+              }
               spectrum.setFrequency(frequencyHz);
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
@@ -595,6 +659,61 @@
         e.preventDefault();
       }
     });
+ 
+    // Allow 'f' to toggle spectrum fullscreen even when the waterfall/canvas does not have focus.
+    // If the waterfall canvas already has focus, Spectrum.prototype.onKeypress will handle 'f'.
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'f' || e.code === 'KeyF') {
+        try {
+          const waterfall = document.getElementById('waterfall');
+          const active = document.activeElement;
+          // Only handle here when the waterfall does NOT have focus
+          if (!(waterfall && active === waterfall)) {
+            if (typeof spectrum !== 'undefined' && spectrum) {
+              spectrum.toggleFullscreen();
+              e.preventDefault();
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+    }, false);
+
+    // When an element enters fullscreen, ensure the waterfall canvas receives keyboard focus
+    // so subsequent keypresses are handled by Spectrum.prototype.onKeypress.
+    document.addEventListener('fullscreenchange', function() {
+      try {
+        const wf = document.getElementById('waterfall');
+        if (document.fullscreenElement === wf) {
+          // give it focus so it receives keyboard events
+          wf.focus();
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    // Space bar toggles audio (calls audio_start_stop defined in radio.html)
+    // Placed here next to other keyboard handlers for readability.
+    document.addEventListener('keydown', function(e) {
+      // Prefer e.code when available; fall back to e.key for older browsers
+      if (e.code === 'Space' || e.key === ' ') {
+        // If the spectrum is fullscreen, prevent page scrolling but do not toggle audio here.
+        // Let Spectrum.prototype.onKeypress handle keys while fullscreen.
+        if (typeof spectrum !== 'undefined' && spectrum && spectrum.fullscreen) {
+          e.preventDefault();
+          return;
+        }
+        // Prevent default scrolling when Space is pressed and we're handling it
+        e.preventDefault();
+        try {
+          audio_start_stop();
+        } catch (err) {
+          console.error('audio_start_stop() not available:', err);
+        }
+      }
+    }, false);
 
     // ...existing code...
 
@@ -698,13 +817,153 @@
       }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
+  // Update filter edge inputs to sensible defaults for this mode
+  setFilterEdgesForMode(selected_mode);
   }
 
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
         ws.send("M:"+mode);
+      setFilterEdgesForMode(mode);
       saveSettings();
+    }
+
+    // Set filter input values according to mode defaults
+    function setFilterEdgesForMode(mode) {
+      const lowEl = document.getElementById('filterLowInput');
+      const highEl = document.getElementById('filterHighInput');
+      if (!lowEl || !highEl) return;
+  // Prevent auto-send while programmatically setting values
+  suppressEdgeAutoSend = true;
+      switch((mode||'').toLowerCase()) {
+        case 'cwu':
+        case 'cwl':
+          lowEl.value = -200;
+          highEl.value = 200;
+          break;
+        case 'usb':
+          lowEl.value = 50;
+          highEl.value = 3000;
+          break;
+        case 'lsb':
+          lowEl.value = -3000;
+          highEl.value = -50;
+          break;
+        case 'am':
+        case 'sam':
+          lowEl.value = -5000;
+          highEl.value = 5000;
+          break;
+        case 'fm':
+          lowEl.value = -6000;
+          highEl.value = 6000;
+          break;
+        case 'iq':
+          lowEl.value = -5000;
+          highEl.value = 5000;
+          break;
+        default:
+          // leave as-is
+          break;
+      }
+      // re-enable auto-send after programmatic change
+      suppressEdgeAutoSend = false;
+  // programmatic change isn't manual typing
+  edgeManualDirty = false;
+  updateEdgeButtonState();
+    }
+
+    // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
+    // immediately send the new values to the backend. Programmatic changes are suppressed
+    // by the `suppressEdgeAutoSend` flag set above.
+    let suppressEdgeAutoSend = false;
+    let edgesListenersAttached = false;
+    // Whether the user has manually typed values that require pressing the Edge button
+    let edgeManualDirty = false;
+
+    function updateEdgeButtonState() {
+      try {
+        const btn = document.getElementById('edge_button');
+        if (!btn) return;
+        if (edgeManualDirty) {
+          btn.removeAttribute('disabled');
+          btn.style.opacity = '';
+        } else {
+          btn.setAttribute('disabled','disabled');
+          btn.style.opacity = '0.6';
+        }
+      } catch (e) {}
+    }
+
+    function attachEdgeInputListeners() {
+      if (edgesListenersAttached) return;
+      edgesListenersAttached = true;
+      const lowEl = document.getElementById('filterLowInput');
+      const highEl = document.getElementById('filterHighInput');
+      if (!lowEl || !highEl) return;
+
+      // Track the source of the last interaction so we can distinguish manual typing
+      // (keyboard) from pointer-based changes (spinner buttons, mouse wheel).
+      let lastEdgeInteraction = null; // 'pointer' | 'keyboard'
+
+      // Pointer interactions (mouse/touch/spinner) — mark and send on input
+      const pointerStart = function() {
+        lastEdgeInteraction = 'pointer';
+      };
+      lowEl.addEventListener('pointerdown', pointerStart);
+      highEl.addEventListener('pointerdown', pointerStart);
+      // Clear pointer state on pointerup/cancel so continuous pointer actions are detected
+      const pointerEnd = function() { lastEdgeInteraction = null; };
+      lowEl.addEventListener('pointerup', pointerEnd);
+      highEl.addEventListener('pointerup', pointerEnd);
+      lowEl.addEventListener('pointercancel', pointerEnd);
+      highEl.addEventListener('pointercancel', pointerEnd);
+      // wheel events are pointer-like; keep pointer state for a short timeout after wheel
+      let wheelTimer = null;
+      const wheelHandler = function() {
+        lastEdgeInteraction = 'pointer';
+        if (wheelTimer) clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => { lastEdgeInteraction = null; wheelTimer = null; }, 200);
+      };
+      lowEl.addEventListener('wheel', wheelHandler);
+      highEl.addEventListener('wheel', wheelHandler);
+
+      // Keyboard interaction — mark as keyboard. Arrow keys still cause a send after update.
+      const keyHandler = function(e) {
+        lastEdgeInteraction = 'keyboard';
+        // If the user presses arrow keys we still want immediate action (handled below).
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          if (suppressEdgeAutoSend) return;
+          // allow the value to update then send
+          setTimeout(() => {
+            sendFilterEdges();
+            // after auto-send, ensure manual dirty flag is cleared
+            edgeManualDirty = false;
+            updateEdgeButtonState();
+          }, 0);
+        }
+      };
+      lowEl.addEventListener('keydown', keyHandler);
+      highEl.addEventListener('keydown', keyHandler);
+
+      // Input handler: only auto-send when the last interaction was pointer (spinner/click/wheel).
+      const inputHandler = function(e) {
+        if (suppressEdgeAutoSend) return;
+        if (lastEdgeInteraction === 'pointer') {
+          sendFilterEdges();
+          // pointer-based changes are auto-sent; ensure manual dirty flag is cleared
+          edgeManualDirty = false;
+          updateEdgeButtonState();
+        } else if (lastEdgeInteraction === 'keyboard') {
+          // user is typing digits manually -> require explicit press of Edge button
+          edgeManualDirty = true;
+          updateEdgeButtonState();
+        }
+        // do not immediately clear lastEdgeInteraction here; pointerEnd or wheel timeout will clear it
+      };
+      lowEl.addEventListener('input', inputHandler);
+      highEl.addEventListener('input', inputHandler);
     }
   
     function zoomin() {
@@ -753,7 +1012,8 @@
         //alertOverlayMisalignment();
         spectrum.clearOverlayTrace();
       }
-      ws.send("Z:c");
+  // Send explicit center (kHz) so backend will center on the tuned frequency
+  ws.send("Z:c:" + document.getElementById('freq').value);
       //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
       saveSettings();
@@ -1246,6 +1506,7 @@ function saveSettings() {
   localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
+  localStorage.setItem("enableBandEdges", enableBandEdges);
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -1295,9 +1556,12 @@ function setDefaultSettings() {
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
   document.getElementById("ckonlyAutoscaleButton").checked = false;
-  enableAnalogSMeter = false; // Default to digital S-Meter
-  document.getElementById("ckAnalogSMeter").checked = false;
+  enableAnalogSMeter = true; // Default to analog S-Meter on
+  document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the default setting
+  enableBandEdges = false; // Default to not show band edges
+  var beEl = document.getElementById('ckShowBandEdges');
+  if (beEl) beEl.checked = enableBandEdges;
   const MEMORY_KEY = 'frequency_memories';
   let memories = Array(20).fill("");
   localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
@@ -1308,7 +1572,7 @@ function setDefaultSettings() {
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
-  if ((localStorage.length == 0) || localStorage.length != 26) {
+ if ((localStorage.length == 0) || localStorage.length != 27) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
@@ -1356,6 +1620,15 @@ function loadSettings() {
   enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
   document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
   setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
+  // Band edges persistence: mirror analog S-meter behavior
+  enableBandEdges = (localStorage.getItem("enableBandEdges") == "true");
+  var beEl = document.getElementById('ckShowBandEdges');
+  if (beEl) beEl.checked = enableBandEdges;
+  // apply to spectrum if present
+  if (typeof spectrum !== 'undefined' && spectrum) {
+      spectrum.showBandEdges = enableBandEdges;
+      spectrum.updateAxes();
+  }
   //console.log("Loaded volume settings: ",parseFloat(localStorage.getItem("volume_control")));
   var vc = parseFloat(localStorage.getItem("volume_control"));
   document.getElementById("volume_control").value = vc;
@@ -1442,6 +1715,25 @@ function setAnalogMeterVisible(visible) {
     }
     enableAnalogSMeter = visible; // Update the global variable
     saveSettings();
+}
+
+// Ensure a global setShowBandEdges exists so inline onchange handlers won't fail
+function setShowBandEdges(checked) {
+  try {
+    window.enableBandEdges = !!checked;
+  } catch (e) {}
+  try {
+    enableBandEdges = !!checked;
+  } catch (e) {}
+  try {
+    if (typeof spectrum !== 'undefined' && spectrum) {
+      spectrum.showBandEdges = !!checked;
+      spectrum.updateAxes();
+      if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+    }
+  } catch (e) {}
+  try { localStorage.setItem('enableBandEdges', checked ? 'true' : 'false'); } catch (e) {}
+  try { if (typeof saveSettings === 'function') saveSettings(); } catch (e) {}
 }
 
 // --- Frequency Memories logic: must be defined before use ---
@@ -1836,7 +2128,7 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(data => {
             dialogPlaceholder.innerHTML = data;
             
-            // Setup overlay buttons if spectrum exists
+            // Setup the overlay buttons if spectrum exists
             if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
                 spectrum.setupOverlayButtons();
             }

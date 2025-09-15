@@ -59,8 +59,9 @@
               </div>
               <!-- Row 2: Selector -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
-                <select id="memory_select" title="Select memory channel" style="width: 126px; min-width: 126px; max-width: 120px; padding: 1px 2px;"></select>
-              </div>
+                                <select id="memory_select" title="Select memory channel" style="width: 126px; min-width: 126px; max-width: 120px; padding: 1px 2px;"></select>
+                            </div>
+                              <!-- Row 2b: (Set Edges button moved next to band select to save vertical space) -->
               <!-- Row 3: Description textbox below selector, matching width -->
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; margin-bottom: 2px;">
                 <input id="memory_desc" title="Memory channel description, 20 characters max" type="text" maxlength="20" placeholder="Description" style="width: 120px; min-width: 120px; max-width: 120px; font-size: 13px; margin: 0 auto;" autocomplete="off" />
@@ -106,18 +107,24 @@
                             <option value="cwu">CWU</option>
                             <option value="cwl">CWL</option>
                             <option value="usb">USB</option>
-                            <option value="wusb">WUSB</option>
+                                <!-- <option value="wusb">WUSB</option> -->
                             <option value="lsb">LSB</option>
-                            <option value="wlsb">WLSB</option>
+                                <!-- <option value="wlsb">WLSB</option> -->
                             <option value="am">AM</option>
                             <option value="sam">SAM</option>
-                            <option value="nam">NAM</option>
                             <option value="fm">FM</option>
                             <option value="iq">IQ</option>
                             <option value="user1">USER1</option>
                             <option value="user2">USER2</option>
                             <option value="user3">USER3</option>
                         </select>
+                        <!-- Filter edge controls: compact inputs. Tight margins to save space -->
+                        <div style="display: inline-block; margin-left: 0px; vertical-align: middle;">
+                            <!-- Width increased to allow for numeric text + spinner; step set to 100 Hz for caret increments -->
+                            <input id="filterLowInput" type="number" step="100" inputmode="numeric" placeholder="Low" title="Filter low edge (units sent-as-is); arrows change by 100" style="width:8ch; margin-left:2px;" />
+                            <input id="filterHighInput" type="number" step="100" inputmode="numeric" placeholder="High" title="Filter high edge (units sent-as-is); arrows change by 100" style="width:8ch; margin-left:2px;" />
+                            <!-- Set button moved to memories box to save horizontal space -->
+                        </div>
                     </td>
                     <td rowspan=2 colspan=2>
                         <label for="zoom_level">Zoom:</label>
@@ -152,6 +159,7 @@
                         <select name="band" id="band" title="Select Channel.">
                             <option value="" disabled selected hidden>Band</option>
                         </select>
+                            <button id="edge_button" onclick="sendFilterEdges()" title="Send filter low/high edges" style="margin-left:2px; padding:2px 6px; font-size:90%">Edge</button>
                     </td>
                 </tr>
                 <tr>
@@ -350,24 +358,28 @@
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
         <li>The Channel Memory box saves / restores up to 50 current frequencies and modes with descriptions.</li>
+        <li> Space bar toggles audio (when not in full screen mode)</li>
+        <li>'f' to toggle fullscreen mode on and off</li>
     </ul>
-   <p><b>If the spectrum display/waterfall is focused, keyboard shortcuts are active:</b></p>
+   <p><b>If the spectrum display/waterfall is full screen, these keyboard shortcuts are active:</b></p>
    <ul>
-      <li>Press space to toggle pause/run mode</li>
-      <li>'f' to toggle fullscreen mode</li>
-      <li>'c' to step through the colormap options</li>
-      <li>up/down arrow shifts the spectrum trace up/down</li>
-      <li>left/right arrow increases/decreases amplitude range</li>
-      <li>'s'/'w' to increase/decrease size of spectrum display</li>
-      <li>'+'/'-' to increase/decrease FFT averaging</li>
-      <li>'m' to toggle max hold mode</li>
-      <li>'z' to center spectrum</li>
-      <li>'i' to zoom in spectrum</li>
-      <li>'o' to zoom out spectrum</li>
+        <li>Press space to toggle pause/run mode (only when focused on the spectrum display, otherwise audio is toggled)</li>
+        <li>'f' to toggle fullscreen mode on and off</li>
+        <li>'c' to step through the colormap options</li>
+        <li>up/down arrow shifts the spectrum trace up/down</li>
+        <li>left/right arrow increases/decreases amplitude range</li>
+        <li>'s'/'w' to increase/decrease size of spectrum display</li>
+        <li>'+'/'-' to increase/decrease FFT averaging</li>
+        <li>'m' to toggle max hold mode</li>
+        <li>'z' to center spectrum</li>
+        <li>'i' to zoom in spectrum</li>
+        <li>'o' to zoom out spectrum</li>
+        <li>'a' to autoscale</li>
    </ul>    
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
+            <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge markers, space toggles audio, set poll rate, adjust filter widths</li>
             <li>v2.75: Overlay trace load aligns spectrum, spectrum slides to follow mouse at ends, new keyboard shortcuts, up/down input boxes for spectrum floor and fft averaging</li>
             <li>v2.74: Added export to disk of max, min & current spectrum with load from disk to new trace and clear buttons, Freeze checkbox, Solar conditions and link</li>
             <li>v2.73: Increased maximum volume by 12 dB, save volume level</li>

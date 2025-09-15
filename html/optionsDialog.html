@@ -7,10 +7,16 @@
            <input type="checkbox" id="cksbFrequency" name="cksbFrequency" title="Switch modes to LSB/USB by frequency < or > than 10 MHz">
            <label for="cksbFrequency">Switch Modes by Frequency</label>
         </div>
-        <div style="margin-top: 5px;">
-           <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
-           <label for="ckonlyAutoscaleButton">Autoscale, manual only with button press</label>
-        </div>
+            <div style="margin-top: 5px; display:flex; align-items:center; gap:23px;">
+                <div>
+                   <input type="checkbox" id="ckonlyAutoscaleButton" name="ckonlyAutoscaleButton" title="Only Autoscale when Autoscale Button is pressed">
+                   <label for="ckonlyAutoscaleButton">Autoscale, manual only</label>
+                </div>
+                <div>
+                   <input type="checkbox" id="ckShowBandEdges" name="ckShowBandEdges" title="Show or hide ham band edge markers" onchange="setShowBandEdges(this.checked)">
+                   <label for="ckShowBandEdges">Show Band Edges</label>
+                </div>
+            </div>
         <div style="margin-top: 5px;">
            <input type="checkbox" id="ckAnalogSMeter" name="ckAnalogSMeter" onchange="setAnalogMeterVisible(this.checked)" title="Show or hide the analog S meter">
            <label for="ckAnalogSMeter">Enable Analog S Meter</label>
@@ -46,11 +52,14 @@
                 onchange="setSkipWaterfallLines(this.value)">
            </div>
         </div>
-        <div style="font-size:12px;margin-top:5px">
-         <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset Settings</button> 
-         <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; width:74px;" title="Write Info and/or start/stop periodic info export">Write Info</button>
-         <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:4px;" title="Enter minutes for periodic Write Info. 0 = off.">
-        </div>
+   <div style="font-size:12px;margin-top:5px; display:flex; align-items:center; gap:8px;">
+    <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset Settings</button>
+    <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; width:74px;" title="Write Info and/or start/stop periodic info export">Write Info</button>
+   <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:4px;" title="Enter minutes for periodic Write Info. 0 = off.">
+   <!-- Spectrum poll input (milliseconds) and send button -->
+   <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 6px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Set Poll</button>
+   <input type="number" id="spectrumPollInput" min="30" max="200" step="1" value="100" style="width:44px; font-size:12px; margin-left:4px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
+   </div>
         <div style="font-size:12px;margin-top:5px">
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" id="ExportMax" title="Export Max Hold as CSV File" onclick="spectrum.exportMaxHoldCSV()">Export Max</button>
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" id="ExportData" title="Export current spectrum data as CSV File" onclick="spectrum.exportCSV()">Export Data</button>
@@ -60,3 +69,4 @@
       </div>
      </form>
 </div>
+   <!-- Script for Show Band Edges moved to radio.js: setShowBandEdges, persistence and initialization are handled centrally in radio.js -->
