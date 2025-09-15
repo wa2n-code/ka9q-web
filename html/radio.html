@@ -297,15 +297,23 @@
     <div style="width: 100%;" id="stat_div">
         <table id="stat_table">
             <tr>
-                <td><span id="rf_gain"></span></td>
+                                <td>
+                                    <span id="rf_gain"></span>
+                                    <!-- RF gain control input to the right of the RF Gain status -->
+                                    <input id="rf_gain_input" type="number" step="0.1" style="width:70px; margin-left:6px;" title="Set RF gain (dB)" value="24.6" />
+                                </td>
                 <td>
                   <label for="fft_avg_input" style="margin-right:4px;">FFT average:</label>
                   <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging from 1 to 50" />
                 </td>
                 <td><span id="gps_time"></span></td>
             </tr>
-            <tr>
-                <td><span id="rf_attn"></span></td>
+                        <tr>
+                                <td>
+                                    <span id="rf_attn"></span>
+                                    <!-- RF atten control input to the right of the RF Atten status -->
+                                    <input id="rf_atten_input" type="number" step="0.1" style="width:70px; margin-left:6px;" title="Set RF attenuation (dB)" value="0.0" />
+                                </td>
                 <td><span id="hz_per_bin"></span></td>
                 <td><span id="uptime"></span></td>
             </tr>
@@ -314,8 +322,13 @@
                 <td><span id="bins"></span></td>
                 <td><span id="adc_overs"></span></td>
             </tr>
-            <tr>
-                <td><span id="rf_agc"></span></td>
+                        <tr>
+                                <td>
+                                    <span id="rf_agc"></span>
+                                    <!-- AGC enable checkbox to the right of the RF AGC status -->
+                                    <label style="margin-left:6px;">AGC</label>
+                                    <input id="rf_agc_checkbox" type="checkbox" style="margin-left:4px;" title="Enable/Disable RF AGC" checked />
+                                </td>
                 <td><span id="ssrc"></span></td>
                 <td><span id="adc_last_over"></span></td>
             </tr>

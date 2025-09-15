@@ -90,6 +90,7 @@ extern int init_control(struct session *sp);
 extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
+extern void control_set_gain_control(struct session *sp, char *agc_str, char *gain_str, char *atten_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -443,6 +444,19 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           char *high = strtok(NULL, ":");
           if (low != NULL && high != NULL) {
             control_set_filter_edges(sp, low, high);
+          }
+        }
+        break;
+      case 'g':
+      case 'G':
+        {
+          // Expect format: g:<agc_enable>:<rf_gain>:<rf_atten>
+          // agc_enable is "0" or "1"; rf_gain and rf_atten are floats (may be empty)
+          char *agc = strtok(NULL, ":");
+          char *gain = strtok(NULL, ":");
+          char *atten = strtok(NULL, ":");
+          if (agc != NULL) {
+            control_set_gain_control(sp, agc, gain, atten);
           }
         }
         break;
@@ -1076,6 +1090,45 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
   /* Encode LOW_EDGE then HIGH_EDGE as floats */
   encode_float(&bp, LOW_EDGE, lowf);
   encode_float(&bp, HIGH_EDGE, highf);
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  encode_eol(&bp);
+
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Send AGC enable / RF gain / RF atten settings to the control socket for this session.
+   agc_str is expected to be "0" or "1"; gain_str and atten_str are floats (may be NULL or empty).
+*/
+void control_set_gain_control(struct session *sp, char *agc_str, char *gain_str, char *atten_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  int agc_state = 0;
+  float gain = 0.0f;
+  float atten = 0.0f;
+
+  if (agc_str && strlen(agc_str) > 0) {
+    agc_state = (atoi(agc_str) != 0);
+  }
+  if (gain_str && strlen(gain_str) > 0) {
+    gain = strtof(gain_str, NULL);
+  }
+  if (atten_str && strlen(atten_str) > 0) {
+    atten = strtof(atten_str, NULL);
+  }
+
+  *bp++ = CMD; // Command
+  // Encode AGC enable as int, and RF gain / atten as floats
+  encode_int(&bp, AGC_ENABLE, agc_state);
+  encode_float(&bp, RF_GAIN, gain);
+  encode_float(&bp, RF_ATTEN, atten);
+  // Debugging output so operator can see what is being sent
+  fprintf(stderr, "control_set_gain_control: SSRC=%u AGC=%d RF_GAIN=%.3f RF_ATTEN=%.3f\n", sp ? sp->ssrc : 0, agc_state, gain, atten);
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
   encode_int(&bp, COMMAND_TAG, arc4random());
   encode_eol(&bp);

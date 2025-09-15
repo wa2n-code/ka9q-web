@@ -132,6 +132,7 @@
         } catch (e) {}
   // Attach listeners so spinner/caret presses auto-send
       try { attachEdgeInputListeners(); } catch (e) {}
+  try { sendGainControl(); } catch (e) {}
       }
       
       // Send a request to the server to change the spectrum poll interval (milliseconds).
@@ -179,6 +180,31 @@
           }
         } else {
           console.warn('WebSocket not open, cannot send filter edges');
+        }
+      }
+
+      // Send AGC / RF gain / RF attenuation to the server via websocket
+      function sendGainControl() {
+        const agcCb = document.getElementById('rf_agc_checkbox');
+        const gainEl = document.getElementById('rf_gain_input');
+        const attenEl = document.getElementById('rf_atten_input');
+        if (!agcCb || !gainEl || !attenEl) return;
+        const agc = agcCb.checked ? 1 : 0;
+        const gain = parseFloat(gainEl.value);
+        const atten = parseFloat(attenEl.value);
+        // If numeric inputs are empty, use 0.0 as a safe default
+        const gainStr = isNaN(gain) ? '0.0' : gain.toString();
+        const attenStr = isNaN(atten) ? '0.0' : atten.toString();
+        console.log('Attempting sendGainControl: agc=' + agc + ' gain=' + gainStr + ' atten=' + attenStr + ' wsState=' + (ws ? ws.readyState : 'no-ws'));
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send('g:' + agc.toString() + ':' + gainStr + ':' + attenStr);
+            console.log('Sent gain control: agc=' + agc + ' gain=' + gainStr + ' atten=' + attenStr);
+          } catch (e) {
+            console.error('Failed to send gain control:', e);
+          }
+        } else {
+          console.warn('WebSocket not open, cannot send gain control');
         }
       }
       
@@ -445,6 +471,42 @@
         ws.onclose=on_ws_close;
         ws.binaryType = "arraybuffer";
         ws.onerror = on_ws_error;
+        // Attach listeners for gain control UI — init() runs after DOM is loaded, so elements exist now
+        var agcCb = document.getElementById('rf_agc_checkbox');
+        var gainInput = document.getElementById('rf_gain_input');
+        var attenInput = document.getElementById('rf_atten_input');
+        if (agcCb) {
+          // checkbox: respond to both click and change for robustness
+          agcCb.addEventListener('change', function() {
+            console.log('rf_agc_checkbox change ->', agcCb.checked);
+            sendGainControl();
+          });
+          agcCb.addEventListener('click', function() {
+            console.log('rf_agc_checkbox click ->', agcCb.checked);
+            sendGainControl();
+          });
+        }
+        if (gainInput) {
+          // input event fires as the value changes; change fires on blur. Listen to both.
+          gainInput.addEventListener('input', function() {
+            console.log('rf_gain_input input ->', gainInput.value);
+            if (agcCb && !agcCb.checked) sendGainControl();
+          });
+          gainInput.addEventListener('change', function() {
+            console.log('rf_gain_input change ->', gainInput.value);
+            if (agcCb && !agcCb.checked) sendGainControl();
+          });
+        }
+        if (attenInput) {
+          attenInput.addEventListener('input', function() {
+            console.log('rf_atten_input input ->', attenInput.value);
+            if (agcCb && !agcCb.checked) sendGainControl();
+          });
+          attenInput.addEventListener('change', function() {
+            console.log('rf_atten_input change ->', attenInput.value);
+            if (agcCb && !agcCb.checked) sendGainControl();
+          });
+        }
         document.getElementById('waterfall').addEventListener("wheel", onWheel, false);
         document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
         document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
