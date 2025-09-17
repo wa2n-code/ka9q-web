@@ -1,4 +1,3 @@
-KA9Q_RADIO_DIR=../ka9q-radio/src
 PREFIX=/usr/local
 
 # for production
