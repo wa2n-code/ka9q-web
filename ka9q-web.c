@@ -34,10 +34,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <math.h>
 
-#include "misc.h"
-#include "multicast.h"
-#include "status.h"
 #include "radio.h"
 #include "config.h"
 
