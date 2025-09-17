@@ -9,14 +9,15 @@ DOPTS=-DNDEBUG=1 -O3
 
 COPTS=-march=native -std=gnu11 -pthread -Wall -funsafe-math-optimizations -D_GNU_SOURCE=1
 
-INCLUDES=-I$(KA9Q_RADIO_DIR)
+INCLUDES=
 
 RESOURCES_BASE_DIR=$(PREFIX)/share/ka9q-web
 
 CFLAGS=$(DOPTS) $(COPTS)
 CPPFLAGS=$(INCLUDES) -DRESOURCES_BASE_DIR=$(RESOURCES_BASE_DIR)
 
-KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_RADIO_DIR)/misc.o $(KA9Q_RADIO_DIR)/decode_status.o $(KA9Q_RADIO_DIR)/rtp.o
+# Use the bundled radio.c instead of external ka9q-radio object files
+KA9Q_RADIO_OBJS=radio.o
 
 all: ka9q-web
 
