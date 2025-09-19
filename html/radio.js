@@ -454,6 +454,8 @@
           console.log("loadSettings() returned false, setting defaults");
           setDefaultSettings(); 
         }
+        // Initialize filter edge inputs according to the current mode/preset
+        try { setFilterEdgesForMode(document.getElementById('mode')?.value || target_preset); } catch (e) {}
         spectrum.radio_pointer = this;
         page_title = "";
 
@@ -875,19 +877,60 @@
           setPlayerVolume(volumeSlider.value);
       }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
-      saveSettings();
-      // Do not auto-set filter edge inputs based on mode
+    saveSettings();
+    try { setFilterEdgesForMode(selected_mode); } catch (e) {}
   }
 
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
         ws.send("M:"+mode);
-  // Do not auto-set filter edge inputs based on mode
+      try { setFilterEdgesForMode(mode); } catch (e) {}
       saveSettings();
     }
 
-    // (Removed) mode-based automatic filter edge setting. Inputs remain under user control.
+    // Set filter input values according to mode defaults
+    function setFilterEdgesForMode(mode) {
+      const lowEl = document.getElementById('filterLowInput');
+      const highEl = document.getElementById('filterHighInput');
+      if (!lowEl || !highEl) return;
+      switch((mode||'').toLowerCase()) {
+        case 'usb':
+          lowEl.value = 50;
+          highEl.value = 3000;
+          break;
+        case 'lsb':
+          lowEl.value = -3000;
+          highEl.value = -50;
+          break;
+        case 'am':
+        case 'sam':
+        case 'user1':
+        case 'user2':
+        case 'user3':
+          lowEl.value = -5000;
+          highEl.value = 5000;
+          break;
+        case 'fm':
+          lowEl.value = -8000;
+          highEl.value = 8000;
+          break;
+        case 'cwl':
+        case 'cwu':
+          lowEl.value = -200;
+          highEl.value = 200;
+          break;
+        case 'iq':
+          lowEl.value = -5000;
+          highEl.value = 5000;
+          break;
+        default:
+          // leave inputs unchanged for other modes
+          break;
+      }
+      // After programmatic change, clear manual-dirty and update button state
+      try { edgeManualDirty = false; updateEdgeButtonState(); } catch (e) {}
+    }
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed

@@ -1128,7 +1128,7 @@ void control_set_gain_control(struct session *sp, char *agc_str, char *gain_str,
   encode_float(&bp, RF_GAIN, gain);
   encode_float(&bp, RF_ATTEN, atten);
   // Debugging output so operator can see what is being sent
-  fprintf(stderr, "control_set_gain_control: SSRC=%u AGC=%d RF_GAIN=%.3f RF_ATTEN=%.3f\n", sp ? sp->ssrc : 0, agc_state, gain, atten);
+  // fprintf(stderr, "control_set_gain_control: SSRC=%u AGC=%d RF_GAIN=%.3f RF_ATTEN=%.3f\n", sp ? sp->ssrc : 0, agc_state, gain, atten);
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
   encode_int(&bp, COMMAND_TAG, arc4random());
   encode_eol(&bp);
