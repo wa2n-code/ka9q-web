@@ -126,10 +126,7 @@
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
         ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
         fetchZoomTableSize(); // Fetch and store the zoom table size
-        // Initialize filter edge inputs based on the target preset
-        try {
-          setFilterEdgesForMode(target_preset);
-        } catch (e) {}
+        // Do not auto-clamp filter edges by mode; leave inputs as-is
   // Attach listeners so spinner/caret presses auto-send
       try { attachEdgeInputListeners(); } catch (e) {}
   try { sendGainControl(); } catch (e) {}
@@ -879,62 +876,18 @@
       }
       //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
       saveSettings();
-    // Update filter edge inputs to sensible defaults for this mode
-    setFilterEdgesForMode(selected_mode);
+      // Do not auto-set filter edge inputs based on mode
   }
 
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
         ws.send("M:"+mode);
-      setFilterEdgesForMode(mode);
+  // Do not auto-set filter edge inputs based on mode
       saveSettings();
     }
 
-    // Set filter input values according to mode defaults
-    function setFilterEdgesForMode(mode) {
-      const lowEl = document.getElementById('filterLowInput');
-      const highEl = document.getElementById('filterHighInput');
-      if (!lowEl || !highEl) return;
-  // Prevent auto-send while programmatically setting values
-  suppressEdgeAutoSend = true;
-      switch((mode||'').toLowerCase()) {
-        case 'cwu':
-        case 'cwl':
-          lowEl.value = -200;
-          highEl.value = 200;
-          break;
-        case 'usb':
-          lowEl.value = 50;
-          highEl.value = 3000;
-          break;
-        case 'lsb':
-          lowEl.value = -3000;
-          highEl.value = -50;
-          break;
-        case 'am':
-        case 'sam':
-          lowEl.value = -5000;
-          highEl.value = 5000;
-          break;
-        case 'fm':
-          lowEl.value = -8000;
-          highEl.value = 8000;
-          break;
-        case 'iq':
-          lowEl.value = -5000;
-          highEl.value = 5000;
-          break;
-        default:
-          // leave as-is
-          break;
-      }
-      // re-enable auto-send after programmatic change
-      suppressEdgeAutoSend = false;
-  // programmatic change isn't manual typing
-      edgeManualDirty = false;
-      updateEdgeButtonState();
-    }
+    // (Removed) mode-based automatic filter edge setting. Inputs remain under user control.
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed
@@ -2450,104 +2403,4 @@ window.addEventListener('DOMContentLoaded', function() {
     setInterval(fetchAndDisplayWWVSolarData, 60 * 60 * 1000);
 });
 
-(function() {
-  function getCurrentDemodMode() {
-    // Prefer the explicit #mode select value.
-    try {
-      var primary = document.getElementById('mode');
-      if (primary && typeof primary.value !== 'undefined') return String(primary.value).toLowerCase();
-    } catch (e) {
-      // fall through to other checks
-    }
-    // If a global variable 'mode' exists and is a string, return it.
-    if (typeof mode === 'string' && mode) return mode.toLowerCase();
-    // If currentMode is a string, return it.
-    if (typeof currentMode === 'string' && currentMode) return currentMode.toLowerCase();
-    var ids = ['mode_select','demod','preset','demodulator'];
-    for (var i = 0; i < ids.length; i++){
-      var el = document.getElementById(ids[i]);
-      if (el) {
-        if (typeof el.value !== 'undefined') return String(el.value).toLowerCase();
-        // If the element itself was passed around as a global, try returning its id
-        if (typeof el.id !== 'undefined') return String(el.id).toLowerCase();
-      }
-    }
-    return '';
-  }
-
-  function isFMMode(modeStr) {
-    if (!modeStr) return false;
-    modeStr = String(modeStr).toLowerCase();
-    return modeStr.indexOf('fm') !== -1 || modeStr.indexOf('wfm') !== -1 || modeStr.indexOf('efm') !== -1;
-  }
-
-  function updateFilterEdgeLimits() {
-    var modeStr = getCurrentDemodMode();
-    var limit = isFMMode(modeStr) ? 8000 : 6000;
-    var low = document.getElementById('filterLowInput');
-    var high = document.getElementById('filterHighInput');
-    console.log('Updating filter edge limits for mode:', modeStr, 'limit:', limit);
-    if (low) {
-      low.min = -limit;
-      low.max = limit;
-      // if current value is out of range, clamp it visually
-      var v = parseFloat(low.value);
-      if (!isNaN(v)) {
-        if (v < -limit) low.value = -limit;
-        if (v > limit) low.value = limit;
-      }
-    }
-    if (high) {
-      high.min = -limit;
-      high.max = limit;
-      var w = parseFloat(high.value);
-      if (!isNaN(w)) {
-        if (w < -limit) high.value = -limit;
-        if (w > limit) high.value = limit;
-      }
-    }
-  }
-
-  function clampValue(v, min, max) {
-    var n = parseFloat(v);
-    if (isNaN(n)) return 0;
-    if (n < min) return min;
-    if (n > max) return max;
-    return n;
-  }
-
-  // Override or define sendFilterEdges to enforce limits before sending to server
-  window.sendFilterEdges = function() {
-    var lowEl = document.getElementById('filterLowInput');
-    var highEl = document.getElementById('filterHighInput');
-    if (!lowEl || !highEl) return;
-    updateFilterEdgeLimits();
-    var modeStr = getCurrentDemodMode();
-    var limit = isFMMode(modeStr) ? 8000 : 6000;
-    var low = clampValue(lowEl.value, -limit, limit);
-    var high = clampValue(highEl.value, -limit, limit);
-    // ensure low <= high if that's desired; otherwise leave as-is
-    lowEl.value = low;
-    highEl.value = high;
-    try {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send('e:' + low + ':' + high);
-      }
-    } catch (err) {
-      console.error('sendFilterEdges: websocket send failed', err);
-    }
-  };
-
-  // Attach listeners to update limits when mode selection changes
-  document.addEventListener('DOMContentLoaded', function() {
-    updateFilterEdgeLimits();
-    var ids = ['mode','mode_select','demod','preset','demodulator'];
-    ids.forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el) el.addEventListener('change', updateFilterEdgeLimits);
-    });
-    // also update when zoom or other UI may change mode state
-    // expose update function globally for debugging
-    window.updateFilterEdgeLimits = updateFilterEdgeLimits;
-  });
-})();
+// Note: Mode-based clamping and sendFilterEdges override removed so raw input values are sent.
