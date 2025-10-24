@@ -30,6 +30,7 @@
  */
 function Spectrum(id, options) {
     // Handle options
+    this.startMinHoldTimestamp = Date.now() + 2000; // wait 2 seconds before grabbing real min values
     this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
     this.spanHz = (options && options.spanHz) ? options.spanHz : 0;
     this.wf_size = (options && options.wf_size) ? options.wf_size : 0;
@@ -788,7 +789,7 @@ Spectrum.prototype.drawSpectrum = function(bins) {
 
     // Min hold
     if (this.maxHold) {
-        if (!this.binsMin || this.binsMin.length != bins.length) {
+        if (!this.binsMin || (this.binsMin.length != bins.length) || (this.startMinHoldTimestamp > Date.now())){
             this.binsMin = Array.from(bins);
         } else {
             for (var i = 0; i < bins.length; i++) {
