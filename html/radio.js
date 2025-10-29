@@ -2435,6 +2435,13 @@ function fetchAndDisplayWWVSolarData() {
         bwHz = (typeof binWidthHz === 'number' ? binWidthHz : 1) * (typeof binCount === 'number' ? binCount : 1);
       }
 
+      // If the calculated bandwidth exceeds the system Nyquist (fs/2), clamp to fs/2.
+      // This commonly happens when the slider reaches zoom level 0; the proper displayed
+      // value should not exceed input_samprate/2 and is effectively zoom level 1's fs/2.
+      if (typeof input_samprate === 'number' && input_samprate > 0 && bwHz > (input_samprate / 2)) {
+        bwHz = input_samprate / 2;
+      }
+
       // Always format bandwidth in kHz with one decimal digit (e.g. "2.5 kHz")
       const kHzFloat = bwHz / 1000.0;
       const kHzNum = Number(kHzFloat.toFixed(1));
