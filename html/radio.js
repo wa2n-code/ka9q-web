@@ -2382,6 +2382,115 @@ function fetchAndDisplayWWVSolarData() {
         });
 }
 
+// --- Zoom bandwidth popup (shows transient kHz label while interacting with zoom slider) ---
+(function(){
+  let zoomBandwidthPopup = null;
+  let zoomPopupHideTimer = null;
+
+  function ensureZoomPopup() {
+    if (zoomBandwidthPopup) return zoomBandwidthPopup;
+    zoomBandwidthPopup = document.createElement('div');
+    zoomBandwidthPopup.id = 'zoom_bw_popup';
+    zoomBandwidthPopup.style.position = 'absolute';
+    zoomBandwidthPopup.style.zIndex = 2000;
+    zoomBandwidthPopup.style.padding = '6px 8px';
+    zoomBandwidthPopup.style.borderRadius = '6px';
+    zoomBandwidthPopup.style.background = 'rgba(0,0,0,0.85)';
+    zoomBandwidthPopup.style.color = '#fff';
+    zoomBandwidthPopup.style.fontSize = '13px';
+    zoomBandwidthPopup.style.fontFamily = 'sans-serif';
+    zoomBandwidthPopup.style.pointerEvents = 'none';
+    zoomBandwidthPopup.style.transition = 'opacity 0.12s ease';
+    zoomBandwidthPopup.style.opacity = '0';
+    zoomBandwidthPopup.style.whiteSpace = 'nowrap';
+    document.body.appendChild(zoomBandwidthPopup);
+    return zoomBandwidthPopup;
+  }
+
+  function hideZoomBandwidthPopupNow() {
+    if (zoomPopupHideTimer) { clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = null; }
+    if (zoomBandwidthPopup) zoomBandwidthPopup.style.opacity = '0';
+  }
+
+  function showZoomBandwidthPopupForValue(value, evt) {
+    try {
+      const zoomEl = document.getElementById('zoom_level');
+      if (!zoomEl) return;
+      const min = Number(zoomEl.min) || 0;
+      const max = Number(zoomEl.max) || (window.zoomTable ? window.zoomTable.length - 1 : 10);
+      let v = Number(value);
+      if (isNaN(v)) v = zoomEl.valueAsNumber || parseInt(zoomEl.value, 10) || 0;
+      v = Math.max(min, Math.min(max, v));
+
+      // determine zoomTable entry
+      const idx = Math.round(v);
+      const table = window.zoomTable || [];
+      const entry = table[idx] || table[Math.min(idx, table.length-1)] || null;
+      let bwHz = 0;
+      if (entry && typeof entry.bin_width === 'number' && typeof entry.bin_count === 'number') {
+        // Use full span for display
+        bwHz = (entry.bin_width * entry.bin_count);
+      } else {
+        // fallback to binWidthHz * binCount
+        bwHz = (typeof binWidthHz === 'number' ? binWidthHz : 1) * (typeof binCount === 'number' ? binCount : 1);
+      }
+
+      // Always format bandwidth in kHz with one decimal digit (e.g. "2.5 kHz")
+      const kHzFloat = bwHz / 1000.0;
+      const kHzNum = Number(kHzFloat.toFixed(1));
+      const kHzLabel = kHzNum.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      const label = `${kHzLabel} kHz`;
+
+      const popup = ensureZoomPopup();
+      popup.textContent = label;
+
+      // position above thumb: approximate using percentage of value across control
+      const rect = zoomEl.getBoundingClientRect();
+      const pct = (v - min) / Math.max(1, (max - min));
+      const pageLeft = rect.left + window.scrollX + pct * rect.width;
+      // center popup horizontally on the thumb
+      const popupWidth = popup.offsetWidth || 60;
+      const left = Math.round(pageLeft - (popupWidth / 2));
+      const top = Math.round(rect.top + window.scrollY - popup.offsetHeight - 10);
+      popup.style.left = `${left}px`;
+      popup.style.top = `${top}px`;
+      popup.style.opacity = '1';
+
+      // reset hide timer
+      if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer);
+      zoomPopupHideTimer = setTimeout(() => { hideZoomBandwidthPopupNow(); }, 900);
+    } catch (e) {
+      // ignore errors in optional UI
+      console.debug('zoom popup error', e);
+    }
+  }
+
+  // Attach listeners after DOM ready
+  window.addEventListener('DOMContentLoaded', function() {
+    const zoomEl = document.getElementById('zoom_level');
+    if (!zoomEl) return;
+
+    const onInput = function(e) { showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
+    const onPointerDown = function(e) { showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
+    const onPointerMove = function(e) { if (e.buttons) showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
+    const onPointerUp = function(e) { if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); };
+
+    zoomEl.addEventListener('input', onInput, { passive: true });
+    zoomEl.addEventListener('pointerdown', onPointerDown);
+    zoomEl.addEventListener('pointermove', onPointerMove);
+    // pointerup and mouseup/touchend
+    zoomEl.addEventListener('pointerup', onPointerUp);
+    zoomEl.addEventListener('mouseup', onPointerUp);
+    zoomEl.addEventListener('touchend', onPointerUp);
+    zoomEl.addEventListener('change', function(e){ showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); });
+
+    // hide on window resize or scroll
+    window.addEventListener('resize', hideZoomBandwidthPopupNow);
+    window.addEventListener('scroll', hideZoomBandwidthPopupNow);
+  });
+
+})();
+
 // Initial fetch and then every hour, after DOM is ready
 window.addEventListener('DOMContentLoaded', function() {
     fetchAndDisplayWWVSolarData();
