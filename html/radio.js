@@ -305,6 +305,13 @@
               //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
+              // Show bandwidth popup for the newly-applied zoom level (server-driven)
+              try {
+                if (typeof window.showZoomBandwidthPopupForValue === 'function') {
+                  // Use the server-provided z_level to show the accurate post-change bandwidth
+                  window.showZoomBandwidthPopupForValue(z_level);
+                }
+              } catch (e) { /* ignore popup errors */ }
             }
             var dataBuffer = evt.data.slice(i,data.byteLength);
             if (4 == bin_precision_bytes) {
@@ -978,6 +985,12 @@
       //autoAutoscale(15,true);
       autoAutoscale(100,true);
       saveSettings();
+      try {
+        if (typeof window.showZoomBandwidthPopupForValue === 'function') {
+          const z = document.getElementById('zoom_level')?.valueAsNumber;
+          window.showZoomBandwidthPopupForValue(z);
+        }
+      } catch (e) {}
     }
 
     function zoomout() {
@@ -992,6 +1005,12 @@
       // autoAutoscale(15,true); // 15 for n0
       autoAutoscale(100,true);
       saveSettings();
+      try {
+        if (typeof window.showZoomBandwidthPopupForValue === 'function') {
+          const z = document.getElementById('zoom_level')?.valueAsNumber;
+          window.showZoomBandwidthPopupForValue(z);
+        }
+      } catch (e) {}
     }
 
     function bumpAGCWithFM() {
@@ -2495,6 +2514,10 @@ function fetchAndDisplayWWVSolarData() {
     window.addEventListener('resize', hideZoomBandwidthPopupNow);
     window.addEventListener('scroll', hideZoomBandwidthPopupNow);
   });
+
+  // Expose popup helpers so other code (buttons) can trigger the same transient display
+  window.showZoomBandwidthPopupForValue = showZoomBandwidthPopupForValue;
+  window.hideZoomBandwidthPopupNow = hideZoomBandwidthPopupNow;
 
 })();
 
