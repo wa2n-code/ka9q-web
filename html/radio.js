@@ -985,12 +985,7 @@
       //autoAutoscale(15,true);
       autoAutoscale(100,true);
       saveSettings();
-      try {
-        if (typeof window.showZoomBandwidthPopupForValue === 'function') {
-          const z = document.getElementById('zoom_level')?.valueAsNumber;
-          window.showZoomBandwidthPopupForValue(z);
-        }
-      } catch (e) {}
+      
     }
 
     function zoomout() {
@@ -1005,12 +1000,7 @@
       // autoAutoscale(15,true); // 15 for n0
       autoAutoscale(100,true);
       saveSettings();
-      try {
-        if (typeof window.showZoomBandwidthPopupForValue === 'function') {
-          const z = document.getElementById('zoom_level')?.valueAsNumber;
-          window.showZoomBandwidthPopupForValue(z);
-        }
-      } catch (e) {}
+      
     }
 
     function bumpAGCWithFM() {
@@ -2405,6 +2395,7 @@ function fetchAndDisplayWWVSolarData() {
 (function(){
   let zoomBandwidthPopup = null;
   let zoomPopupHideTimer = null;
+  let lastShownZoomIndex = null;
 
   function ensureZoomPopup() {
     if (zoomBandwidthPopup) return zoomBandwidthPopup;
@@ -2443,6 +2434,18 @@ function fetchAndDisplayWWVSolarData() {
 
       // determine zoomTable entry
       const idx = Math.round(v);
+      // Determine if this call originated from a user pointer down (click/touch) event.
+      const isUserDown = evt && (evt.type === 'pointerdown' || evt.type === 'mousedown' || evt.type === 'touchstart');
+      // If we've already shown the popup for this zoom index, just extend the hide timer and don't re-show,
+      // unless this invocation was a direct user selection (pointer/mouse down) in which case we want to
+      // present the bandwidth even if the zoom index hasn't changed.
+      if (idx === lastShownZoomIndex && !isUserDown) {
+        if (zoomPopupHideTimer) {
+          clearTimeout(zoomPopupHideTimer);
+          zoomPopupHideTimer = setTimeout(() => { hideZoomBandwidthPopupNow(); }, 900);
+        }
+        return; // no change in zoom level and not a user-down event, don't display again
+      }
       const table = window.zoomTable || [];
       const entry = table[idx] || table[Math.min(idx, table.length-1)] || null;
       let bwHz = 0;
@@ -2467,7 +2470,8 @@ function fetchAndDisplayWWVSolarData() {
       const kHzLabel = kHzNum.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
       const label = `${kHzLabel} kHz`;
 
-      const popup = ensureZoomPopup();
+  const popup = ensureZoomPopup();
+  lastShownZoomIndex = idx;
       popup.textContent = label;
 
       // position above thumb: approximate using percentage of value across control
@@ -2497,12 +2501,36 @@ function fetchAndDisplayWWVSolarData() {
     if (!zoomEl) return;
 
     const onInput = function(e) { showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
-    const onPointerDown = function(e) { showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
+    // Show popup only when user *selects* the slider thumb (left button near the thumb)
+    const onPointerDown = function(e) {
+      try {
+        // Only handle left-button presses
+        if (typeof e.button === 'number' && e.button !== 0) return;
+        const rect = zoomEl.getBoundingClientRect();
+        const min = Number(zoomEl.min) || 0;
+        const max = Number(zoomEl.max) || 0;
+        const v = (typeof zoomEl.valueAsNumber === 'number' && !isNaN(zoomEl.valueAsNumber)) ? zoomEl.valueAsNumber : parseInt(zoomEl.value, 10) || 0;
+        const pct = (v - min) / Math.max(1, (max - min));
+        const thumbX = rect.left + pct * rect.width;
+        // threshold in pixels: adaptive but bounded
+        const threshold = Math.max(8, Math.min(20, rect.width * 0.03));
+        const clientX = (typeof e.clientX === 'number') ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
+        if (Math.abs(clientX - thumbX) <= threshold) {
+          showZoomBandwidthPopupForValue(v, e);
+        }
+      } catch (err) {
+        // fallback to permissive behavior on error
+        showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e);
+      }
+    };
+    // Some browsers/devices may fire mousedown instead of pointerdown for the native thumb.
+    const onMouseDown = function(e) { onPointerDown(e); };
     const onPointerMove = function(e) { if (e.buttons) showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
     const onPointerUp = function(e) { if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); };
 
     zoomEl.addEventListener('input', onInput, { passive: true });
-    zoomEl.addEventListener('pointerdown', onPointerDown);
+  zoomEl.addEventListener('pointerdown', onPointerDown);
+  zoomEl.addEventListener('mousedown', onMouseDown);
     zoomEl.addEventListener('pointermove', onPointerMove);
     // pointerup and mouseup/touchend
     zoomEl.addEventListener('pointerup', onPointerUp);
