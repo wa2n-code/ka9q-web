@@ -1169,7 +1169,7 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
 {
         const useN0 = false;
         const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
-        const waterfallBias = 11;    // Further bias the waterfall range by this amount
+        const waterfallBias = 8;    // Further bias the waterfall range by this amount (was 11 changed 11-29-2025)
         if(getNewMinMax){
             if(useN0) { // N0 took too long to settle...
                 this.minimum = Math.round(noise_density_audio) + 17;
