@@ -1680,22 +1680,27 @@ void *ctrl_thread(void *arg) {
           // Should this be TLV encoding like the radiod RTP streams?
           // Dealing with endian and zero suppression in javascript
           // looked painful, so I went quick-n-dirty here
-          memcpy((void*)ip,&Frontend.samprate,4); ip++;
-          memcpy((void*)ip,&Frontend.rf_agc,4); ip++;
-          memcpy((void*)ip,&Frontend.samples,8); ip+=2;
-          memcpy((void*)ip,&Frontend.overranges,8); ip+=2;
-          memcpy((void*)ip,&Frontend.samp_since_over,8); ip+=2;
-          memcpy((void*)ip,&Frontend.timestamp,8); ip+=2;
-          memcpy((void*)ip,&Channel.status.blocks_since_poll,8); ip+=2;
-          memcpy((void*)ip,&Frontend.rf_atten,4); ip++;
-          memcpy((void*)ip,&Frontend.rf_gain,4); ip++;
-          memcpy((void*)ip,&Frontend.rf_level_cal,4); ip++;
-          memcpy((void*)ip,&sp->if_power,4); ip++;
-          memcpy((void*)ip,&sp->noise_density_audio,4); ip++;
-          memcpy((void*)ip,&sp->zoom_index,4); ip++;
-          memcpy((void*)ip,&bin_precision_bytes,4); ip++;
-          memcpy((void*)ip,&sp->bins_autorange_offset,4); ip++;
-          memcpy((void*)ip,&sp->bins_autorange_gain,4); ip++;
+	  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
+	  *ip++ = (uint32_t)Frontend.rf_agc;
+	  *(uint64_t *)ip = (uint64_t)Frontend.samples;
+	  ip += 2;
+	  *(uint64_t *)ip = (uint64_t)Frontend.overranges;
+	  ip += 2;
+	  *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
+	  ip += 2;
+	  *(uint64_t *)ip = (uint64_t)Frontend.timestamp;
+	  ip += 2;
+	  *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
+	  ip += 2;
+	  *ip++ = (uint32_t)Frontend.rf_atten;
+	  *ip++ = (uint32_t)Frontend.rf_gain;
+	  *ip++ = (uint32_t)Frontend.rf_level_cal;
+	  *ip++ = (uint32_t)Frontend.if_power;
+	  *ip++ = (uint32_t)sp->noise_density_audio;
+	  *ip++ = (uint32_t)sp->zoom_index;
+	  *ip++ = (uint32_t)bin_precision_bytes;
+	  *ip++ = (uint32_t)sp->bins_autorange_offset;
+	  *ip++ = (uint32_t)sp->bins_autorange_gain;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1729,11 +1734,11 @@ void *ctrl_thread(void *arg) {
               float *fp=(float*)ip;
               // below center
               for(int i=npower/2; i < npower; i++) {
-                *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
+                *fp++=(powers[i] == 0) ? -120.0 : 10*log10f(powers[i]);
               }
               // above center
               for(int i=0; i < npower/2; i++) {
-                *fp++=(powers[i] == 0) ? -120.0 : 10*log10(powers[i]);
+                *fp++=(powers[i] == 0) ? -120.0 : 10*log10f(powers[i]);
               }
               size=(uint8_t*)fp-&output_buffer[0];
             }
@@ -1744,14 +1749,14 @@ void *ctrl_thread(void *arg) {
               int16_t *fp=(int16_t*)ip;
               // below center
               for(int i=npower/2; i < npower; i++) {
-                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10f(powers[i]);
                 powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
                 powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
                 *fp++=powers[i] * 100.0;
               }
               // above center
               for(int i=0; i < npower/2; i++) {
-                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10f(powers[i]);
                 powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
                 powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
                 *fp++=powers[i] * 100.0;
@@ -1794,12 +1799,12 @@ void *ctrl_thread(void *arg) {
               uint8_t *fp=(uint8_t*)ip;
               // below center
               for(int i=npower/2; i < npower; i++) {
-                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10f(powers[i]);
                 *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
               }
               // above center
               for(int i=0; i < npower/2; i++) {
-                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10(powers[i]);
+                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10f(powers[i]);
                 *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
               }
               size=(uint8_t*)fp-&output_buffer[0];
