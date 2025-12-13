@@ -2411,7 +2411,11 @@ Spectrum.prototype.getHamBands = function() {
     var bands_mhz = [
         { low: 1.8, high: 2.0, label: '160m' },
         { low: 3.5, high: 4.0, label: '80m' },
-        { low: 5.0, high: 5.4, label: '60m' },
+	{ low: 5.3306, high: 5.3334, label: '60m ch1' },
+	{ low: 5.3466, high: 5.3494, label: '60m ch2' },
+	{ low: 5.3515, high: 5.3665, label: '60m' },
+	{ low: 5.3716, high: 5.3744, label: '60m ch4' },
+	{ low: 5.4036, high: 5.4064, label: '60m ch5' },
         { low: 7.0, high: 7.30, label: '40m' },
         { low: 10.1, high: 10.15, label: '30m' },
         { low: 14.0, high: 14.35, label: '20m' },
@@ -2420,6 +2424,10 @@ Spectrum.prototype.getHamBands = function() {
         { low: 24.89, high: 24.99, label: '12m' },
         { low: 28.0, high: 29.7, label: '10m' },
         { low: 50.0, high: 54.0, label: '6m' }
+	{ low: 144.0, high: 148.0, label: '2m' },
+	{ low: 222.0, high: 225.0, label: '125cm' },
+	{ low: 420.0, high: 450.0, label: '70cm'  },
+	{ low: 1240.0, high: 1300.0, label: '23cm' },
     ];
     return bands_mhz.map(function(b) { return { lowHz: b.low * 1e6, highHz: b.high * 1e6, label: b.label }; });
 };
