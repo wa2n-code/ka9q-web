@@ -1680,6 +1680,14 @@ void *ctrl_thread(void *arg) {
           // Should this be TLV encoding like the radiod RTP streams?
           // Dealing with endian and zero suppression in javascript
           // looked painful, so I went quick-n-dirty here
+
+
+	  // The types of some elements of struct frontend and struct channel changed in radiod
+	  // eg, Frontend.samprate became a double. This broke the memcpy calls
+	  // Changed memcpy to assignments with casts, which is much more portable
+	  // But yeah, this message should be TLV encoded or something
+	  // And it's what you get when you steal internal data structures from another
+	  // program maintained by someone else... - 12 Dec 2025 KA9Q
 	  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
 	  *ip++ = (uint32_t)Frontend.rf_agc;
 	  *(uint64_t *)ip = (uint64_t)Frontend.samples;
