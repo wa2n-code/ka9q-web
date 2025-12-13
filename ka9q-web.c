@@ -1681,6 +1681,10 @@ void *ctrl_thread(void *arg) {
           // Dealing with endian and zero suppression in javascript
           // looked painful, so I went quick-n-dirty here
           memcpy((void*)ip,&Frontend.samprate,4); ip++;
+          if (Frontend.samprate == 0) {
+              fprintf(stderr, "[ctrl_thread] Warning: Frontend.samprate is 0 (bogus value)\n");
+              // Optionally: set a default or take corrective action here
+          }
           memcpy((void*)ip,&Frontend.rf_agc,4); ip++;
           memcpy((void*)ip,&Frontend.samples,8); ip+=2;
           memcpy((void*)ip,&Frontend.overranges,8); ip+=2;
