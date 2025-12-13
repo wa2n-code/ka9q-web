@@ -2423,11 +2423,11 @@ Spectrum.prototype.getHamBands = function() {
         { low: 21.0, high: 21.45, label: '15m' },
         { low: 24.89, high: 24.99, label: '12m' },
         { low: 28.0, high: 29.7, label: '10m' },
-        { low: 50.0, high: 54.0, label: '6m' }
+        { low: 50.0, high: 54.0, label: '6m' },
 	{ low: 144.0, high: 148.0, label: '2m' },
 	{ low: 222.0, high: 225.0, label: '125cm' },
 	{ low: 420.0, high: 450.0, label: '70cm'  },
-	{ low: 1240.0, high: 1300.0, label: '23cm' },
+	{ low: 1240.0, high: 1300.0, label: '23cm' }
     ];
     return bands_mhz.map(function(b) { return { lowHz: b.low * 1e6, highHz: b.high * 1e6, label: b.label }; });
 };
