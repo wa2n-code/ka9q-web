@@ -273,7 +273,7 @@ static void check_frequency(struct session *sp) {
     // Only log if the tuned frequency is outside the visible range after all adjustments
     if (((int64_t)sp->frequency > max_f) || ((int64_t)sp->frequency < min_f)) {
         int freq_bin_final = ((int64_t)sp->frequency - min_f) / sp->bin_width;
-        printf("[check_frequency] Final: tuned freq %u is at bin %d (outside visible range [0-%d])\n", 
+        printf("[check_frequency] Final: tuned freq %u is at bin %d (outside visible range [0-%d])\n",
                sp->frequency/1000, freq_bin_final, sp->bins-1);
     }
 }
@@ -344,27 +344,27 @@ static void adjust_center_within_bounds(struct session *sp) {
 }
 
 /*
-The `websocket_cb` function is the central callback for handling all WebSocket communication between the web client 
-and the SDR server. It is invoked whenever a message is received from a client or when the connection state changes. 
-This function is responsible for interpreting client commands, managing per-client session state, and coordinating the 
+The `websocket_cb` function is the central callback for handling all WebSocket communication between the web client
+and the SDR server. It is invoked whenever a message is received from a client or when the connection state changes.
+This function is responsible for interpreting client commands, managing per-client session state, and coordinating the
 creation and control of background threads for spectrum and audio streaming.
 
-At the start, the function locates the session associated with the incoming WebSocket connection. If the connection is 
-closing or the client has disconnected, it performs cleanup by stopping any active threads, releasing resources, and 
+At the start, the function locates the session associated with the incoming WebSocket connection. If the connection is
+closing or the client has disconnected, it performs cleanup by stopping any active threads, releasing resources, and
 removing the session from the global list.
 
-When a message is received, the function reads and parses the command, which may request actions such as starting or 
-stopping spectrum or audio streaming, changing the frequency, adjusting the demodulator mode, or modifying the spectrum 
-zoom level. Each command is processed by updating the session state, sending control commands to the radio backend, 
-or starting/stopping per-session threads as needed. For example, a spectrum start command will launch a 
-dedicated spectrum thread for that client, while a frequency change will update the session’s frequency and 
+When a message is received, the function reads and parses the command, which may request actions such as starting or
+stopping spectrum or audio streaming, changing the frequency, adjusting the demodulator mode, or modifying the spectrum
+zoom level. Each command is processed by updating the session state, sending control commands to the radio backend,
+or starting/stopping per-session threads as needed. For example, a spectrum start command will launch a
+dedicated spectrum thread for that client, while a frequency change will update the session’s frequency and
 notify the backend.
 
-The function uses mutexes to ensure thread-safe access to shared session data and to synchronize operations that 
-affect the WebSocket or session state. After processing the command, it unlocks the session mutex and signals 
+The function uses mutexes to ensure thread-safe access to shared session data and to synchronize operations that
+affect the WebSocket or session state. After processing the command, it unlocks the session mutex and signals
 readiness for more data.
 
-Overall, `websocket_cb` acts as the main dispatcher for client interactions, managing session lifecycle, interpreting 
+Overall, `websocket_cb` acts as the main dispatcher for client interactions, managing session lifecycle, interpreting
 commands, and ensuring robust, concurrent operation for multiple clients in a real-time SDR web application.
 */
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
@@ -558,26 +558,26 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
 }
 
 /*
-The `main` function serves as the entry point for the KA9Q Web SDR server application. Its primary responsibilities 
-are to parse command-line arguments, initialize global resources, set up network connections, and launch the 
+The `main` function serves as the entry point for the KA9Q Web SDR server application. Its primary responsibilities
+are to parse command-line arguments, initialize global resources, set up network connections, and launch the
 web server that handles HTTP and WebSocket requests.
 
-At startup, the function parses command-line options to configure parameters such as the web server port, resource 
-directory, multicast group address, radio description, bin precision, verbosity, and whether to run with real-time scheduling. 
+At startup, the function parses command-line options to configure parameters such as the web server port, resource
+directory, multicast group address, radio description, bin precision, verbosity, and whether to run with real-time scheduling.
 These options allow the server to be flexibly configured for different environments and use cases.
 
-After parsing options, the function prints the server version and initializes the global session mutex to ensure 
-thread-safe access to session data. It then calls `init_connections` to set up multicast sockets and start background 
+After parsing options, the function prints the server version and initializes the global session mutex to ensure
+thread-safe access to session data. It then calls `init_connections` to set up multicast sockets and start background
 threads for control and audio processing. If these initializations fail, the program exits with an error.
 
-Next, the function creates and configures the Onion web server object, enabling multi-threaded operation and disabling 
-the default signal handler. It sets up the URL routing table, mapping specific paths to handler functions for 
-serving static files, status and version information, and the main SDR web interface. The web server is then 
+Next, the function creates and configures the Onion web server object, enabling multi-threaded operation and disabling
+the default signal handler. It sets up the URL routing table, mapping specific paths to handler functions for
+serving static files, status and version information, and the main SDR web interface. The web server is then
 started with `onion_listen`, entering the main event loop to handle incoming HTTP and WebSocket connections.
 
-When the server is stopped, the function cleans up by freeing the Onion server object and returns an exit code. 
-Throughout its execution, the `main` function ensures that all necessary resources are initialized and that the 
-server is ready to handle multiple clients concurrently, providing a robust foundation for real-time SDR web 
+When the server is stopped, the function cleans up by freeing the Onion server object and returns an exit code.
+Throughout its execution, the `main` function ensures that all necessary resources are initialized and that the
+server is ready to handle multiple clients concurrently, providing a robust foundation for real-time SDR web
 operations.
 */
 int main(int argc,char **argv) {
@@ -645,21 +645,21 @@ int main(int argc,char **argv) {
 }
 
 /*
-The `status` function is an HTTP handler responsible for generating and returning a real-time status web page 
-for the KA9Q Web SDR server. When a client requests the `/status` URL, this function is invoked to produce an 
+The `status` function is an HTTP handler responsible for generating and returning a real-time status web page
+for the KA9Q Web SDR server. When a client requests the `/status` URL, this function is invoked to produce an
 HTML page summarizing the current state of all active sessions.
 
-The function begins by writing the basic HTML structure and a page header to the response. It then displays the 
-total number of active sessions. If there are any sessions, it generates an HTML table listing key details for 
-each one, including the client identifier, SSRC, frequency range, tuned frequency, center frequency, number of 
+The function begins by writing the basic HTML structure and a page header to the response. It then displays the
+total number of active sessions. If there are any sessions, it generates an HTML table listing key details for
+each one, including the client identifier, SSRC, frequency range, tuned frequency, center frequency, number of
 spectrum bins, bin width, and whether audio streaming is enabled for that session.
 
-To populate the table, the function iterates through the linked list of session structures, extracting and formatting 
-the relevant information for each session. After listing all sessions, it closes the table and completes the 
+To populate the table, the function iterates through the linked list of session structures, extracting and formatting
+the relevant information for each session. After listing all sessions, it closes the table and completes the
 HTML document.
 
-This status page provides a convenient, human-readable overview of the server’s current activity, making it useful 
-for monitoring, debugging, and administration. The function is designed to be efficient and thread-safe, ensuring 
+This status page provides a convenient, human-readable overview of the server’s current activity, making it useful
+for monitoring, debugging, and administration. The function is designed to be efficient and thread-safe, ensuring
 that the displayed information accurately reflects the server’s real-time state.
 */
 onion_connection_status status(void *data, onion_request * req,
@@ -717,22 +717,22 @@ onion_connection_status version(void *data, onion_request * req,
 }
 
 /*
-The `home` function is an HTTP handler responsible for serving the main entry point of the KA9Q Web SDR web 
-interface. When a client accesses the root URL of the server, this function is invoked to either redirect the 
+The `home` function is an HTTP handler responsible for serving the main entry point of the KA9Q Web SDR web
+interface. When a client accesses the root URL of the server, this function is invoked to either redirect the
 client to the main radio interface or to establish a new WebSocket session.
 
-If the request is not a WebSocket upgrade, the function responds with a minimal HTML page that immediately 
+If the request is not a WebSocket upgrade, the function responds with a minimal HTML page that immediately
 redirects the client to `radio.html`, ensuring users are directed to the main application interface.
 
-If the request is a WebSocket upgrade, the function creates a new session structure for the client, assigning 
-it a unique SSRC (synchronization source identifier) and initializing session parameters such as frequency, 
-center frequency, bin width, and zoom level. It also records the client's description and sets up mutexes for 
-thread safety. The new session is added to the global session list, and initial control commands are sent to 
+If the request is a WebSocket upgrade, the function creates a new session structure for the client, assigning
+it a unique SSRC (synchronization source identifier) and initializing session parameters such as frequency,
+center frequency, bin width, and zoom level. It also records the client's description and sets up mutexes for
+thread safety. The new session is added to the global session list, and initial control commands are sent to
 configure the radio backend for this session.
 
-Finally, the function registers the `websocket_cb` callback to handle all future WebSocket communication for 
-this session and returns a status indicating that the connection has been upgraded to a WebSocket. This design 
-ensures that each client receives a dedicated session and that the server is ready to handle real-time interaction 
+Finally, the function registers the `websocket_cb` callback to handle all future WebSocket communication for
+this session and returns a status indicating that the connection has been upgraded to a WebSocket. This design
+ensures that each client receives a dedicated session and that the server is ready to handle real-time interaction
 with the web interface.
 */
 onion_connection_status home(void *data, onion_request * req,
@@ -795,27 +795,27 @@ onion_connection_status home(void *data, onion_request * req,
   return OCS_WEBSOCKET;
 }
 
-/* 
-The `audio_thread` function is a POSIX thread entry point designed to handle audio packet reception 
-and forwarding in a networked application. It begins by allocating memory for a `packet` structure, 
-which will be used to store incoming audio data. The function then waits for the `Channel.output.dest_socket` 
+/*
+The `audio_thread` function is a POSIX thread entry point designed to handle audio packet reception
+and forwarding in a networked application. It begins by allocating memory for a `packet` structure,
+which will be used to store incoming audio data. The function then waits for the `Channel.output.dest_socket`
 to be initialized (its `sa_family` field set), using a mutex and condition variable to synchronize with other
  threads. Once the destination socket is ready, it calls `listen_mcast` to join a multicast group and obtain a
  socket file descriptor for receiving audio data.
 
-If the socket setup fails (`Input_fd == -1`), the thread exits cleanly. Otherwise, the thread enters an infinite 
+If the socket setup fails (`Input_fd == -1`), the thread exits cleanly. Otherwise, the thread enters an infinite
 loop where it waits for incoming packets using `recvfrom`. If an error occurs (other than an interrupt), it logs
 the error and briefly sleeps before retrying. It also skips packets that are too small to be valid RTP packets.
 
-For each valid packet, the function parses the RTP header and adjusts the data pointer and length accordingly, 
+For each valid packet, the function parses the RTP header and adjusts the data pointer and length accordingly,
 handling RTP padding if present. It then attempts to find an active session matching the packet's SSRC (synchronization source identifier).
-If a session is found and is marked as audio-active, the function locks the session's websocket mutex, sets the 
-websocket opcode to binary, and writes the packet data to the websocket. If the write fails, it logs an error. 
+If a session is found and is marked as audio-active, the function locks the session's websocket mutex, sets the
+websocket opcode to binary, and writes the packet data to the websocket. If the write fails, it logs an error.
 After handling the packet, it unlocks the session mutex.
 
 Throughout, the function uses careful synchronization to avoid race conditions, and it is robust against
-malformed or unexpected network data. The design allows for real-time forwarding of audio streams from 
-multicast to websocket clients, making it suitable for applications like networked audio streaming or 
+malformed or unexpected network data. The design allows for real-time forwarding of audio streams from
+multicast to websocket clients, making it suitable for applications like networked audio streaming or
 conferencing.
 */
 static void *audio_thread(void *arg) {
@@ -890,20 +890,20 @@ The `init_connections` function is responsible for initializing network connecti
 for a networked application that uses multicast communication and threading. It takes a multicast group address as
 input and performs several key steps to set up the environment.
 
-First, it prepares a buffer (`iface`) to store the name of the network interface used for multicast. It then 
+First, it prepares a buffer (`iface`) to store the name of the network interface used for multicast. It then
 initializes a mutex (`ctl_mutex`) to ensure thread-safe access to shared resources. The function calls `resolve_mcast`
 to resolve the multicast group address and populate the `Metadata_dest_socket` structure, also determining the appropriate
-network interface. Next, it attempts to listen for multicast status messages by calling `listen_mcast`. If this fails 
+network interface. Next, it attempts to listen for multicast status messages by calling `listen_mcast`. If this fails
 (indicated by `Status_fd == -1`), it logs an error and returns an error code.
 
-If the status socket is set up successfully, the function tries to connect to the multicast control channel using `connect_mcast`. 
-If this connection fails, it logs an error and returns an error code as well. Assuming both sockets are ready, 
-the function creates two threads: one for control operations (`ctrl_thread`) and one for audio processing (`audio_thread`). 
-For each thread, it checks if thread creation was successful; if not, it logs an error. If successful, it assigns 
+If the status socket is set up successfully, the function tries to connect to the multicast control channel using `connect_mcast`.
+If this connection fails, it logs an error and returns an error code as well. Assuming both sockets are ready,
+the function creates two threads: one for control operations (`ctrl_thread`) and one for audio processing (`audio_thread`).
+For each thread, it checks if thread creation was successful; if not, it logs an error. If successful, it assigns
 a human-readable name to each thread using `pthread_setname_np` for easier debugging and monitoring.
 
-Finally, if all steps succeed, the function returns a success code (`EX_OK`). This setup ensures that the application 
-can communicate over multicast, handle control messages, and process audio data concurrently in separate threads, 
+Finally, if all steps succeed, the function returns a success code (`EX_OK`). This setup ensures that the application
+can communicate over multicast, handle control messages, and process audio data concurrently in separate threads,
 providing a robust foundation for real-time networked operations.
 */
 int init_connections(const char *multicast_group) {
@@ -944,24 +944,24 @@ int init_connections(const char *multicast_group) {
 }
 
 /*
-The `init_control` function is responsible for initializing control communication for a session in a networked 
-application, likely related to radio or audio streaming. It takes a pointer to a `session` structure as its 
-argument. The function prepares and sends two command packets over a control socket, each packet configuring a 
+The `init_control` function is responsible for initializing control communication for a session in a networked
+application, likely related to radio or audio streaming. It takes a pointer to a `session` structure as its
+argument. The function prepares and sends two command packets over a control socket, each packet configuring a
 specific SSRC (Synchronization Source identifier) for the session.
 
-First, the function creates a command buffer and a pointer (`bp`) to build the command message. It writes a 
-command identifier, encodes a frequency value, the session's SSRC, a randomly generated command tag, and a 
-preset string ("am") into the buffer. It then finalizes the command with an end-of-line marker and calculates 
-the total length of the command. The function locks a mutex (`ctl_mutex`) to ensure thread-safe access to the 
-control socket (`Ctl_fd`) and sends the command. If the send operation fails, it logs an error message. The 
+First, the function creates a command buffer and a pointer (`bp`) to build the command message. It writes a
+command identifier, encodes a frequency value, the session's SSRC, a randomly generated command tag, and a
+preset string ("am") into the buffer. It then finalizes the command with an end-of-line marker and calculates
+the total length of the command. The function locks a mutex (`ctl_mutex`) to ensure thread-safe access to the
+control socket (`Ctl_fd`) and sends the command. If the send operation fails, it logs an error message. The
 mutex is then unlocked.
 
-The process is repeated for a second command, this time incrementing the SSRC by one and omitting the preset string. 
+The process is repeated for a second command, this time incrementing the SSRC by one and omitting the preset string.
 Again, the command is sent over the control socket with proper mutex protection.
 
-After sending both commands, the function initializes the demodulator for the channel by calling `init_demod(&Channel)`. 
-It also resets the frontend frequency and intermediate frequency (IF) values to "not a number" (`NAN`), indicating 
-that these values are not currently set. Finally, the function returns a success code (`EX_OK`). This setup ensures 
+After sending both commands, the function initializes the demodulator for the channel by calling `init_demod(&Channel)`.
+It also resets the frontend frequency and intermediate frequency (IF) values to "not a number" (`NAN`), indicating
+that these values are not currently set. Finally, the function returns a success code (`EX_OK`). This setup ensures
 that the session is properly configured and ready for further control operations.
 */
 int init_control(struct session *sp) {
@@ -1009,27 +1009,27 @@ int init_control(struct session *sp) {
 }
 
 /*
-The `control_set_frequency` function is designed to send a command to set the frequency for a given 
-session in a networked application, likely related to radio or audio streaming. It takes two parameters: 
-a pointer to a `session` structure (`sp`) and a string (`str`) representing the desired frequency in 
+The `control_set_frequency` function is designed to send a command to set the frequency for a given
+session in a networked application, likely related to radio or audio streaming. It takes two parameters:
+a pointer to a `session` structure (`sp`) and a string (`str`) representing the desired frequency in
 kilohertz (kHz).
 
-The function first checks if the input string is non-empty. If so, it begins constructing a command packet 
-in the `cmdbuffer` array. The first byte of the buffer is set to a constant `CMD`, indicating the type of 
-command. The function then converts the frequency string from kHz to hertz (Hz) by parsing it as a double 
-and multiplying by 1000, ensuring the value is positive with `fabs`. This frequency value is stored in the 
+The function first checks if the input string is non-empty. If so, it begins constructing a command packet
+in the `cmdbuffer` array. The first byte of the buffer is set to a constant `CMD`, indicating the type of
+command. The function then converts the frequency string from kHz to hertz (Hz) by parsing it as a double
+and multiplying by 1000, ensuring the value is positive with `fabs`. This frequency value is stored in the
 session's `frequency` field and encoded into the command buffer using `encode_double`.
 
-Next, the function encodes the session's SSRC (Synchronization Source identifier) and a randomly generated 
-command tag into the buffer using `encode_int`. It finalizes the command with an end-of-line marker via 
-`encode_eol`. The total length of the command is calculated as the difference between the current buffer 
+Next, the function encodes the session's SSRC (Synchronization Source identifier) and a randomly generated
+command tag into the buffer using `encode_int`. It finalizes the command with an end-of-line marker via
+`encode_eol`. The total length of the command is calculated as the difference between the current buffer
 pointer and the start of the buffer.
 
-To ensure thread safety, the function locks the `ctl_mutex` mutex before sending the command over the control 
-socket (`Ctl_fd`). If the `send` operation fails to transmit the entire command, an error message is printed. 
+To ensure thread safety, the function locks the `ctl_mutex` mutex before sending the command over the control
+socket (`Ctl_fd`). If the `send` operation fails to transmit the entire command, an error message is printed.
 Finally, the mutex is unlocked, allowing other threads to access the control socket.
 
-Overall, this function safely constructs and sends a frequency-setting command for a session, handling 
+Overall, this function safely constructs and sends a frequency-setting command for a session, handling
 string parsing, buffer management, and thread synchronization.
 */
 void control_set_frequency(struct session *sp,char *str) {
@@ -1089,21 +1089,21 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 }
 
 /*
-The `control_set_mode` function is responsible for sending a command to change the mode (or preset) of a 
-session in a networked application, likely related to radio or audio streaming. It takes two parameters: 
+The `control_set_mode` function is responsible for sending a command to change the mode (or preset) of a
+session in a networked application, likely related to radio or audio streaming. It takes two parameters:
 a pointer to a `session` structure (`sp`) and a string (`str`) that specifies the desired mode or preset.
 
-The function first checks if the provided string is non-empty. If so, it begins constructing a command packet 
-in the `cmdbuffer` array. The first byte of the buffer is set to a constant `CMD`, which likely indicates the 
-type of command being sent. The function then encodes the mode string into the buffer using `encode_string`, 
-associating it with the `PRESET` field. It also encodes the session's SSRC (Synchronization Source identifier) 
-and a randomly generated command tag into the buffer using `encode_int`. The command is finalized with an 
+The function first checks if the provided string is non-empty. If so, it begins constructing a command packet
+in the `cmdbuffer` array. The first byte of the buffer is set to a constant `CMD`, which likely indicates the
+type of command being sent. The function then encodes the mode string into the buffer using `encode_string`,
+associating it with the `PRESET` field. It also encodes the session's SSRC (Synchronization Source identifier)
+and a randomly generated command tag into the buffer using `encode_int`. The command is finalized with an
 end-of-line marker via `encode_eol`, and the total length of the command is calculated.
 
-To ensure thread safety, the function locks the `ctl_mutex` mutex before sending the command over the control socket 
-(`Ctl_fd`). It also copies the requested preset string into the session's `requested_preset` field for tracking 
-purposes. If the `send` operation fails to transmit the entire command, an error message is printed. 
-Finally, the mutex is unlocked, allowing other threads to access the control socket. 
+To ensure thread safety, the function locks the `ctl_mutex` mutex before sending the command over the control socket
+(`Ctl_fd`). It also copies the requested preset string into the session's `requested_preset` field for tracking
+purposes. If the `send` operation fails to transmit the entire command, an error message is printed.
+Finally, the mutex is unlocked, allowing other threads to access the control socket.
 This approach ensures that mode changes are communicated reliably and safely in a concurrent environment.
 */
 void control_set_mode(struct session *sp,char *str) {
@@ -1128,26 +1128,26 @@ void control_set_mode(struct session *sp,char *str) {
 
 
 /*
-The `stop_spectrum_stream` function is designed to send a command to stop a spectrum demodulator stream for a 
-given session in a networked application, likely related to radio or signal processing. The function takes a 
-pointer to a `session` structure as its argument. It begins by preparing a command buffer (`cmdbuffer`) and a 
-pointer (`bp`) to build the command message. The first byte of the buffer is set to a constant `CMD`, indicating 
+The `stop_spectrum_stream` function is designed to send a command to stop a spectrum demodulator stream for a
+given session in a networked application, likely related to radio or signal processing. The function takes a
+pointer to a `session` structure as its argument. It begins by preparing a command buffer (`cmdbuffer`) and a
+pointer (`bp`) to build the command message. The first byte of the buffer is set to a constant `CMD`, indicating
 the type of command.
 
-Next, the function encodes several pieces of information into the buffer: the SSRC (Synchronization Source identifier) 
-for the spectrum stream (using `sp->ssrc + 1`), a randomly generated command tag, the demodulator type (set to `SPECT_DEMOD` 
-to specify a spectrum demodulator), and a frequency value of 0 Hz (which is used as a signal to stop the stream). 
+Next, the function encodes several pieces of information into the buffer: the SSRC (Synchronization Source identifier)
+for the spectrum stream (using `sp->ssrc + 1`), a randomly generated command tag, the demodulator type (set to `SPECT_DEMOD`
+to specify a spectrum demodulator), and a frequency value of 0 Hz (which is used as a signal to stop the stream).
 The command is finalized with an end-of-line marker, and the total length of the command is calculated.
 
-To ensure the command is reliably received, the function sends the command three times in a loop, with a 
-short delay (`usleep(100000)`, or 100 milliseconds) between each attempt. Before each send, it locks a 
-mutex (`ctl_mutex`) to ensure thread-safe access to the control socket (`Ctl_fd`). If the send operation fails, 
-it prints an error message. If the `verbose` flag is set, the function also logs a message to standard error each 
+To ensure the command is reliably received, the function sends the command three times in a loop, with a
+short delay (`usleep(100000)`, or 100 milliseconds) between each attempt. Before each send, it locks a
+mutex (`ctl_mutex`) to ensure thread-safe access to the control socket (`Ctl_fd`). If the send operation fails,
+it prints an error message. If the `verbose` flag is set, the function also logs a message to standard error each
 time it sends the command, including the tag and SSRC used. After sending, it unlocks the mutex.
 
-This approach ensures that the command to stop the spectrum stream is sent reliably, even in the presence of 
-potential packet loss or network issues. The use of mutex locking ensures that multiple threads do not interfere 
-with each other when accessing the control socket. The function is robust and suitable for use in a concurrent, 
+This approach ensures that the command to stop the spectrum stream is sent reliably, even in the presence of
+potential packet loss or network issues. The use of mutex locking ensures that multiple threads do not interfere
+with each other when accessing the control socket. The function is robust and suitable for use in a concurrent,
 networked environment.
 */
 void stop_spectrum_stream(struct session *sp) {
@@ -1174,25 +1174,25 @@ void stop_spectrum_stream(struct session *sp) {
 }
 
 /*
-The `control_get_powers` function is responsible for sending a command to request spectral power data from a 
-remote system, likely in the context of a radio or signal processing application. It takes as arguments a pointer 
-to a `session` structure (`sp`), a frequency value (`frequency`), the number of bins (`bins`), and the bandwidth 
+The `control_get_powers` function is responsible for sending a command to request spectral power data from a
+remote system, likely in the context of a radio or signal processing application. It takes as arguments a pointer
+to a `session` structure (`sp`), a frequency value (`frequency`), the number of bins (`bins`), and the bandwidth
 per bin (`bin_bw`). These parameters define the spectral region and resolution for which power data is being requested.
 
-Inside the function, a command buffer (`cmdbuffer`) is prepared to hold the serialized command. The buffer pointer (`bp`) 
-is used to sequentially encode each part of the command. The command starts with a command identifier (`CMD`), followed 
-by the output SSRC (Synchronization Source identifier) for the session, which is incremented by one to target the correct 
+Inside the function, a command buffer (`cmdbuffer`) is prepared to hold the serialized command. The buffer pointer (`bp`)
+is used to sequentially encode each part of the command. The command starts with a command identifier (`CMD`), followed
+by the output SSRC (Synchronization Source identifier) for the session, which is incremented by one to target the correct
 stream. A random tag is generated to uniquely identify this command transaction, aiding in matching responses to requests.
 
-The function then encodes several parameters into the buffer: the demodulator type (set to `SPECT_DEMOD` to indicate a 
-spectrum analysis request), the center frequency, the number of bins, and the bandwidth per bin. Each of these values is 
-encoded using helper functions like `encode_int`, `encode_double`, and `encode_float`, which serialize the data into the 
+The function then encodes several parameters into the buffer: the demodulator type (set to `SPECT_DEMOD` to indicate a
+spectrum analysis request), the center frequency, the number of bins, and the bandwidth per bin. Each of these values is
+encoded using helper functions like `encode_int`, `encode_double`, and `encode_float`, which serialize the data into the
 buffer in the required format. The command is finalized with an end-of-line marker using `encode_eol`.
 
-Once the command is fully constructed, its length is calculated, and the function locks a mutex (`ctl_mutex`) to ensure 
-thread-safe access to the control socket (`Ctl_fd`). The command is then sent over the socket using the `send` function. 
-If the send operation does not transmit the expected number of bytes, an error message is printed. Finally, the mutex is 
-unlocked, allowing other threads to use the control socket. This approach ensures that spectral power requests are sent 
+Once the command is fully constructed, its length is calculated, and the function locks a mutex (`ctl_mutex`) to ensure
+thread-safe access to the control socket (`Ctl_fd`). The command is then sent over the socket using the `send` function.
+If the send operation does not transmit the expected number of bytes, an error message is printed. Finally, the mutex is
+unlocked, allowing other threads to use the control socket. This approach ensures that spectral power requests are sent
 safely and reliably in a concurrent, networked environment.
 */
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw) {
@@ -1216,22 +1216,22 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
 }
 
 /*
-The `control_poll` function is designed to send a polling command to a remote system, typically as part of a 
-networked application that manages sessions (such as a radio or streaming server). The function takes a pointer 
-to a `session` structure as its argument, which contains information about the current session, including its 
+The `control_poll` function is designed to send a polling command to a remote system, typically as part of a
+networked application that manages sessions (such as a radio or streaming server). The function takes a pointer
+to a `session` structure as its argument, which contains information about the current session, including its
 SSRC (Synchronization Source identifier).
 
-Inside the function, a buffer (`cmdbuffer`) is allocated to hold the command data. A pointer (`bp`) is used to 
-build the command sequentially. The first byte of the buffer is set to `1`, which likely represents the command 
-type for polling. The function then encodes a random command tag using `encode_int`, which helps uniquely identify 
-this poll request and match it with any response. The session's SSRC is also encoded, allowing the poll to target 
-a specific session or, if set to zero, to request a list of available SSRCs. The command is finalized with an 
+Inside the function, a buffer (`cmdbuffer`) is allocated to hold the command data. A pointer (`bp`) is used to
+build the command sequentially. The first byte of the buffer is set to `1`, which likely represents the command
+type for polling. The function then encodes a random command tag using `encode_int`, which helps uniquely identify
+this poll request and match it with any response. The session's SSRC is also encoded, allowing the poll to target
+a specific session or, if set to zero, to request a list of available SSRCs. The command is finalized with an
 end-of-line marker using `encode_eol`.
 
-After constructing the command, the function calculates its length and locks a mutex (`ctl_mutex`) to ensure 
-thread-safe access to the control socket (`Ctl_fd`). It then sends the command using the `send` function. 
-If the number of bytes sent does not match the expected command length, an error message is printed using `perror`. 
-Finally, the mutex is unlocked, allowing other threads to use the control socket. This approach ensures that polling 
+After constructing the command, the function calculates its length and locks a mutex (`ctl_mutex`) to ensure
+thread-safe access to the control socket (`Ctl_fd`). It then sends the command using the `send` function.
+If the number of bytes sent does not match the expected command length, an error message is printed using `perror`.
+Finally, the mutex is unlocked, allowing other threads to use the control socket. This approach ensures that polling
 commands are sent safely and reliably in a concurrent, networked environment.
 */
 void control_poll(struct session *sp) {
@@ -1253,32 +1253,32 @@ void control_poll(struct session *sp) {
 }
 
 /*
-The `extract_powers` function is designed to parse a binary buffer containing a sequence of tagged data fields 
-(often called TLVs: Type-Length-Value) and extract spectral power information for a given session. This function 
-is typically used in applications that process spectrum or signal analysis data, such as radio receivers or spectrum 
+The `extract_powers` function is designed to parse a binary buffer containing a sequence of tagged data fields
+(often called TLVs: Type-Length-Value) and extract spectral power information for a given session. This function
+is typically used in applications that process spectrum or signal analysis data, such as radio receivers or spectrum
 analyzers.
 
-The function takes several parameters: pointers to arrays and variables where it will store the extracted power 
-values, time, frequency, and bin bandwidth; the expected SSRC (stream/source identifier); the input buffer and 
+The function takes several parameters: pointers to arrays and variables where it will store the extracted power
+values, time, frequency, and bin bandwidth; the expected SSRC (stream/source identifier); the input buffer and
 its length; and a pointer to the session structure for storing additional results.
 
-The function iterates through the buffer, reading one TLV field at a time. For each field, it reads the type 
-(an enum value), then the length. If the length byte indicates a value of 128 or more, it uses additional bytes 
-to determine the actual length, supporting variable-length fields. It then checks that the field does not extend 
+The function iterates through the buffer, reading one TLV field at a time. For each field, it reads the type
+(an enum value), then the length. If the length byte indicates a value of 128 or more, it uses additional bytes
+to determine the actual length, supporting variable-length fields. It then checks that the field does not extend
 beyond the buffer’s end to avoid buffer overflows.
 
-Depending on the type, the function decodes the value using helper functions (like `decode_int64`, `decode_double`, 
-or `decode_float`) and stores the result in the appropriate output variable or session field. For example, if the 
-type is `BIN_DATA`, it decodes an array of floating-point power values, updates the session’s min/max dB values, 
-and checks that the number of bins does not exceed the provided array size. It also handles other types such as 
+Depending on the type, the function decodes the value using helper functions (like `decode_int64`, `decode_double`,
+or `decode_float`) and stores the result in the appropriate output variable or session field. For example, if the
+type is `BIN_DATA`, it decodes an array of floating-point power values, updates the session’s min/max dB values,
+and checks that the number of bins does not exceed the provided array size. It also handles other types such as
 GPS time, frequency, demodulator type, and IF power.
 
-After parsing, the function checks for consistency between the number of bins reported and the number of bins actually 
-decoded, and ensures the count does not exceed a maximum allowed value. If any check fails, it returns an error 
+After parsing, the function checks for consistency between the number of bins reported and the number of bins actually
+decoded, and ensures the count does not exceed a maximum allowed value. If any check fails, it returns an error
 code; otherwise, it returns the number of bins extracted.
 
-Overall, this function is robust against malformed or unexpected data, and is careful to avoid buffer overruns 
-and to validate all extracted information. It is a good example of defensive programming in a low-level data parsing 
+Overall, this function is robust against malformed or unexpected data, and is careful to avoid buffer overruns
+and to validate all extracted information. It is a good example of defensive programming in a low-level data parsing
 context.
 */
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp){
@@ -1400,23 +1400,23 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
 }
 
 /*
-The `extract_noise` function is designed to parse a binary buffer containing tagged data fields and extract the 
-noise density value for a given session. The function takes four parameters: a pointer to a float (`n0`) where 
-the extracted noise value will be stored, a pointer to the start of the buffer (`buffer`), the length of the buffer 
-(`length`), and a pointer to a session structure (`sp`). The function iterates through the buffer, reading one 
+The `extract_noise` function is designed to parse a binary buffer containing tagged data fields and extract the
+noise density value for a given session. The function takes four parameters: a pointer to a float (`n0`) where
+the extracted noise value will be stored, a pointer to the start of the buffer (`buffer`), the length of the buffer
+(`length`), and a pointer to a session structure (`sp`). The function iterates through the buffer, reading one
 field at a time in a loop.
 
-Each field in the buffer is expected to follow a Type-Length-Value (TLV) format. The function first reads the type 
-(an enum value) and then the length of the field. If the length byte indicates a value of 128 or more (the high bit is set), 
+Each field in the buffer is expected to follow a Type-Length-Value (TLV) format. The function first reads the type
+(an enum value) and then the length of the field. If the length byte indicates a value of 128 or more (the high bit is set),
 the actual length is encoded in the following bytes, allowing for fields longer than 127 bytes. The function decodes this extended length as needed.
 
-For each field, the function checks that the field does not extend beyond the end of the buffer to prevent buffer overruns. 
-It then uses a switch statement to handle different field types. If the field type is `NOISE_DENSITY`, it decodes the value 
-as a float and stores it in the location pointed to by `n0`. If the type is `EOL` (end of list), the function breaks 
+For each field, the function checks that the field does not extend beyond the end of the buffer to prevent buffer overruns.
+It then uses a switch statement to handle different field types. If the field type is `NOISE_DENSITY`, it decodes the value
+as a float and stores it in the location pointed to by `n0`. If the type is `EOL` (end of list), the function breaks
 out of the loop. For any other type, it simply skips over the field.
 
-After processing all fields or encountering an end-of-list marker, the function returns 0. This function is robust 
-against malformed or unexpected data, as it checks buffer boundaries and handles variable-length fields. It is 
+After processing all fields or encountering an end-of-list marker, the function returns 0. This function is robust
+against malformed or unexpected data, as it checks buffer boundaries and handles variable-length fields. It is
 a typical example of defensive programming for parsing binary protocols in C or C++.
 */
 int extract_noise(float *n0,uint8_t const * const buffer,int length,struct session *sp){
@@ -1458,24 +1458,24 @@ int extract_noise(float *n0,uint8_t const * const buffer,int length,struct sessi
 }
 
 /*
-The `init_demod` function is a C/C++ function designed to initialize (or reset) all fields of a `channel` structure 
-to a known state, typically before use or reuse. The function takes a pointer to a `channel` structure as its argument. 
-The first operation it performs is a call to `memset`, which sets all bytes in the structure to zero. This ensures that 
+The `init_demod` function is a C/C++ function designed to initialize (or reset) all fields of a `channel` structure
+to a known state, typically before use or reuse. The function takes a pointer to a `channel` structure as its argument.
+The first operation it performs is a call to `memset`, which sets all bytes in the structure to zero. This ensures that
 all fields, including any padding or uninitialized memory, are cleared.
 
-After zeroing the structure, the function explicitly sets many floating-point fields within nested structures of `channel` 
-to `NAN` (Not-a-Number). This is a common technique in signal processing and scientific computing to indicate that a 
-value is undefined or uninitialized, as opposed to being zero, which might be a valid value in some contexts. The fields 
-set to `NAN` include various tuning parameters (such as `second_LO`, `freq`, and `shift`), filter parameters 
-(`min_IF`, `max_IF`, `kaiser_beta`), output and linear processing parameters (`headroom`, `hangtime`, `recovery_rate`), 
-signal statistics (`bb_power`, `snr`, `foffset`), FM and PLL parameters (`pdeviation`, `cphase`), output gain, and two 
-test points (`tp1`, `tp2`). 
+After zeroing the structure, the function explicitly sets many floating-point fields within nested structures of `channel`
+to `NAN` (Not-a-Number). This is a common technique in signal processing and scientific computing to indicate that a
+value is undefined or uninitialized, as opposed to being zero, which might be a valid value in some contexts. The fields
+set to `NAN` include various tuning parameters (such as `second_LO`, `freq`, and `shift`), filter parameters
+(`min_IF`, `max_IF`, `kaiser_beta`), output and linear processing parameters (`headroom`, `hangtime`, `recovery_rate`),
+signal statistics (`bb_power`, `snr`, `foffset`), FM and PLL parameters (`pdeviation`, `cphase`), output gain, and two
+test points (`tp1`, `tp2`).
 
-By explicitly setting these fields to `NAN` after the `memset`, the function ensures that any code using this structure 
-can reliably detect uninitialized or invalid values, which can help with debugging and error handling. The function 
-returns `0` to indicate successful initialization. This pattern of zeroing a structure and then setting specific fields 
-to sentinel values is a robust way to prepare complex data structures for use in C and C++ programs, especially 
-in applications like DSP (digital signal processing) or communications where distinguishing between "zero" and "invalid" 
+By explicitly setting these fields to `NAN` after the `memset`, the function ensures that any code using this structure
+can reliably detect uninitialized or invalid values, which can help with debugging and error handling. The function
+returns `0` to indicate successful initialization. This pattern of zeroing a structure and then setting specific fields
+to sentinel values is a robust way to prepare complex data structures for use in C and C++ programs, especially
+in applications like DSP (digital signal processing) or communications where distinguishing between "zero" and "invalid"
 is important.
 */
 int init_demod(struct channel *channel){
@@ -1492,25 +1492,25 @@ int init_demod(struct channel *channel){
 }
 
 /*
-The `spectrum_thread` function is a POSIX thread routine designed to periodically request and poll spectrum data 
-for a given session in a concurrent C or C++ application. It takes a pointer to a `session` structure as its argument, 
-which it casts from a generic `void*` pointer. The function runs in a loop as long as the `spectrum_active` flag in 
+The `spectrum_thread` function is a POSIX thread routine designed to periodically request and poll spectrum data
+for a given session in a concurrent C or C++ application. It takes a pointer to a `session` structure as its argument,
+which it casts from a generic `void*` pointer. The function runs in a loop as long as the `spectrum_active` flag in
 the session remains true, allowing the thread to be cleanly stopped from elsewhere in the program.
 
-Within each iteration of the loop, the thread first locks the `spectrum_mutex` associated with the session to ensure 
-thread-safe access to shared spectrum-related data. It then calls `control_get_powers`, passing the session pointer and 
-relevant parameters such as the center frequency, number of bins, and bin width. This function likely sends a 
-command to a remote server or device to request a new set of spectrum power measurements. After the request is sent, 
+Within each iteration of the loop, the thread first locks the `spectrum_mutex` associated with the session to ensure
+thread-safe access to shared spectrum-related data. It then calls `control_get_powers`, passing the session pointer and
+relevant parameters such as the center frequency, number of bins, and bin width. This function likely sends a
+command to a remote server or device to request a new set of spectrum power measurements. After the request is sent,
 the mutex is unlocked, allowing other threads to access or modify the session's spectrum data.
 
-Next, the thread calls `control_poll`, which probably sends a poll command to check the status or retrieve results 
-from the remote system. To avoid overwhelming the system and to pace the requests, the thread sleeps for 100 milliseconds 
-using `usleep(100000)`. If the sleep call fails, an error message is printed. The loop then repeats, continuing to request 
+Next, the thread calls `control_poll`, which probably sends a poll command to check the status or retrieve results
+from the remote system. To avoid overwhelming the system and to pace the requests, the thread sleeps for 100 milliseconds
+using `usleep(100000)`. If the sleep call fails, an error message is printed. The loop then repeats, continuing to request
 and poll spectrum data as long as the session remains active.
 
-This design allows spectrum data to be requested and processed in the background, independently of the main 
-application flow. The use of mutexes ensures that shared data is accessed safely in a multithreaded environment, 
-and the periodic polling mechanism provides a balance between responsiveness and resource usage. The function 
+This design allows spectrum data to be requested and processed in the background, independently of the main
+application flow. The use of mutexes ensures that shared data is accessed safely in a multithreaded environment,
+and the periodic polling mechanism provides a balance between responsiveness and resource usage. The function
 returns `NULL` when the thread exits, as required by the POSIX thread API.
 */
 void *spectrum_thread(void *arg) {
@@ -1542,30 +1542,30 @@ void *spectrum_thread(void *arg) {
 // Set realtime priority (if possible)
 
 /*
-The `set_realtime` function is designed to elevate the scheduling priority of the calling thread or process, 
-aiming to achieve real-time or near real-time execution on Linux systems. This is particularly useful for 
-applications that require low-latency or time-critical processing, such as audio streaming, signal processing, 
+The `set_realtime` function is designed to elevate the scheduling priority of the calling thread or process,
+aiming to achieve real-time or near real-time execution on Linux systems. This is particularly useful for
+applications that require low-latency or time-critical processing, such as audio streaming, signal processing,
 or other performance-sensitive tasks.
 
-The function first checks if it is running on a Linux system using the `__linux__` preprocessor macro. If so, 
-it attempts to set the thread's scheduling policy to `SCHED_FIFO` (First-In, First-Out), which is a real-time 
-scheduling class in Linux. It does this by determining the minimum and maximum priorities available for `SCHED_FIFO` 
-and then selecting a priority value midway between them. The `sched_setscheduler` system call is used to apply this 
-policy and priority to the current thread or process. If this call succeeds, the function returns immediately, 
+The function first checks if it is running on a Linux system using the `__linux__` preprocessor macro. If so,
+it attempts to set the thread's scheduling policy to `SCHED_FIFO` (First-In, First-Out), which is a real-time
+scheduling class in Linux. It does this by determining the minimum and maximum priorities available for `SCHED_FIFO`
+and then selecting a priority value midway between them. The `sched_setscheduler` system call is used to apply this
+policy and priority to the current thread or process. If this call succeeds, the function returns immediately,
 indicating that real-time scheduling has been successfully set.
 
-If the attempt to set real-time scheduling fails (which can happen if the process lacks the necessary privileges, 
-such as root access or the `CAP_SYS_NICE` capability), the function retrieves the thread's name and prints a warning 
+If the attempt to set real-time scheduling fails (which can happen if the process lacks the necessary privileges,
+such as root access or the `CAP_SYS_NICE` capability), the function retrieves the thread's name and prints a warning
 message to standard output, explaining the failure and the likely cause.
 
-As a fallback, the function tries to improve the process's priority by decreasing its "niceness" value by 10 
-using the `setpriority` system call. Lower niceness values correspond to higher scheduling priority in the 
-standard Linux scheduler. If this call also fails, another warning message is printed, again indicating that 
+As a fallback, the function tries to improve the process's priority by decreasing its "niceness" value by 10
+using the `setpriority` system call. Lower niceness values correspond to higher scheduling priority in the
+standard Linux scheduler. If this call also fails, another warning message is printed, again indicating that
 elevated privileges are required to change process priority.
 
-Overall, the function is robust: it first tries to achieve the best possible scheduling policy for 
-real-time performance, and if that fails, it attempts a less powerful but still helpful adjustment. 
-It also provides clear feedback to the user if neither approach succeeds, helping with troubleshooting and 
+Overall, the function is robust: it first tries to achieve the best possible scheduling policy for
+real-time performance, and if that fails, it attempts a less powerful but still helpful adjustment.
+It also provides clear feedback to the user if neither approach succeeds, helping with troubleshooting and
 system configuration.
 */
 void set_realtime(void){
@@ -1603,34 +1603,34 @@ void set_realtime(void){
 }
 
 /*
-The `ctrl_thread` function is a POSIX thread routine responsible for handling incoming status and spectrum data packets, 
-processing them, and forwarding relevant information to connected clients via WebSockets. This function is part 
+The `ctrl_thread` function is a POSIX thread routine responsible for handling incoming status and spectrum data packets,
+processing them, and forwarding relevant information to connected clients via WebSockets. This function is part
 of a larger C++ project that deals with real-time radio or spectrum data streaming.
 
-At the start, the function sets up several buffers and variables to hold incoming data, processed results, and 
-metadata. If the application is configured to run with real-time priority, it calls `set_realtime()` to attempt 
+At the start, the function sets up several buffers and variables to hold incoming data, processed results, and
+metadata. If the application is configured to run with real-time priority, it calls `set_realtime()` to attempt
 to elevate its scheduling priority, which is important for minimizing latency in real-time applications.
 
-The main logic is contained within an infinite loop. In each iteration, the thread waits for a packet to arrive 
-on the `Status_fd` socket using `recvfrom`. When a packet is received, it checks if the packet is of type 
-`STATUS` and has a valid length. It then extracts the SSRC (synchronization source identifier) from the packet to 
+The main logic is contained within an infinite loop. In each iteration, the thread waits for a packet to arrive
+on the `Status_fd` socket using `recvfrom`. When a packet is received, it checks if the packet is of type
+`STATUS` and has a valid length. It then extracts the SSRC (synchronization source identifier) from the packet to
 determine which session the data belongs to.
 
-If the SSRC indicates spectrum data (odd value), the function locates the corresponding session and updates 
-status values by calling `decode_radio_status`. It then prepares an RTP (Real-time Transport Protocol) 
-header and serializes various session and frontend statistics into an output buffer. The function then extracts 
-power values from the received packet, processes them according to the desired precision (float, int16, or uint8), 
-and writes the processed spectrum data to the client’s WebSocket. The code includes logic to rescale and auto-range 
+If the SSRC indicates spectrum data (odd value), the function locates the corresponding session and updates
+status values by calling `decode_radio_status`. It then prepares an RTP (Real-time Transport Protocol)
+header and serializes various session and frontend statistics into an output buffer. The function then extracts
+power values from the received packet, processes them according to the desired precision (float, int16, or uint8),
+and writes the processed spectrum data to the client’s WebSocket. The code includes logic to rescale and auto-range
 the data for 8-bit transmission, ensuring efficient use of the available dynamic range.
 
-If the SSRC indicates regular status data (even value), the function updates the session’s status, extracts noise density, 
-and checks if the current preset and frequency match the requested values. If not, it issues commands to correct them. 
-It also prepares and sends a status RTP packet to the client, including baseband power and filter edge information, 
+If the SSRC indicates regular status data (even value), the function updates the session’s status, extracts noise density,
+and checks if the current preset and frequency match the requested values. If not, it issues commands to correct them.
+It also prepares and sends a status RTP packet to the client, including baseband power and filter edge information,
 and optionally a description string.
 
-Throughout the function, mutexes are used to ensure thread-safe access to shared resources, such as session data 
-and WebSocket connections. The code is robust, handling errors gracefully and providing debug output when necessary. 
-This design allows the application to efficiently process and forward real-time radio or spectrum data to 
+Throughout the function, mutexes are used to ensure thread-safe access to shared resources, such as session data
+and WebSocket connections. The code is robust, handling errors gracefully and providing debug output when necessary.
+This design allows the application to efficiently process and forward real-time radio or spectrum data to
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
 void *ctrl_thread(void *arg) {
@@ -1687,7 +1687,7 @@ void *ctrl_thread(void *arg) {
 	  // Changed memcpy to assignments with casts, which is much more portable
 	  // But yeah, this message should be TLV encoded or something
 	  // And it's what you get when you steal internal data structures from another
-	  // program maintained by someone else... - 12 Dec 2025 KA9Q
+	  // program maintained by someone else... - 12/13 Dec 2025 KA9Q
 	  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
 	  *ip++ = (uint32_t)Frontend.rf_agc;
 	  *(uint64_t *)ip = (uint64_t)Frontend.samples;
@@ -1700,11 +1700,11 @@ void *ctrl_thread(void *arg) {
 	  ip += 2;
 	  *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
 	  ip += 2;
-	  *ip++ = (uint32_t)Frontend.rf_atten;
-	  *ip++ = (uint32_t)Frontend.rf_gain;
-	  *ip++ = (uint32_t)Frontend.rf_level_cal;
-	  *ip++ = (uint32_t)Frontend.if_power;
-	  *ip++ = (uint32_t)sp->noise_density_audio;
+	  *(float *)ip++ = (float)Frontend.rf_atten;
+	  *(float *)ip++ = (float)Frontend.rf_gain;
+	  *(float *)ip++ = (float)Frontend.rf_level_cal;
+	  *(float *)ip++ = (float)power2dB(Frontend.if_power);
+	  *(float *)ip++ = (float)sp->noise_density_audio;
 	  *ip++ = (uint32_t)sp->zoom_index;
 	  *ip++ = (uint32_t)bin_precision_bytes;
 	  *ip++ = (uint32_t)sp->bins_autorange_offset;
