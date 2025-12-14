@@ -1071,27 +1071,31 @@ Spectrum.prototype.updateAxes = function() {
                 this.ctx_axes.stroke();
                 anyEdgeDrawn = true;
 
-                // Draw arrows at the top 20% of the spectrum height
+                // Draw arrows at the top 15% of the spectrum height
                 const arrowY = Math.round(height * 0.15);
-                const arrowSize = 8;
+                const arrowSize = 6;
 
-                // Low edge: right-pointing arrow
-                this.ctx_axes.beginPath();
-                this.ctx_axes.moveTo(lx, arrowY - arrowSize / 2);
-                this.ctx_axes.lineTo(lx + arrowSize, arrowY);
-                this.ctx_axes.lineTo(lx, arrowY + arrowSize / 2);
-                this.ctx_axes.closePath();
-                this.ctx_axes.fillStyle = "#00FF00";
-                this.ctx_axes.fill();
+                // Only draw arrows if the points are not too close together
+                // Require at least 3 arrow widths of blank space between them
+                if (Math.abs(rx - lx) > (arrowSize * 3) + 2) {
+                    // Low edge: right-pointing arrow
+                    this.ctx_axes.beginPath();
+                    this.ctx_axes.moveTo(lx, arrowY - arrowSize / 2);
+                    this.ctx_axes.lineTo(lx + arrowSize, arrowY);
+                    this.ctx_axes.lineTo(lx, arrowY + arrowSize / 2);
+                    this.ctx_axes.closePath();
+                    this.ctx_axes.fillStyle = "#00FF00";
+                    this.ctx_axes.fill();
 
-                // High edge: left-pointing arrow
-                this.ctx_axes.beginPath();
-                this.ctx_axes.moveTo(rx, arrowY - arrowSize / 2);
-                this.ctx_axes.lineTo(rx - arrowSize, arrowY);
-                this.ctx_axes.lineTo(rx, arrowY + arrowSize / 2);
-                this.ctx_axes.closePath();
-                this.ctx_axes.fillStyle = "#00FF00";
-                this.ctx_axes.fill();
+                    // High edge: left-pointing arrow
+                    this.ctx_axes.beginPath();
+                    this.ctx_axes.moveTo(rx, arrowY - arrowSize / 2);
+                    this.ctx_axes.lineTo(rx - arrowSize, arrowY);
+                    this.ctx_axes.lineTo(rx, arrowY + arrowSize / 2);
+                    this.ctx_axes.closePath();
+                    this.ctx_axes.fillStyle = "#00FF00";
+                    this.ctx_axes.fill();
+                }
             }
             // Now draw one label per band (centered) for bands overlapping view
             for (var bi2 = 0; bi2 < bands.length; bi2++) {
@@ -1099,12 +1103,21 @@ Spectrum.prototype.updateAxes = function() {
                 if (bb.highHz < this.start_freq || bb.lowHz > this.highHz) continue;
                 var centerHz = Math.max(bb.lowHz, this.start_freq) + (Math.min(bb.highHz, this.highHz) - Math.max(bb.lowHz, this.start_freq)) / 2;
                 var cx = (centerHz - this.start_freq) / hz_per_pixel;
-                this.ctx_axes.fillStyle = "#00FF00";
-                this.ctx_axes.textAlign = "center";
+                var lx = (bb.lowHz - this.start_freq) / hz_per_pixel;
+                var rx = (bb.highHz - this.start_freq) / hz_per_pixel;
                 var bandLabelY = (typeof freqLabelBottom === 'number') ? (freqLabelBottom + 4) : 16;
-                this.ctx_axes.fillText(bb.label, cx, bandLabelY);
+
+                // Only draw label if there is enough space between edges
+                var minLabelWidth = 40; // Minimum pixel width to show label (adjust as needed)
+                var labelWidth = this.ctx_axes.measureText(bb.label).width;
+                var availableWidth = rx - lx;
+                if (availableWidth > Math.max(minLabelWidth, labelWidth + 8)) {
+                    this.ctx_axes.fillStyle = "#00FF00";
+                    this.ctx_axes.textAlign = "center";
+                    this.ctx_axes.fillText(bb.label, cx, bandLabelY);
+                }
             }
-            // Reset strokeStyle/lineWidth to defaults
+//          // Reset strokeStyle/lineWidth to defaults
             this.ctx_axes.strokeStyle = "rgba(200, 200, 200, 0.30)";
             this.ctx_axes.lineWidth = 1;
         } catch (e) {
