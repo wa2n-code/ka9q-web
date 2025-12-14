@@ -1070,6 +1070,28 @@ Spectrum.prototype.updateAxes = function() {
                 this.ctx_axes.lineWidth = 1.2;
                 this.ctx_axes.stroke();
                 anyEdgeDrawn = true;
+
+                // Draw arrows at the top 20% of the spectrum height
+                const arrowY = Math.round(height * 0.15);
+                const arrowSize = 8;
+
+                // Low edge: right-pointing arrow
+                this.ctx_axes.beginPath();
+                this.ctx_axes.moveTo(lx, arrowY - arrowSize / 2);
+                this.ctx_axes.lineTo(lx + arrowSize, arrowY);
+                this.ctx_axes.lineTo(lx, arrowY + arrowSize / 2);
+                this.ctx_axes.closePath();
+                this.ctx_axes.fillStyle = "#00FF00";
+                this.ctx_axes.fill();
+
+                // High edge: left-pointing arrow
+                this.ctx_axes.beginPath();
+                this.ctx_axes.moveTo(rx, arrowY - arrowSize / 2);
+                this.ctx_axes.lineTo(rx - arrowSize, arrowY);
+                this.ctx_axes.lineTo(rx, arrowY + arrowSize / 2);
+                this.ctx_axes.closePath();
+                this.ctx_axes.fillStyle = "#00FF00";
+                this.ctx_axes.fill();
             }
             // Now draw one label per band (centered) for bands overlapping view
             for (var bi2 = 0; bi2 < bands.length; bi2++) {
@@ -1089,6 +1111,7 @@ Spectrum.prototype.updateAxes = function() {
             console.warn('Failed to draw ham band edges', e);
         }
     }
+
 }
 
 
