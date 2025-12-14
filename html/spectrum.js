@@ -2449,7 +2449,7 @@ Spectrum.prototype.getHamBands = function() {
         { low: 3.5, high: 4.0, label: '80m' },
 	{ low: 5.3306, high: 5.3334, label: '60m ch1' },
 	{ low: 5.3466, high: 5.3494, label: '60m ch2' },
-	{ low: 5.3515, high: 5.3665, label: '60m lp' },
+	{ low: 5.3515, high: 5.3665, label: '60m qrp' },
 	{ low: 5.3716, high: 5.3744, label: '60m ch4' },
 	{ low: 5.4036, high: 5.4064, label: '60m ch5' },
         { low: 7.0, high: 7.30, label: '40m' },
