@@ -43,8 +43,12 @@
 
 const char *webserver_version = "2.77";
 
+
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
+
+// Global variable to mirror Channel.tune.freq for external use
+double current_backend_frequency = 0.0;
 
 int Ctl_fd,Input_fd,Status_fd;
 pthread_mutex_t ctl_mutex;
@@ -448,7 +452,12 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'F':
       case 'f':
-  sp->frequency = strtod(&tmp[2],0) * 1000;
+        {
+          double freq = strtod(&tmp[2],0);
+          fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
+          fflush(stderr);
+        }
+        sp->frequency = strtod(&tmp[2],0) * 1000;
     int32_t span = sp->bin_width * sp->bins;
     int32_t min_f = sp->center_frequency - (span / 2);
     int32_t max_f = sp->center_frequency + (span / 2);
@@ -1033,6 +1042,12 @@ Overall, this function safely constructs and sends a frequency-setting command f
 string parsing, buffer management, and thread synchronization.
 */
 void control_set_frequency(struct session *sp,char *str) {
+    // Debug: print when sending frequency command to backend
+    if(strlen(str) > 0){
+      double debug_f = fabs(strtod(str,0) * 1000.0);
+      fprintf(stderr, "[DEBUG] Sending frequency command to backend: %.3f Hz\n", debug_f);
+      fflush(stderr);
+    }
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   double f;
@@ -1843,13 +1858,23 @@ void *ctrl_thread(void *arg) {
               fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
             control_set_mode(sp,sp->requested_preset);
           }
-          // verify tuned frequency is correct, too
           if (Channel.tune.freq != sp->frequency){
+            // Update the global variable with the latest backend frequency
+            current_backend_frequency = Channel.tune.freq;
+            // Send the backend frequency to the client as a text message
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
+            pthread_mutex_lock(&sp->ws_mutex);
+            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+            onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
+            pthread_mutex_unlock(&sp->ws_mutex);
             if (verbose)
               fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, retrying...\n",
                       sp->ssrc,
                       0.001 * sp->frequency,
                       Channel.tune.freq * 0.001);
+            // Debug: print the actual Channel.tune.freq value
+            fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz\n", Channel.tune.freq);
             char f[128];
             sprintf(f,"%.3f",0.001 * sp->frequency);
             control_set_frequency(sp,f);

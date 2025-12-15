@@ -15,6 +15,9 @@
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
+
+      // Variable to store the actual backend frequency as reported by the server
+      var backendFrequencyHz = 0;
   let binCount = 1620;
   let spanHz = binCount * binWidthHz;
   // Spectrum poll interval in milliseconds (client-side default)
@@ -195,6 +198,12 @@
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
+          // Handle backend frequency update from server
+          if(args[0]==='BFREQ' && args.length > 1) {
+            backendFrequencyHz = parseFloat(args[1]);
+            // Optionally, log or update UI here
+             console.log('Backend frequency updated:', backendFrequencyHz);
+          }
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
           rx(data.byteLength);
@@ -246,6 +255,7 @@
                 update=1;
               }
 
+
               n = view.getUint32(i);
               i=i+4;
               hz = ntohl(n);
@@ -253,7 +263,9 @@
                 frequencyHz=hz;
                 update=1;
               }
-
+              // Update backendFrequencyHz to reflect the actual backend frequency
+              backendFrequencyHz = hz;
+              //console.log("Backend frequency updated to: " + backendFrequencyHz + " Hz");
               n = view.getUint32(i);
               i=i+4;
               hz = ntohl(n);;
