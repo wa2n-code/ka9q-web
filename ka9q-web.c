@@ -117,7 +117,7 @@ int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
-int verbose = 0;
+int verbose = 1;
 int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -1649,6 +1649,7 @@ This design allows the application to efficiently process and forward real-time 
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
 void *ctrl_thread(void *arg) {
+    static double last_sent_backend_frequency = 0.0;
   struct session *sp;
   socklen_t ssize = sizeof(Metadata_source_socket);
   uint8_t buffer[PKTSIZE/sizeof(float)];
@@ -1858,9 +1859,10 @@ void *ctrl_thread(void *arg) {
               fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
             control_set_mode(sp,sp->requested_preset);
           }
-          if (Channel.tune.freq != sp->frequency){
-            // Update the global variable with the latest backend frequency
+          // Send BFREQ update to frontend whenever backend frequency changes
+          if (last_sent_backend_frequency != Channel.tune.freq) {
             current_backend_frequency = Channel.tune.freq;
+            last_sent_backend_frequency = Channel.tune.freq;
             // Send the backend frequency to the client as a text message
             char freq_msg[64];
             snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
@@ -1868,16 +1870,25 @@ void *ctrl_thread(void *arg) {
             onion_websocket_set_opcode(sp->ws, OWS_TEXT);
             onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
             pthread_mutex_unlock(&sp->ws_mutex);
-            if (verbose)
-              fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, retrying...\n",
-                      sp->ssrc,
-                      0.001 * sp->frequency,
-                      Channel.tune.freq * 0.001);
-            // Debug: print the actual Channel.tune.freq value
-            fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz\n", Channel.tune.freq);
-            char f[128];
-            sprintf(f,"%.3f",0.001 * sp->frequency);
-            control_set_frequency(sp,f);
+          }
+          if (Channel.tune.freq != sp->frequency) {
+            // Inhibit resend if preset is CWU or CWL
+            if (strcasecmp(sp->requested_preset, "cwu") == 0 || strcasecmp(sp->requested_preset, "cwl") == 0) {
+              if (verbose);
+                //fprintf(stderr, "SSRC %u: backend freq differs (CW mode), but resend is inhibited (preset=%s)\n",
+                //        sp->ssrc, sp->requested_preset);
+            } else {
+              if (verbose)
+                fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, it's not CWL or CWU,retrying...\n",
+                        sp->ssrc,
+                        0.001 * sp->frequency,
+                        Channel.tune.freq * 0.001);
+              // Debug: print the actual Channel.tune.freq value
+              fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz\n", Channel.tune.freq);
+              char f[128];
+              sprintf(f,"%.3f",0.001 * sp->frequency);
+              control_set_frequency(sp,f);
+            }
           }
           pthread_mutex_lock(&output_dest_socket_mutex);
           if(Channel.output.dest_socket.sa_family != 0)
