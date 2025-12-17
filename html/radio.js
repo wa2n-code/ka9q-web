@@ -64,6 +64,27 @@
 
       // Variable to store the actual backend frequency as reported by the server
       var backendFrequencyHz = 0;
+
+      // Update the CW-mode carrier offset marker based on the tuned frequency.
+      function updateCWMarker() {
+        try {
+          if (typeof spectrum === 'undefined' || !spectrum) return;
+          const modeEl = document.getElementById('mode');
+          const mode = modeEl ? (modeEl.value || '').toLowerCase() : '';
+          if (mode === 'cwu' || mode === 'cwl') {
+            const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
+            if (tuned && Number.isFinite(tuned) && tuned !== 0) {
+              const offset = 500; // Hz
+              const markerHz = (mode === 'cwu') ? (tuned - offset) : (tuned + offset);
+              spectrum.backendMarkerHz = markerHz;
+              spectrum.backendMarkerActive = true;
+              return;
+            }
+          }
+          spectrum.backendMarkerActive = false;
+          spectrum.backendMarkerHz = null;
+        } catch (e) { /* ignore */ }
+      }
   let binCount = 1620;
   let spanHz = binCount * binWidthHz;
   // Spectrum poll interval in milliseconds (client-side default)
@@ -272,6 +293,7 @@ function applyQuickBW() {
         // default to 20 Mtr band
         //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
+        updateCWMarker();
         // can we load the saved frequency/zoom/preset here?
         ws.send("M:" + target_preset);
         //ws.send("Z:" + (22 - target_zoom_level).toString());
@@ -391,12 +413,7 @@ function applyQuickBW() {
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
-          // Handle backend frequency update from server
-          if(args[0]==='BFREQ' && args.length > 1) {
-            backendFrequencyHz = parseFloat(args[1]);
-            // Optionally, log or update UI here
-             console.log('Backend frequency updated:', backendFrequencyHz);
-          }
+          // (BFREQ messages ignored for marker placement)
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
           rx(data.byteLength);
@@ -503,6 +520,7 @@ function applyQuickBW() {
                 spectrum.setCenterHz(centerHz);
               }
               spectrum.setFrequency(frequencyHz);
+              updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
               document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? zoomTableSize-1: zoomTableSize-1; // above and below 64.8 Mhz now can do 15 levels of zoom?
@@ -703,6 +721,18 @@ function applyQuickBW() {
         updateRangeValues();
         player.volume(1.00);
         getVersion();
+        // Attach a listener to the mode selector so switching to CWU/CWL immediately shows the marker
+        try {
+          const modeEl = document.getElementById('mode');
+          const updateBackendMarkerForMode = function() {
+            try { updateCWMarker(); } catch (e) { /* ignore */ }
+          };
+          if (modeEl) {
+            modeEl.addEventListener('change', updateBackendMarkerForMode);
+            // initialize marker based on current mode immediately
+            updateBackendMarkerForMode();
+          }
+        } catch (e) { /* ignore */ }
         settingsReady = true; // Allow saves after initialization
       }
 
@@ -797,6 +827,7 @@ function applyQuickBW() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -814,6 +845,7 @@ function applyQuickBW() {
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -989,6 +1021,7 @@ function applyQuickBW() {
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(f);
         autoAutoscale(asCount,waitToAutoscale);      
@@ -1003,6 +1036,7 @@ function applyQuickBW() {
             return;
         }
         spectrum.setFrequency(f);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
         ws.send("F:" + (freq / 1000).toFixed(3));

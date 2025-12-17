@@ -110,6 +110,9 @@ function Spectrum(id, options) {
     }
 
     this.radio_pointer = undefined;
+    // backend frequency marker (set by radio.js when BFREQ arrives in CW modes)
+    this.backendMarkerActive = false;
+    this.backendMarkerHz = null;
 
     // Trigger first render
     this.setAveraging(this.averaging);
@@ -868,6 +871,25 @@ Spectrum.prototype.drawSpectrum = function(bins) {
 
     // Restore scale
     this.ctx.restore();
+
+    // Draw persistent backend frequency marker (if active)
+    try {
+        if (this.backendMarkerActive && typeof this.backendMarkerHz === 'number' && Number.isFinite(this.spanHz) && this.spanHz > 0) {
+            var rel = (this.backendMarkerHz - this.start_freq) / this.spanHz;
+            var mx = Math.round(rel * this.canvas.width);
+            var markerLen = 20; // pixels
+            if (mx >= 0 && mx <= this.canvas.width) {
+                this.ctx.save();
+                this.ctx.beginPath();
+                this.ctx.strokeStyle = '#ff0000';
+                this.ctx.lineWidth = 2;
+                this.ctx.moveTo(mx + 0.5, 0);
+                this.ctx.lineTo(mx + 0.5, markerLen);
+                this.ctx.stroke();
+                this.ctx.restore();
+            }
+        }
+    } catch (e) { /* ignore marker draw errors */ }
 
     // --- Enunciator: show arrow if tuned frequency is outside current window ---
     try {
