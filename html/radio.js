@@ -909,6 +909,10 @@ function applyQuickBW() {
         try {
           const waterfall = document.getElementById('waterfall');
           const active = document.activeElement;
+          // If the memory description input has focus, don't treat 'f' as the global fullscreen hotkey
+          if (active && active.id === 'memory_desc') {
+            return;
+          }
           // Only handle here when the waterfall does NOT have focus
           if (!(waterfall && active === waterfall)) {
             if (typeof spectrum !== 'undefined' && spectrum) {
