@@ -8,7 +8,7 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
-      // CWInstant debug overlay state
+      // QuickBW debug overlay state
       let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
       // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
       const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
@@ -113,25 +113,44 @@
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
 
-// CWInstant preset storage: holds lower/upper offsets (Hz) from current frequency
-let cwInstantPreset = { lowerOffset: 300, upperOffset: 700 };
-// CWInstant runtime state: whether active and stored previous edges for restore
-let cwInstantActive = false;
-let cwInstantPrevEdges = null; // { low: number, high: number }
-function loadCWInstantPreset() {
+// QuickBW preset storage: holds lower/upper offsets (Hz) from current frequency
+let quickBWPreset = { lowerOffset: 300, upperOffset: 700 };
+// QuickBW runtime state: whether active and stored previous edges for restore
+let quickBWActive = false;
+let quickBWPrevEdges = null; // { low: number, high: number }
+function loadQuickBWPreset() {
   try {
-    const v = localStorage.getItem('CWInstantPreset');
-    if (v) cwInstantPreset = JSON.parse(v);
+    // Migrate from old CWInstantPreset if present
+    try {
+      const old = localStorage.getItem && localStorage.getItem('CWInstantPreset');
+      if (old) {
+        try {
+          const parsed = JSON.parse(old);
+          if (parsed && (parsed.lowerOffset !== undefined || parsed.upperOffset !== undefined)) {
+            quickBWPreset.lowerOffset = Number(parsed.lowerOffset) || quickBWPreset.lowerOffset;
+            quickBWPreset.upperOffset = Number(parsed.upperOffset) || quickBWPreset.upperOffset;
+            // remove old key
+            try { localStorage.removeItem && localStorage.removeItem('CWInstantPreset'); } catch (e) {}
+            // persist migrated value
+            try { localStorage.setItem('QuickBWPreset', JSON.stringify(quickBWPreset)); } catch (e) {}
+            return;
+          }
+        } catch (e) { /* ignore parse errors */ }
+      }
+    } catch (e) { /* ignore storage access errors */ }
+
+    const v = localStorage.getItem('QuickBWPreset');
+    if (v) quickBWPreset = JSON.parse(v);
   } catch (e) {
-    console.warn('Failed to load CWInstantPreset, using defaults');
+    console.warn('Failed to load QuickBWPreset, using defaults');
   }
 }
-function saveCWInstantPreset() {
-  try { localStorage.setItem('CWInstantPreset', JSON.stringify(cwInstantPreset)); } catch (e) {}
+function saveQuickBWPreset() {
+  try { localStorage.setItem('QuickBWPreset', JSON.stringify(quickBWPreset)); } catch (e) {}
 }
 
-// Update CWInstant button enabled/disabled state based on current mode
-function updateCWInstantButtonState() {
+// Update QuickBW button enabled/disabled state based on current mode
+function updateQuickBWButtonState() {
   try {
     const btn = document.getElementById('cw_instant_button');
     const modeEl = document.getElementById('mode');
@@ -141,50 +160,52 @@ function updateCWInstantButtonState() {
       btn.removeAttribute('disabled');
       btn.style.opacity = '';
     } else {
-      // If mode no longer supports CWInstant but it was active, deactivate and restore edges
-      if (cwInstantActive) {
-        try { applyCWInstant(); } catch (e) {}
+      // If mode no longer supports QuickBW but it was active, deactivate and restore edges
+      if (quickBWActive) {
+        try { applyQuickBW(); } catch (e) {}
       }
       btn.setAttribute('disabled', 'disabled');
       btn.style.opacity = '0.6';
     }
     // Reflect active state visually (bold when active)
-    if (cwInstantActive) {
+    if (quickBWActive) {
       btn.style.fontWeight = 'bold';
+      btn.title = 'Restore previous filter bandwidth';
     } else {
       btn.style.fontWeight = '';
+      btn.title = 'Apply alternate filter bandwidth';
     }
   } catch (e) {}
 }
 
-// Apply CWInstant preset: set filter input boxes and send edges to backend
-function applyCWInstant() {
+// Apply QuickBW preset: set filter input boxes and send edges to backend
+function applyQuickBW() {
   const lowEl = document.getElementById('filterLowInput');
   const highEl = document.getElementById('filterHighInput');
   const modeEl = document.getElementById('mode');
   if (!lowEl || !highEl || !modeEl) return;
   const m = (modeEl.value || '').toLowerCase();
   if (!(m === 'usb' || m === 'lsb')) return;
-  const lowerOffset = Number(cwInstantPreset.lowerOffset) || 300;
-  const upperOffset = Number(cwInstantPreset.upperOffset) || 700;
+  const lowerOffset = Number(quickBWPreset.lowerOffset) || 300;
+  const upperOffset = Number(quickBWPreset.upperOffset) || 700;
   // Toggle behavior: if already active, restore previous edges; otherwise save current and apply offsets
-  if (cwInstantActive) {
+  if (quickBWActive) {
     // restore
-    if (cwInstantPrevEdges) {
+    if (quickBWPrevEdges) {
       suppressEdgeAutoSend = true;
-      lowEl.value = cwInstantPrevEdges.low;
-      highEl.value = cwInstantPrevEdges.high;
+      lowEl.value = quickBWPrevEdges.low;
+      highEl.value = quickBWPrevEdges.high;
       suppressEdgeAutoSend = false;
-      cwInstantPrevEdges = null;
+      quickBWPrevEdges = null;
     }
-    cwInstantActive = false;
-    updateCWInstantButtonState();
+    quickBWActive = false;
+    updateQuickBWButtonState();
     sendFilterEdges();
     return;
   }
 
   // Save current edges for later restore
-  cwInstantPrevEdges = { low: lowEl.value, high: highEl.value };
+  quickBWPrevEdges = { low: lowEl.value, high: highEl.value };
 
   let lowVal, highVal;
   if (m === 'usb') {
@@ -203,8 +224,8 @@ function applyCWInstant() {
   highEl.value = highVal;
   suppressEdgeAutoSend = false;
 
-  cwInstantActive = true;
-  updateCWInstantButtonState();
+  quickBWActive = true;
+  updateQuickBWButtonState();
   // Send to backend
   sendFilterEdges();
 }
@@ -1053,8 +1074,8 @@ function applyCWInstant() {
       saveSettings();
   // Update filter edge inputs to sensible defaults for this mode
   setFilterEdgesForMode(selected_mode);
-  // Update CWInstant button state when mode changes programmatically
-  try { updateCWInstantButtonState(); } catch (e) {}
+  // Update QuickBW button state when mode changes programmatically
+  try { updateQuickBWButtonState(); } catch (e) {}
   }
 
     function selectMode(mode) {
@@ -1062,7 +1083,7 @@ function applyCWInstant() {
         element.value = mode;
         ws.send("M:"+mode);
       setFilterEdgesForMode(mode);
-      try { updateCWInstantButtonState(); } catch (e) {}
+      try { updateQuickBWButtonState(); } catch (e) {}
       saveSettings();
     }
 
@@ -2510,37 +2531,37 @@ window.addEventListener('DOMContentLoaded', function() {
             // Initialize desc box for first memory
             descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
 
-            // Initialize CWInstant preset and button
+            // Initialize QuickBW preset and button
             try {
-              loadCWInstantPreset();
+              loadQuickBWPreset();
               const cwBtn = document.getElementById('cw_instant_button');
               if (cwBtn) {
-                cwBtn.onclick = function() { applyCWInstant(); };
+                cwBtn.onclick = function() { applyQuickBW(); };
               }
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                modeEl.addEventListener('change', updateCWInstantButtonState);
+                modeEl.addEventListener('change', updateQuickBWButtonState);
               }
               // ensure initial button state
-              updateCWInstantButtonState();
-              // Initialize CWInstant inputs and Save button (in options dialog)
+              updateQuickBWButtonState();
+              // Initialize QuickBW inputs and Save button (in options dialog)
               try {
                 const cwLower = document.getElementById('cw_lower_input');
                 const cwUpper = document.getElementById('cw_upper_input');
                 const cwSave = document.getElementById('cw_save_button');
-                if (cwLower) cwLower.value = cwInstantPreset.lowerOffset;
-                if (cwUpper) cwUpper.value = cwInstantPreset.upperOffset;
+                if (cwLower) cwLower.value = quickBWPreset.lowerOffset;
+                if (cwUpper) cwUpper.value = quickBWPreset.upperOffset;
                 if (cwSave) {
                   cwSave.onclick = function() {
                     try {
                       const lo = Number(document.getElementById('cw_lower_input').value);
                       const hi = Number(document.getElementById('cw_upper_input').value);
                       if (Number.isFinite(lo) && Number.isFinite(hi)) {
-                        cwInstantPreset.lowerOffset = lo;
-                        cwInstantPreset.upperOffset = hi;
-                        saveCWInstantPreset();
-                        // If CWInstant currently active, reapply offsets for current mode
-                        if (cwInstantActive) {
+                        quickBWPreset.lowerOffset = lo;
+                        quickBWPreset.upperOffset = hi;
+                        saveQuickBWPreset();
+                        // If QuickBW currently active, reapply offsets for current mode
+                        if (quickBWActive) {
                           const modeEl = document.getElementById('mode');
                           const lowEl = document.getElementById('filterLowInput');
                           const highEl = document.getElementById('filterHighInput');
@@ -2559,11 +2580,11 @@ window.addEventListener('DOMContentLoaded', function() {
                       } else {
                         alert('Please enter valid numeric offsets');
                       }
-                    } catch (e) { console.error('Failed to save CWInstant offsets', e); }
+                    } catch (e) { console.error('Failed to save QuickBW offsets', e); }
                   };
                 }
               } catch (e) { /* ignore */ }
-            } catch (e) { console.error('CWInstant init failed', e); }
+            } catch (e) { console.error('QuickBW init failed', e); }
 
             // --- END OF ALL INITIALIZATION ---
             settingsReady = true; // Allow saveSettings() from now on
