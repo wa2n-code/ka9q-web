@@ -1692,7 +1692,7 @@ function setDefaultSettings() {
 
 function loadSettings() {
   console.log(`localStorage.length = ${localStorage.length}`);
- if ((localStorage.length == 0) || localStorage.length != 27) {
+ if ((localStorage.length == 0) || localStorage.length != 28) {
     return false;
   }
   spectrum.averaging = parseInt(localStorage.getItem("averaging"));
