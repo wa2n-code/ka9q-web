@@ -8,6 +8,52 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // CWInstant debug overlay state
+      let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
+      // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
+      const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
+      // pending filter edges to send once websocket opens
+      let pendingFilterEdges = null;
+      // expected ack tracking for last sent edges
+      let expectedFilterAck = null; // { low, high, time, retries }
+      const EXPECTED_ACK_MAX_RETRIES = 3;
+
+      function createCWDebugOverlay() {
+        try {
+          if (!CW_DEBUG_OVERLAY) return; // suppressed by in-file flag
+          if (document.getElementById('cw_debug_overlay')) return;
+          const d = document.createElement('div');
+          d.id = 'cw_debug_overlay';
+          d.style.position = 'fixed';
+          d.style.right = '8px';
+          d.style.bottom = '8px';
+          d.style.zIndex = 9999;
+          d.style.background = 'rgba(0,0,0,0.7)';
+          d.style.color = '#0f0';
+          d.style.fontFamily = 'monospace';
+          d.style.fontSize = '12px';
+          d.style.padding = '6px 8px';
+          d.style.borderRadius = '6px';
+          d.style.maxWidth = '320px';
+          d.style.whiteSpace = 'pre-wrap';
+          d.style.pointerEvents = 'none';
+          d.textContent = 'CW Debug overlay initializing...';
+          document.body.appendChild(d);
+        } catch (e) { /* ignore */ }
+      }
+
+      function updateCWDebugOverlay() {
+        try {
+          if (!CW_DEBUG_OVERLAY) return;
+          const d = document.getElementById('cw_debug_overlay');
+          if (!d) return;
+          const s = cwDebug.lastSent ? `${cwDebug.lastSent.low}:${cwDebug.lastSent.high} @ ${new Date(cwDebug.lastSent.time).toLocaleTimeString()}` : 'none';
+          const a = cwDebug.lastAck ? `${cwDebug.lastAck.low}:${cwDebug.lastAck.high} @ ${new Date(cwDebug.lastAck.time).toLocaleTimeString()}` : 'none';
+          const wsst = (ws && ws.readyState != null) ? ws.readyState : cwDebug.wsState;
+          const wait = (expectedFilterAck && expectedFilterAck.retries !== undefined) ? ` waiting(retries=${expectedFilterAck.retries})` : '';
+          d.textContent = `ws:${wsst}${wait}\nlastSent: ${s}\nlastAck:  ${a}`;
+        } catch (e) {}
+      }
       let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
       let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025 
@@ -229,8 +275,20 @@ function applyCWInstant() {
         try {
           setFilterEdgesForMode(target_preset);
         } catch (e) {}
-  // Attach listeners so spinner/caret presses auto-send
-  try { attachEdgeInputListeners(); } catch (e) {}
+        // Attach listeners so spinner/caret presses auto-send
+        try { attachEdgeInputListeners(); } catch (e) {}
+        // If a filter-edge update was queued while WS was closed, send it now
+        try {
+          if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('e:' + pendingFilterEdges.low.toString() + ':' + pendingFilterEdges.high.toString());
+            cwDebug.lastSent = { low: pendingFilterEdges.low, high: pendingFilterEdges.high, time: Date.now() };
+            cwDebug.wsState = ws.readyState;
+            updateCWDebugOverlay();
+            pendingFilterEdges = null;
+          }
+        } catch (e) { console.error('Failed to flush pending filter edges', e); }
+        // create debug overlay when WS opens
+        try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
       }
       
       // Send a request to the server to change the spectrum poll interval (milliseconds).
@@ -268,16 +326,47 @@ function applyCWInstant() {
         }
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send('e:' + low.toString() + ':' + high.toString());
+            const payload = 'e:' + low.toString() + ':' + high.toString();
+            ws.send(payload);
+            // update debug overlay state
+            try { cwDebug.lastSent = { low: low, high: high, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
             console.log('Sent filter edges:', low, high);
-            // Clear manual-dirty flag and update Edge button state when edges are sent
+            // expect ack from server; set up one-time retry
+            try {
+              expectedFilterAck = { low: low, high: high, time: Date.now(), retries: 0 };
+              // schedule check
+              setTimeout(() => {
+                try {
+                  // if ack arrived with matching low/high, clear expected
+                  if (expectedFilterAck && cwDebug.lastAck && Number(cwDebug.lastAck.low) === Number(expectedFilterAck.low) && Number(cwDebug.lastAck.high) === Number(expectedFilterAck.high)) {
+                    expectedFilterAck = null;
+                    updateCWDebugOverlay();
+                    return;
+                  }
+                  // otherwise resend once
+                  if (expectedFilterAck && expectedFilterAck.retries === 0) {
+                    expectedFilterAck.retries = 1;
+                    console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                      ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                      cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
+                      updateCWDebugOverlay();
+                    }
+                    // allow more time for ack; clear after another timeout
+                    setTimeout(() => { expectedFilterAck = null; updateCWDebugOverlay(); }, 2000);
+                  }
+                } catch (e) { console.error('expectedFilterAck check failed', e); }
+              }, 800);
+            } catch (e) {}
             edgeManualDirty = false;
             updateEdgeButtonState();
           } catch (e) {
             console.error('Failed to send filter edges:', e);
           }
         } else {
-          console.warn('WebSocket not open, cannot send filter edges');
+          console.warn('WebSocket not open, queueing filter edges');
+          pendingFilterEdges = { low: low, high: high, time: Date.now() };
+          try { cwDebug.lastSent = pendingFilterEdges; cwDebug.wsState = (ws && ws.readyState) || -1; updateCWDebugOverlay(); } catch (e) {}
         }
       }
       
@@ -479,12 +568,14 @@ function applyCWInstant() {
                     dataBuffer = evt.data.slice(i,i+l);
                     arr_low = new Float32Array(dataBuffer);
                     filter_low=ntohf(arr_low[0]);
+                        try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
                   case 40: // HIGH_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
                     let arr_high = new Float32Array(dataBuffer);
                     filter_high=ntohf(arr_high[0]);
+                    try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
                   case 46: // BASEBAND_POWER
@@ -495,6 +586,34 @@ function applyCWInstant() {
                 }
               }
               spectrum.setFilter(filter_low,filter_high);
+              try {
+                // record ack
+                try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
+                // If we expected a different ack, attempt an immediate resend (bounded retries)
+                if (expectedFilterAck) {
+                  const expLow = Number(expectedFilterAck.low);
+                  const expHigh = Number(expectedFilterAck.high);
+                  if (expLow !== Number(filter_low) || expHigh !== Number(filter_high)) {
+                    if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
+                      expectedFilterAck.retries++;
+                      console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
+                      if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                        cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
+                        updateCWDebugOverlay();
+                      }
+                    } else {
+                      // give up after max retries
+                      expectedFilterAck = null;
+                      updateCWDebugOverlay();
+                    }
+                  } else {
+                    // ack matches expected, clear
+                    expectedFilterAck = null;
+                    updateCWDebugOverlay();
+                  }
+                }
+              } catch (e) {}
               break;
             case 0x7A: // 122 - 16bit PCM Audio at 12000 Hz
               // Audio data 1 channel 12000
