@@ -52,20 +52,23 @@
                 onchange="setSkipWaterfallLines(this.value)">
            </div>
         </div>
-   <div style="font-size:12px;margin-top:5px; display:flex; align-items:center; gap:8px;">
-    <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset Settings</button>
-    <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; width:74px;" title="Write Info and/or start/stop periodic info export">Write Info</button>
-   <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:4px;" title="Enter minutes for periodic Write Info. 0 = off.">
+   <div style="font-size:12px;margin-top:5px; display:flex; align-items:center; gap:4px;">
+    <button id="reset" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" title="Reset settings to default (export your memories first as they will be lost)" onclick="resetSettings()">Reset</button>
+    <button id="csv_out" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px;" title="Write Info and/or start/stop periodic info export">Write</button>
+   <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:2px;" title="Enter minutes for periodic Write Info. 0 = off.">
    <!-- Spectrum poll input (milliseconds) and send button -->
-   <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 6px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Set Poll</button>
-   <input type="number" id="spectrumPollInput" min="30" max="2000" step="10" value="100" style="width:50px; font-size:12px; margin-left:4px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
+   <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 4px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Poll</button>
+   <input type="number" id="spectrumPollInput" min="30" max="2000" step="10" value="100" style="width:50px; font-size:12px; margin-left:2px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
+      <input type="number" id="cw_lower_input" step="1" inputmode="numeric" title="CWInstant lower offset (Hz)" style="width:48px; font-size:12px; margin-left:6px;" />
+      <input type="number" id="cw_upper_input" step="1" inputmode="numeric" title="CWInstant upper offset (Hz)" style="width:48px; font-size:12px; margin-left:2px;" />
    </div>
-        <div style="font-size:12px;margin-top:5px">
+         <div style="font-size:12px;margin-top:5px">
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px" id="ExportMax" title="Export Max Hold as CSV File" onclick="spectrum.exportMaxHoldCSV()">Export Max</button>
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" id="ExportData" title="Export current spectrum data as CSV File" onclick="spectrum.exportCSV()">Export Data</button>
          <button type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" id="ExportMin" title="Export Min Hold as CSV File" onclick="spectrum.exportMinHoldCSV()">Export Min</button>
          <button id="load_max" type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px;" title="Load and display max, min or spectrum data">Load Data</button>
-         <button id="clear_overlay" type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px; margin-left:4px;" title="Clear loaded overlay trace">Clear Data</button>
+         <button id="clear_overlay" type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px; margin-left:4px;" title="Clear loaded overlay trace">Clear</button>
+         <button type="button" id="cw_save_button" style="font-size:12px; padding:2px 6px; min-width:0; min-height:0; height:24px; margin-top:4px; margin-left:6px;" title="Save CWInstant offsets">Save CWI</button>
       </div>
      </form>
 </div>

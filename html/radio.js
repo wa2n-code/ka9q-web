@@ -67,6 +67,102 @@
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
 
+// CWInstant preset storage: holds lower/upper offsets (Hz) from current frequency
+let cwInstantPreset = { lowerOffset: 300, upperOffset: 700 };
+// CWInstant runtime state: whether active and stored previous edges for restore
+let cwInstantActive = false;
+let cwInstantPrevEdges = null; // { low: number, high: number }
+function loadCWInstantPreset() {
+  try {
+    const v = localStorage.getItem('CWInstantPreset');
+    if (v) cwInstantPreset = JSON.parse(v);
+  } catch (e) {
+    console.warn('Failed to load CWInstantPreset, using defaults');
+  }
+}
+function saveCWInstantPreset() {
+  try { localStorage.setItem('CWInstantPreset', JSON.stringify(cwInstantPreset)); } catch (e) {}
+}
+
+// Update CWInstant button enabled/disabled state based on current mode
+function updateCWInstantButtonState() {
+  try {
+    const btn = document.getElementById('cw_instant_button');
+    const modeEl = document.getElementById('mode');
+    if (!btn || !modeEl) return;
+    const m = (modeEl.value || '').toLowerCase();
+    if (m === 'usb' || m === 'lsb') {
+      btn.removeAttribute('disabled');
+      btn.style.opacity = '';
+    } else {
+      // If mode no longer supports CWInstant but it was active, deactivate and restore edges
+      if (cwInstantActive) {
+        try { applyCWInstant(); } catch (e) {}
+      }
+      btn.setAttribute('disabled', 'disabled');
+      btn.style.opacity = '0.6';
+    }
+    // Reflect active state visually (bold when active)
+    if (cwInstantActive) {
+      btn.style.fontWeight = 'bold';
+    } else {
+      btn.style.fontWeight = '';
+    }
+  } catch (e) {}
+}
+
+// Apply CWInstant preset: set filter input boxes and send edges to backend
+function applyCWInstant() {
+  const lowEl = document.getElementById('filterLowInput');
+  const highEl = document.getElementById('filterHighInput');
+  const modeEl = document.getElementById('mode');
+  if (!lowEl || !highEl || !modeEl) return;
+  const m = (modeEl.value || '').toLowerCase();
+  if (!(m === 'usb' || m === 'lsb')) return;
+  const lowerOffset = Number(cwInstantPreset.lowerOffset) || 300;
+  const upperOffset = Number(cwInstantPreset.upperOffset) || 700;
+  // Toggle behavior: if already active, restore previous edges; otherwise save current and apply offsets
+  if (cwInstantActive) {
+    // restore
+    if (cwInstantPrevEdges) {
+      suppressEdgeAutoSend = true;
+      lowEl.value = cwInstantPrevEdges.low;
+      highEl.value = cwInstantPrevEdges.high;
+      suppressEdgeAutoSend = false;
+      cwInstantPrevEdges = null;
+    }
+    cwInstantActive = false;
+    updateCWInstantButtonState();
+    sendFilterEdges();
+    return;
+  }
+
+  // Save current edges for later restore
+  cwInstantPrevEdges = { low: lowEl.value, high: highEl.value };
+
+  let lowVal, highVal;
+  if (m === 'usb') {
+    // USB: add offsets (positive)
+    lowVal = Math.min(lowerOffset, upperOffset);
+    highVal = Math.max(lowerOffset, upperOffset);
+  } else {
+    // LSB: subtract offsets (negative)
+    lowVal = -Math.max(upperOffset, lowerOffset);
+    highVal = -Math.min(upperOffset, lowerOffset);
+  }
+
+  // Programmatic change without marking manual-dirty
+  suppressEdgeAutoSend = true;
+  lowEl.value = lowVal;
+  highEl.value = highVal;
+  suppressEdgeAutoSend = false;
+
+  cwInstantActive = true;
+  updateCWInstantButtonState();
+  // Send to backend
+  sendFilterEdges();
+}
+
       function ntohs(value) {
         const buffer = new ArrayBuffer(2);
         const view = new DataView(buffer);
@@ -838,6 +934,8 @@
       saveSettings();
   // Update filter edge inputs to sensible defaults for this mode
   setFilterEdgesForMode(selected_mode);
+  // Update CWInstant button state when mode changes programmatically
+  try { updateCWInstantButtonState(); } catch (e) {}
   }
 
     function selectMode(mode) {
@@ -845,6 +943,7 @@
         element.value = mode;
         ws.send("M:"+mode);
       setFilterEdgesForMode(mode);
+      try { updateCWInstantButtonState(); } catch (e) {}
       saveSettings();
     }
 
@@ -2291,6 +2390,62 @@ window.addEventListener('DOMContentLoaded', function() {
             };
             // Initialize desc box for first memory
             descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
+
+            // Initialize CWInstant preset and button
+            try {
+              loadCWInstantPreset();
+              const cwBtn = document.getElementById('cw_instant_button');
+              if (cwBtn) {
+                cwBtn.onclick = function() { applyCWInstant(); };
+              }
+              const modeEl = document.getElementById('mode');
+              if (modeEl) {
+                modeEl.addEventListener('change', updateCWInstantButtonState);
+              }
+              // ensure initial button state
+              updateCWInstantButtonState();
+              // Initialize CWInstant inputs and Save button (in options dialog)
+              try {
+                const cwLower = document.getElementById('cw_lower_input');
+                const cwUpper = document.getElementById('cw_upper_input');
+                const cwSave = document.getElementById('cw_save_button');
+                if (cwLower) cwLower.value = cwInstantPreset.lowerOffset;
+                if (cwUpper) cwUpper.value = cwInstantPreset.upperOffset;
+                if (cwSave) {
+                  cwSave.onclick = function() {
+                    try {
+                      const lo = Number(document.getElementById('cw_lower_input').value);
+                      const hi = Number(document.getElementById('cw_upper_input').value);
+                      if (Number.isFinite(lo) && Number.isFinite(hi)) {
+                        cwInstantPreset.lowerOffset = lo;
+                        cwInstantPreset.upperOffset = hi;
+                        saveCWInstantPreset();
+                        // If CWInstant currently active, reapply offsets for current mode
+                        if (cwInstantActive) {
+                          const modeEl = document.getElementById('mode');
+                          const lowEl = document.getElementById('filterLowInput');
+                          const highEl = document.getElementById('filterHighInput');
+                          const m = (modeEl && modeEl.value) ? modeEl.value.toLowerCase() : '';
+                          if (lowEl && highEl && (m === 'usb' || m === 'lsb')) {
+                            if (m === 'usb') {
+                              lowEl.value = Math.min(lo, hi);
+                              highEl.value = Math.max(lo, hi);
+                            } else {
+                              lowEl.value = -Math.max(lo, hi);
+                              highEl.value = -Math.min(lo, hi);
+                            }
+                            sendFilterEdges();
+                          }
+                        }
+                      } else {
+                        alert('Please enter valid numeric offsets');
+                      }
+                    } catch (e) { console.error('Failed to save CWInstant offsets', e); }
+                  };
+                }
+              } catch (e) { /* ignore */ }
+            } catch (e) { console.error('CWInstant init failed', e); }
+
             // --- END OF ALL INITIALIZATION ---
             settingsReady = true; // Allow saveSettings() from now on
         })
