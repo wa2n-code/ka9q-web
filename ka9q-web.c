@@ -84,6 +84,7 @@ struct session {
   float bins_max_db;
   float bins_autorange_gain;
   float bins_autorange_offset;
+  int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
   /* uint32_t last_poll_tag; */
 };
 
@@ -1665,7 +1666,8 @@ void *ctrl_thread(void *arg) {
 
   while(1) {
     int rx_length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
-    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) 
+    {
       uint32_t ssrc = get_ssrc(buffer+1,rx_length-1);
       //      fprintf(stderr,"%s: ssrc=%d\n",__FUNCTION__,ssrc);
       if(ssrc%2==1) { // Spectrum data
@@ -1698,33 +1700,33 @@ void *ctrl_thread(void *arg) {
           // looked painful, so I went quick-n-dirty here
 
 
-	  // The types of some elements of struct frontend and struct channel changed in radiod
-	  // eg, Frontend.samprate became a double. This broke the memcpy calls
-	  // Changed memcpy to assignments with casts, which is much more portable
-	  // But yeah, this message should be TLV encoded or something
-	  // And it's what you get when you steal internal data structures from another
-	  // program maintained by someone else... - 12/13 Dec 2025 KA9Q
-	  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
-	  *ip++ = (uint32_t)Frontend.rf_agc;
-	  *(uint64_t *)ip = (uint64_t)Frontend.samples;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Frontend.overranges;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Frontend.timestamp;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
-	  ip += 2;
-	  *(float *)ip++ = (float)Frontend.rf_atten;
-	  *(float *)ip++ = (float)Frontend.rf_gain;
-	  *(float *)ip++ = (float)Frontend.rf_level_cal;
-	  *(float *)ip++ = (float)power2dB(Frontend.if_power);
-	  *(float *)ip++ = (float)sp->noise_density_audio;
-	  *ip++ = (uint32_t)sp->zoom_index;
-	  *ip++ = (uint32_t)bin_precision_bytes;
-	  *ip++ = (uint32_t)sp->bins_autorange_offset;
-	  *ip++ = (uint32_t)sp->bins_autorange_gain;
+          // The types of some elements of struct frontend and struct channel changed in radiod
+          // eg, Frontend.samprate became a double. This broke the memcpy calls
+          // Changed memcpy to assignments with casts, which is much more portable
+          // But yeah, this message should be TLV encoded or something
+          // And it's what you get when you steal internal data structures from another
+          // program maintained by someone else... - 12/13 Dec 2025 KA9Q
+          *ip++ = (uint32_t)round(fabs(Frontend.samprate));
+          *ip++ = (uint32_t)Frontend.rf_agc;
+          *(uint64_t *)ip = (uint64_t)Frontend.samples;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Frontend.overranges;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Frontend.timestamp;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
+          ip += 2;
+          *(float *)ip++ = (float)Frontend.rf_atten;
+          *(float *)ip++ = (float)Frontend.rf_gain;
+          *(float *)ip++ = (float)Frontend.rf_level_cal;
+          *(float *)ip++ = (float)power2dB(Frontend.if_power);
+          *(float *)ip++ = (float)sp->noise_density_audio;
+          *ip++ = (uint32_t)sp->zoom_index;
+          *ip++ = (uint32_t)bin_precision_bytes;
+          *ip++ = (uint32_t)sp->bins_autorange_offset;
+          *ip++ = (uint32_t)sp->bins_autorange_gain;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1878,17 +1880,35 @@ void *ctrl_thread(void *arg) {
                 //fprintf(stderr, "SSRC %u: backend freq differs (CW mode), but resend is inhibited (preset=%s)\n",
                 //        sp->ssrc, sp->requested_preset);
             } else {
-              if (verbose)
-                fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, it's not CWL or CWU,retrying...\n",
-                        sp->ssrc,
-                        0.001 * sp->frequency,
-                        Channel.tune.freq * 0.001);
-              // Debug: print the actual Channel.tune.freq value
-              fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz\n", Channel.tune.freq);
-              char f[128];
-              sprintf(f,"%.3f",0.001 * sp->frequency);
-              control_set_frequency(sp,f);
+              /* Hold off resending until we've seen this mismatch N times in a row. */
+              const int MAX_FREQ_MISMATCH = 3;
+              if (Channel.tune.freq == sp->frequency) {
+                /* Frequencies now match; clear any counting. */
+                sp->freq_mismatch_count = 0;
+              } else {
+                sp->freq_mismatch_count++;
+                if (verbose)
+                  fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz (mismatch count=%d)\n",
+                          sp->ssrc,
+                          0.001 * sp->frequency,
+                          Channel.tune.freq * 0.001,
+                          sp->freq_mismatch_count);
+                if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+                  /* Debug: print the actual Channel.tune.freq value */
+                  fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
+                  char f[128];
+                  sprintf(f,"%.3f",0.001 * sp->frequency);
+                  control_set_frequency(sp,f);
+                  /* reset counter until a new mismatch sequence starts */
+                  sp->freq_mismatch_count = 0;
+                }
+              }
             }
+          }
+          else {
+            /* Frequencies match; ensure counter is cleared */
+            if (sp->freq_mismatch_count != 0)
+              sp->freq_mismatch_count = 0;
           }
           pthread_mutex_lock(&output_dest_socket_mutex);
           if(Channel.output.dest_socket.sa_family != 0)
@@ -1926,7 +1946,7 @@ void *ctrl_thread(void *arg) {
         }
       }
     } else if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
-fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
+        fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
     }
   }
 //fprintf(stderr,"%s: EXIT\n",__FUNCTION__);

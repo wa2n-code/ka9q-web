@@ -120,29 +120,16 @@ let quickBWActive = false;
 let quickBWPrevEdges = null; // { low: number, high: number }
 function loadQuickBWPreset() {
   try {
-    // Migrate from old CWInstantPreset if present
-    try {
-      const old = localStorage.getItem && localStorage.getItem('CWInstantPreset');
-      if (old) {
-        try {
-          const parsed = JSON.parse(old);
-          if (parsed && (parsed.lowerOffset !== undefined || parsed.upperOffset !== undefined)) {
-            quickBWPreset.lowerOffset = Number(parsed.lowerOffset) || quickBWPreset.lowerOffset;
-            quickBWPreset.upperOffset = Number(parsed.upperOffset) || quickBWPreset.upperOffset;
-            // remove old key
-            try { localStorage.removeItem && localStorage.removeItem('CWInstantPreset'); } catch (e) {}
-            // persist migrated value
-            try { localStorage.setItem('QuickBWPreset', JSON.stringify(quickBWPreset)); } catch (e) {}
-            return;
-          }
-        } catch (e) { /* ignore parse errors */ }
+    const v = (localStorage.getItem && localStorage.getItem('QuickBWPreset'));
+    if (v) {
+      try {
+        quickBWPreset = JSON.parse(v);
+      } catch (e) {
+        console.warn('Failed to parse QuickBWPreset, using defaults');
       }
-    } catch (e) { /* ignore storage access errors */ }
-
-    const v = localStorage.getItem('QuickBWPreset');
-    if (v) quickBWPreset = JSON.parse(v);
+    }
   } catch (e) {
-    console.warn('Failed to load QuickBWPreset, using defaults');
+    console.warn('Failed to access localStorage for QuickBWPreset, using defaults');
   }
 }
 function saveQuickBWPreset() {
