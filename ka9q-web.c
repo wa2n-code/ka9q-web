@@ -118,7 +118,7 @@ int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
 uint16_t rtp_seq=0;
-int verbose = 1;
+int verbose = 0;
 int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -453,35 +453,35 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'F':
       case 'f':
-        {
+        /*{
           double freq = strtod(&tmp[2],0);
           fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
           fflush(stderr);
-        }
+        }*/
         sp->frequency = strtod(&tmp[2],0) * 1000;
-    int32_t span = sp->bin_width * sp->bins;
-    int32_t min_f = sp->center_frequency - (span / 2);
-    int32_t max_f = sp->center_frequency + (span / 2);
-    int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
-    int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
-    // Shift if frequency is within edge_bin_margin bins of the edge
-    if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
-      if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
-        // Shift so that frequency is edge_bin_margin bins above the new min edge
-        int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
-        sp->center_frequency -= shift * sp->bin_width;
-      } else {
-        sp->center_frequency = sp->frequency;
-      }
-    } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
-      if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
-        // Shift so that frequency is edge_bin_margin bins below the new max edge
-        int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
-        sp->center_frequency += shift * sp->bin_width;
-      } else {
-        sp->center_frequency = sp->frequency;
-      }
-    }
+        int32_t span = sp->bin_width * sp->bins;
+        int32_t min_f = sp->center_frequency - (span / 2);
+        int32_t max_f = sp->center_frequency + (span / 2);
+        int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
+        int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
+        // Shift if frequency is within edge_bin_margin bins of the edge
+        if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
+          if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
+            // Shift so that frequency is edge_bin_margin bins above the new min edge
+            int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
+            sp->center_frequency -= shift * sp->bin_width;
+          } else {
+            sp->center_frequency = sp->frequency;
+          }
+        } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
+          if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
+            // Shift so that frequency is edge_bin_margin bins below the new max edge
+            int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
+            sp->center_frequency += shift * sp->bin_width;
+          } else {
+            sp->center_frequency = sp->frequency;
+          }
+        }
         check_frequency(sp);
         control_set_frequency(sp,&tmp[2]);
         break;
@@ -1044,11 +1044,12 @@ string parsing, buffer management, and thread synchronization.
 */
 void control_set_frequency(struct session *sp,char *str) {
     // Debug: print when sending frequency command to backend
-    if(strlen(str) > 0){
+    /*    if(strlen(str) > 0){
       double debug_f = fabs(strtod(str,0) * 1000.0);
       fprintf(stderr, "[DEBUG] Sending frequency command to backend: %.3f Hz\n", debug_f);
       fflush(stderr);
     }
+    */
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   double f;
@@ -1875,11 +1876,11 @@ void *ctrl_thread(void *arg) {
           }
           if (Channel.tune.freq != sp->frequency) {
             // Inhibit resend if preset is CWU or CWL
-            if (strcasecmp(sp->requested_preset, "cwu") == 0 || strcasecmp(sp->requested_preset, "cwl") == 0) {
+/*            if (strcasecmp(sp->requested_preset, "cwu") == 0 || strcasecmp(sp->requested_preset, "cwl") == 0) {
               if (verbose);
                 //fprintf(stderr, "SSRC %u: backend freq differs (CW mode), but resend is inhibited (preset=%s)\n",
                 //        sp->ssrc, sp->requested_preset);
-            } else {
+            } else */ {
               /* Hold off resending until we've seen this mismatch N times in a row. */
               const int MAX_FREQ_MISMATCH = 3;
               if (Channel.tune.freq == sp->frequency) {
@@ -1895,7 +1896,7 @@ void *ctrl_thread(void *arg) {
                           sp->freq_mismatch_count);
                 if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
                   /* Debug: print the actual Channel.tune.freq value */
-                  fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
+                  //fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
                   char f[128];
                   sprintf(f,"%.3f",0.001 * sp->frequency);
                   control_set_frequency(sp,f);
