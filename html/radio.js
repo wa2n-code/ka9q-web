@@ -139,6 +139,8 @@ let quickBWPreset = { lowerOffset: 300, upperOffset: 700 };
 // QuickBW runtime state: whether active and stored previous edges for restore
 let quickBWActive = false;
 let quickBWPrevEdges = null; // { low: number, high: number }
+// Suppress automatic sends when programmatically changing filter edge inputs
+let suppressEdgeAutoSend = false;
 function loadQuickBWPreset() {
   try {
     const v = (localStorage.getItem && localStorage.getItem('QuickBWPreset'));
@@ -1062,7 +1064,16 @@ function applyQuickBW() {
     }
 
     function setMode(selected_mode) {
-      //console.log("setMode() called with selected_mode=", selected_mode);
+      // If QuickBW is active and the change is driven by frequency-based switching,
+      // deactivate QuickBW and drop any saved edges so they won't be restored later.
+      if (quickBWActive && switchModesByFrequency) {
+        quickBWActive = false;
+        quickBWPrevEdges = null;
+        // inhibit any auto-sends while applying mode defaults
+        suppressEdgeAutoSend = true;
+        try { updateQuickBWButtonState(); } catch (e) {}
+      }
+
       document.getElementById('mode').value = selected_mode;
       ws.send("M:" + selected_mode);
   
@@ -1099,6 +1110,9 @@ function applyQuickBW() {
       saveSettings();
   // Update filter edge inputs to sensible defaults for this mode
   setFilterEdgesForMode(selected_mode);
+  // restore auto-send allowance (setFilterEdgesForMode already manages this flag,
+  // but ensure it's false here in case we inhibited it above)
+  suppressEdgeAutoSend = false;
   // Update QuickBW button state when mode changes programmatically
   try { updateQuickBWButtonState(); } catch (e) {}
   }
@@ -1159,8 +1173,7 @@ function applyQuickBW() {
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed
-    // by the `suppressEdgeAutoSend` flag set above.
-    let suppressEdgeAutoSend = false;
+    // by the `suppressEdgeAutoSend` flag declared earlier.
     let edgesListenersAttached = false;
     // Whether the user has manually typed values that require pressing the Edge button
     let edgeManualDirty = false;
