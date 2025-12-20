@@ -157,6 +157,7 @@ function loadQuickBWPreset() {
 }
 function saveQuickBWPreset() {
   try { localStorage.setItem('QuickBWPreset', JSON.stringify(quickBWPreset)); } catch (e) {}
+  console.log('Saved QuickBWPreset:', quickBWPreset);
 }
 
 // Update QuickBW button enabled/disabled state based on current mode
@@ -1866,6 +1867,7 @@ function setDefaultSettings() {
   localStorage.setItem("volume_control", 1.0);
   setPlayerVolume(1.0); // set the volue using the exponential scale
   document.getElementById("volume_control").value = 1.0;
+  saveQuickBWPreset(); // save the quick BW presets with default values
 }
 
 function loadSettings() {
