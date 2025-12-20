@@ -1205,7 +1205,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
   encode_double(&bp,RADIO_FREQUENCY,frequency);
   encode_int(&bp,BIN_COUNT,bins);
-  encode_float(&bp,NONCOHERENT_BIN_BW,bin_bw);
+  encode_float(&bp,RESOLUTION_BW,bin_bw);
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
@@ -1358,7 +1358,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       sp->bins_min_db = (sp->bins_min_db == 0) ? -120 : 10.0 * log10(sp->bins_min_db);
       sp->bins_max_db = (sp->bins_max_db == 0) ? -120 : 10.0 * log10(sp->bins_max_db);
       break;
-    case NONCOHERENT_BIN_BW:
+    case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
       break;
     case IF_POWER:
