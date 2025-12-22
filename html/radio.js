@@ -700,7 +700,7 @@ function applyQuickBW() {
         // Run a diagnostic to surface any missing saved keys (alerts the user)
         try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
         // Trigger autoscale on first load so spectrum has sensible range
-        try { autoAutoscale(5, true); } catch (e) { /* ignore */ }
+        //try { autoAutoscale(50, true); } catch (e) { /* ignore */ }
         spectrum.radio_pointer = this;
         page_title = "";
 
