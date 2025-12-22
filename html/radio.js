@@ -690,10 +690,17 @@ function applyQuickBW() {
                 }, 100); // Small delay to ensure DOM is ready
             }
         });
+        // Ensure sensible in-memory defaults exist before attempting to load stored settings.
+        // Pass `false` to avoid writing defaults to localStorage unless we actually need to create them.
+        setDefaultSettings(false);
         if (!loadSettings()) {
-          console.log("loadSettings() returned false, setting defaults");
-          setDefaultSettings(); 
+          console.log("no saved settings found, committing defaults to localStorage");
+          setDefaultSettings(true);
         }
+        // Run a diagnostic to surface any missing saved keys (alerts the user)
+        try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
+        // Trigger autoscale on first load so spectrum has sensible range
+        try { autoAutoscale(5, true); } catch (e) { /* ignore */ }
         spectrum.radio_pointer = this;
         page_title = "";
 
@@ -1779,6 +1786,7 @@ function dumpHTML() {
 }
 
 let settingsReady = false; // Block saves until after settings are loaded and UI is initialized
+let frequencyMemoriesInitialized = false;
 function saveSettings() {
   if (!settingsReady) return; // Prevent saves during initialization
   localStorage.setItem("tune_hz", spectrum.frequency.toString());
@@ -1815,8 +1823,8 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
-function setDefaultSettings() {
-  console.log("Setting default settings");
+function setDefaultSettings(writeToStorage = true) {
+  if (writeToStorage) console.log("Setting default settings");
   spectrum.averaging = 4;
   spectrum.frequency = 10000000;
   frequencyHz = 10000000;
@@ -1840,7 +1848,8 @@ function setDefaultSettings() {
   spectrum.decay = 1;
   spectrum.cursor_active = false;
   document.getElementById("mode").value = "am";
-  target_preset = "usb";
+  // Keep target_preset in sync with the UI default mode
+  target_preset = document.getElementById("mode").value;
   increment = 1000;
   document.getElementById("colormap").value = 9;
   spectrum.colorIndex = 9;
@@ -1851,6 +1860,15 @@ function setDefaultSettings() {
   spectrum.cursor_freq = 10000000;
   spectrum.check_max = false;
   spectrum.check_min = false;
+  // Ensure the DOM checkboxes match the spectrum defaults
+  try {
+    const elCheckMax = document.getElementById("check_max");
+    if (elCheckMax) elCheckMax.checked = false;
+  } catch (e) {}
+  try {
+    const elCheckMin = document.getElementById("check_min");
+    if (elCheckMin) elCheckMin.checked = false;
+  } catch (e) {}
   switchModesByFrequency = true;
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
@@ -1862,77 +1880,232 @@ function setDefaultSettings() {
   var beEl = document.getElementById('ckShowBandEdges');
   if (beEl) beEl.checked = enableBandEdges;
   const MEMORY_KEY = 'frequency_memories';
-  let memories = Array(20).fill("");
-  localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
-  localStorage.setItem("volume_control", 1.0);
-  setPlayerVolume(1.0); // set the volue using the exponential scale
-  document.getElementById("volume_control").value = 1.0;
-  saveQuickBWPreset(); // save the quick BW presets with default values
+  // Use 50 entries to match the memories subsystem expectations
+  // Each memory is an object: { freq: string, desc: string, mode: string }
+  let memories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+  // Initialize memory 0 to WWV10 @ 10,000 kHz AM (10000000 Hz) when creating defaults
+  memories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
+  if (writeToStorage) {
+    try { localStorage.setItem(MEMORY_KEY, JSON.stringify(memories)); } catch (e) {}
+    try { localStorage.setItem("volume_control", 1.0); } catch (e) {}
+    try { setPlayerVolume(1.0); } catch (e) {}
+    try { document.getElementById("volume_control").value = 1.0; } catch (e) {}
+    try { saveQuickBWPreset(); } catch (e) {}
+  } else {
+    // still set in-memory default for player volume and DOM
+    try { setPlayerVolume(1.0); } catch (e) {}
+    try { document.getElementById("volume_control").value = 1.0; } catch (e) {}
+  }
+  // If requested, also persist all the other UI/spectrum defaults so localStorage
+  // contains the full set that `saveSettings()` expects.
+  if (writeToStorage) {
+    try { localStorage.setItem("tune_hz", spectrum.frequency.toString()); } catch (e) {}
+    try { localStorage.setItem("zoom_level", document.getElementById("zoom_level").value.toString()); } catch (e) {}
+    try { localStorage.setItem("min_db", spectrum.min_db.toString()); } catch (e) {}
+    try { localStorage.setItem("max_db", spectrum.max_db.toString()); } catch (e) {}
+    try { localStorage.setItem("graticuleIncrement", spectrum.graticuleIncrement.toString()); } catch (e) {}
+    try { localStorage.setItem("wf_min_db", spectrum.wf_min_db.toString()); } catch (e) {}
+    try { localStorage.setItem("wf_max_db", spectrum.wf_max_db.toString()); } catch (e) {}
+    try { localStorage.setItem("spectrum_percent", spectrum.spectrumPercent.toString()); } catch (e) {}
+    try { localStorage.setItem("spectrum_center_hz", spectrum.centerHz.toString()); } catch (e) {}
+    try { localStorage.setItem("averaging", spectrum.averaging.toString()); } catch (e) {}
+    try { localStorage.setItem("maxHold", spectrum.maxHold.toString()); } catch (e) {}
+    try { localStorage.setItem("paused", spectrum.paused.toString()); } catch (e) {}
+    try { localStorage.setItem("decay", spectrum.decay.toString()); } catch (e) {}
+    try { localStorage.setItem("cursor_active", spectrum.cursor_active.toString()); } catch (e) {}
+    try { localStorage.setItem("preset", document.getElementById("mode").value); } catch (e) {}
+    try { localStorage.setItem("step", document.getElementById("step").value.toString()); } catch (e) {}
+    try { localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString()); } catch (e) {}
+    try { localStorage.setItem("meterIndex", document.getElementById("meter").value.toString()); } catch (e) {}
+    try { localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString()); } catch (e) {}
+    try { localStorage.setItem("check_max", (document.getElementById("check_max") && document.getElementById("check_max").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("check_min", (document.getElementById("check_min") && document.getElementById("check_min").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("switchModesByFrequency", (document.getElementById("cksbFrequency") && document.getElementById("cksbFrequency").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("onlyAutoscaleByButton", (document.getElementById("ckonlyAutoscaleButton") && document.getElementById("ckonlyAutoscaleButton").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("enableAnalogSMeter", enableAnalogSMeter ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("enableBandEdges", enableBandEdges ? "true" : "false"); } catch (e) {}
+  }
 }
 
 function loadSettings() {
-  console.log(`localStorage.length = ${localStorage.length}`);
- if ((localStorage.length == 0) || localStorage.length != 28) {
-    return false;
-  }
-  spectrum.averaging = parseInt(localStorage.getItem("averaging"));
-  spectrum.frequency = parseFloat(localStorage.getItem("tune_hz"));
-  frequencyHz = parseFloat(localStorage.getItem("tune_hz"));
+  try { console.log(`localStorage.length = ${localStorage.length}`); } catch (e) {}
+  if (typeof localStorage === 'undefined') return false;
+  try { if (localStorage.length === 0) return false; } catch (e) {}
+
+  const getLS = (k, parser, fallback) => {
+    try {
+      const v = localStorage.getItem(k);
+      if (v === null || v === undefined) return fallback;
+      return parser ? parser(v) : v;
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  spectrum.averaging = getLS("averaging", v => parseInt(v, 10), spectrum.averaging);
+  const tune = getLS("tune_hz", v => parseFloat(v), spectrum.frequency);
+  spectrum.frequency = tune;
+  frequencyHz = tune;
   target_frequency = frequencyHz;
-  spectrum.min_db = parseFloat(localStorage.getItem("min_db"));
-  document.getElementById("spectrum_min").value = spectrum.min_db;
-  spectrum.max_db = parseFloat(localStorage.getItem("max_db"));
-  document.getElementById("spectrum_max").value = spectrum.max_db;
-  spectrum.wf_min_db = parseFloat(localStorage.getItem("wf_min_db"));
-  spectrum.graticuleIncrement = parseFloat(localStorage.getItem("graticuleIncrement"));
-  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
-  spectrum.wf_max_db = parseFloat(localStorage.getItem("wf_max_db"));
-  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
-  spectrum.spectrumPercent = parseFloat(localStorage.getItem("spectrum_percent"));
-  spectrum.centerHz = parseFloat(localStorage.getItem("spectrum_center_hz"));
+
+  spectrum.min_db = getLS("min_db", v => parseFloat(v), spectrum.min_db);
+  try { document.getElementById("spectrum_min").value = spectrum.min_db; } catch (e) {}
+
+  spectrum.max_db = getLS("max_db", v => parseFloat(v), spectrum.max_db);
+  try { document.getElementById("spectrum_max").value = spectrum.max_db; } catch (e) {}
+
+  spectrum.wf_min_db = getLS("wf_min_db", v => parseFloat(v), spectrum.wf_min_db);
+  spectrum.graticuleIncrement = getLS("graticuleIncrement", v => parseFloat(v), spectrum.graticuleIncrement);
+  try { document.getElementById("waterfall_min").value = spectrum.wf_min_db; } catch (e) {}
+
+  spectrum.wf_max_db = getLS("wf_max_db", v => parseFloat(v), spectrum.wf_max_db);
+  try { document.getElementById("waterfall_max").value = spectrum.wf_max_db; } catch (e) {}
+
+  spectrum.spectrumPercent = getLS("spectrum_percent", v => parseFloat(v), spectrum.spectrumPercent);
+  spectrum.centerHz = getLS("spectrum_center_hz", v => parseFloat(v), spectrum.centerHz);
   centerHz = spectrum.centerHz;
   target_center = centerHz;
-  spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
-  document.getElementById("max_hold").checked = spectrum.maxHold;
-  spectrum.paused = (localStorage.getItem("paused") == "true");
-  spectrum.decay = parseFloat(localStorage.getItem("decay"));
-  spectrum.cursor_active = (localStorage.getItem("cursor_active") == "true");
-  document.getElementById("mode").value = localStorage.getItem("preset");
-  target_preset = localStorage.getItem("preset");
-  increment = parseFloat(localStorage.getItem("step"));
-  document.getElementById("colormap").value = parseInt(localStorage.getItem("colorIndex"));
-  const c = parseInt(localStorage.getItem("colorIndex"));
-  document.getElementById("colormap").value = c;
-  spectrum.colorIndex = c;
-  document.getElementById("meter").value = parseInt(localStorage.getItem("meterIndex"));
-  const d = parseInt(localStorage.getItem("meterIndex"));
-  document.getElementById("meter").value = d;
-  meterType = d;
-  document.getElementById("zoom_level").value = parseInt(localStorage.getItem("zoom_level"));
-  target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
-  spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
-  spectrum.check_max = check_max.checked = (localStorage.getItem("check_max") == "true");
-  spectrum.check_min = check_min.checked = (localStorage.getItem("check_min") == "true");
-  switchModesByFrequency = (localStorage.getItem("switchModesByFrequency") == "true");
-  document.getElementById("cksbFrequency").checked = switchModesByFrequency;
-  onlyAutoscaleByButton = (localStorage.getItem("onlyAutoscaleByButton") == "true");
-  document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton;
-  enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
-  document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
-  setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
-  // Band edges persistence: mirror analog S-meter behavior
-  enableBandEdges = (localStorage.getItem("enableBandEdges") == "true");
-  var beEl = document.getElementById('ckShowBandEdges');
-  if (beEl) beEl.checked = enableBandEdges;
-  // apply to spectrum if present
-  if (typeof spectrum !== 'undefined' && spectrum) {
-      spectrum.showBandEdges = enableBandEdges;
-      spectrum.updateAxes();
+
+  spectrum.maxHold = getLS("maxHold", v => (v === "true"), spectrum.maxHold);
+  try { document.getElementById("max_hold").checked = spectrum.maxHold; } catch (e) {}
+
+  spectrum.paused = getLS("paused", v => (v === "true"), spectrum.paused);
+  spectrum.decay = getLS("decay", v => parseFloat(v), spectrum.decay);
+  spectrum.cursor_active = getLS("cursor_active", v => (v === "true"), spectrum.cursor_active);
+
+  const preset = getLS("preset", v => v, null);
+  if (preset !== null) {
+    try { document.getElementById("mode").value = preset; } catch (e) {}
+    target_preset = preset;
   }
-  //console.log("Loaded volume settings: ",parseFloat(localStorage.getItem("volume_control")));
-  var vc = parseFloat(localStorage.getItem("volume_control"));
-  document.getElementById("volume_control").value = vc;
-  setPlayerVolume(vc); // set the volue using the exponential scale
+
+  increment = getLS("step", v => parseFloat(v), increment);
+
+  const colorIndex = getLS("colorIndex", v => parseInt(v, 10), spectrum.colorIndex);
+  try { document.getElementById("colormap").value = colorIndex; } catch (e) {}
+  spectrum.colorIndex = colorIndex;
+
+  const meterIndex = getLS("meterIndex", v => parseInt(v, 10), meterType);
+  try { document.getElementById("meter").value = meterIndex; } catch (e) {}
+  meterType = meterIndex;
+
+  const zoomLv = getLS("zoom_level", v => parseInt(v, 10), target_zoom_level);
+  try { document.getElementById("zoom_level").value = zoomLv; } catch (e) {}
+  target_zoom_level = zoomLv;
+
+  spectrum.cursor_freq = getLS("cursor_freq", v => parseFloat(v), spectrum.cursor_freq);
+
+  const elCheckMax = document.getElementById("check_max");
+  const ckMaxVal = getLS("check_max", v => (v === "true"), spectrum.check_max);
+  spectrum.check_max = ckMaxVal;
+  if (elCheckMax) elCheckMax.checked = ckMaxVal;
+
+  const elCheckMin = document.getElementById("check_min");
+  const ckMinVal = getLS("check_min", v => (v === "true"), spectrum.check_min);
+  spectrum.check_min = ckMinVal;
+  if (elCheckMin) elCheckMin.checked = ckMinVal;
+
+  switchModesByFrequency = getLS("switchModesByFrequency", v => (v === "true"), switchModesByFrequency);
+  try { document.getElementById("cksbFrequency").checked = switchModesByFrequency; } catch (e) {}
+
+  onlyAutoscaleByButton = getLS("onlyAutoscaleByButton", v => (v === "true"), onlyAutoscaleByButton);
+  try { document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton; } catch (e) {}
+
+  enableAnalogSMeter = getLS("enableAnalogSMeter", v => (v === "true"), enableAnalogSMeter);
+  try { document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter; } catch (e) {}
+  setAnalogMeterVisible(enableAnalogSMeter);
+
+  enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
+  try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+  if (typeof spectrum !== 'undefined' && spectrum) {
+    spectrum.showBandEdges = enableBandEdges;
+    spectrum.updateAxes();
+  }
+
+  const vc = getLS("volume_control", v => parseFloat(v), null);
+  if (vc !== null && !isNaN(vc)) {
+    try { document.getElementById("volume_control").value = vc; } catch (e) {}
+    setPlayerVolume(vc);
+  }
+
+  // Ensure frequency memories exist in localStorage; create defaults if missing
+  try {
+    const MEMORY_KEY = 'frequency_memories';
+    let mem = null;
+    try { mem = localStorage.getItem(MEMORY_KEY); } catch (e) { mem = null; }
+    if (mem === null) {
+      const defaultMemories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+      defaultMemories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
+      try { localStorage.setItem(MEMORY_KEY, JSON.stringify(defaultMemories)); frequencyMemoriesInitialized = true; } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+
+  return true;
+}
+
+// Diagnostic: check for expected localStorage keys and optionally alert the user
+function diagnosticCheckSettings(showAlert = true) {
+  if (typeof localStorage === 'undefined') return;
+  const expected = [
+    "tune_hz","zoom_level","min_db","max_db","graticuleIncrement",
+    "wf_min_db","wf_max_db","spectrum_percent","spectrum_center_hz",
+    "averaging","maxHold","paused","decay","cursor_active",
+    "preset","step","colorIndex","meterIndex","cursor_freq",
+    "check_max","check_min","switchModesByFrequency","onlyAutoscaleByButton",
+    "enableAnalogSMeter","enableBandEdges","volume_control","frequency_memories"
+  ];
+  const missing = expected.filter(k => {
+    try { return localStorage.getItem(k) === null; } catch (e) { return true; }
+  });
+  // Special validation for frequency_memories: ensure it's a JSON array of length >=50
+  try {
+    const memRaw = localStorage.getItem('frequency_memories');
+    let memInvalid = false;
+    if (memRaw === null) {
+      memInvalid = true;
+    } else {
+      try {
+        const memParsed = JSON.parse(memRaw);
+        if (!Array.isArray(memParsed) || memParsed.length < 50) memInvalid = true;
+        else {
+          // Check memory 0 has expected default values (or at least populated)
+          const m0 = memParsed[0];
+          if (!m0 || typeof m0.freq !== 'string' || m0.freq.trim() === '') memInvalid = true;
+        }
+      } catch (e) { memInvalid = true; }
+    }
+    if (memInvalid) missing.push('frequency_memories (invalid)');
+    // If loadSettings created the memories this run, report that as well
+    try { if (frequencyMemoriesInitialized) missing.push('frequency_memories (created)'); } catch (e) {}
+  } catch (e) { /* ignore */ }
+  if (missing.length > 0) {
+    const msg = `Missing settings keys: ${missing.join(', ')}. Defaults initialized and will be used for this session.`;
+    console.warn(msg);
+    if (showAlert) {
+      const toast = document.createElement('div');
+      toast.id = 'settings_diag_toast';
+      toast.textContent = msg;
+      Object.assign(toast.style, {
+        position: 'fixed',
+        right: '12px',
+        bottom: '12px',
+        background: 'rgba(0,0,0,0.8)',
+        color: '#fff',
+        padding: '10px 14px',
+        borderRadius: '6px',
+        zIndex: 99999,
+        fontSize: '13px',
+        maxWidth: '420px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        try { document.body.removeChild(toast); } catch (e) {}
+      }, 5000);
+    }
+    return false;
+  }
+  // No missing keys — be quiet (no toast).
   return true;
 }
 
