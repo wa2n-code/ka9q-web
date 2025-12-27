@@ -115,10 +115,14 @@
         sampleRate: 12000,
         flushingTime: 250
         });
-      // Ensure player volume matches slider after creation
+      // Ensure player volume matches slider after creation. Defer if DOM not ready.
       const volumeSliderInit = document.getElementById('volume_control');
       if (volumeSliderInit) {
-        setPlayerVolume(volumeSliderInit.value);
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function() { setPlayerVolume(volumeSliderInit.value); }, { once: true });
+        } else {
+          setPlayerVolume(volumeSliderInit.value);
+        }
       }
 
       var pending_range_update = false;
@@ -241,48 +245,12 @@ function applyQuickBW() {
   sendFilterEdges();
 }
 
-      function ntohs(value) {
-        const buffer = new ArrayBuffer(2);
-        const view = new DataView(buffer);
-        view.setUint16(0, value);
-
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 8) | byteArray[1];
-
-        return result;
-      }
-
-      function ntohf(value) {
-        const buffer = new ArrayBuffer(4);
-        let view = new DataView(buffer);
-        view.setFloat32(0, value);
-
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 24) | (byteArray[1] << 16) | (byteArray[2] << 8) | byteArray[3];
-
-        let b0=byteArray[0];
-        let b1=byteArray[1];
-        let b2=byteArray[2];
-        let b3=byteArray[3];
-
-        byteArray[0]=b3;
-        byteArray[1]=b2;
-        byteArray[2]=b1;
-        byteArray[3]=b0;
-
-        return view.getFloat32(0);
-      }
-
-      function ntohl(value) {
-        const buffer = new ArrayBuffer(4);
-        const view = new DataView(buffer);
-        view.setUint32(0, value);
-
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 24) | (byteArray[1] << 16) | (byteArray[2] << 8) | byteArray[3];
-
-        return result;
-      }
+      // Network-to-host helpers (explicit, predictable byte swaps)
+      // For this codebase DataView reads explicitly specify endianness where needed.
+      // Make ntoh helpers no-ops to avoid double-swapping values.
+      function ntohs(v) { return v & 0xFFFF; }
+      function ntohl(v) { return v >>> 0; }
+      function ntohf(v) { return v; }
 
       function calcFrequencies() {
         lowHz = centerHz - ((binWidthHz * binCount) / 2);
@@ -420,40 +388,54 @@ function applyQuickBW() {
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
           rx(data.byteLength);
-          //console.log("data.byteLength=",data.byteLength);
-          // RTP header
+          // defensive: avoid throws on truncated packets
           const view = new DataView(evt.data);
-          var i=0;
+          var i = 0;
+          const ensure = (off, len) => ((off + len) <= view.byteLength);
+          // Need at least 12 bytes for basic header
+          if (!ensure(0, 12)) {
+            console.warn('Short ArrayBuffer received, length=', view.byteLength);
+            return;
+          }
           var n = view.getUint32(i);
-          i=i+4;
-          //console.log("n=",n.toString(16));
+          i += 4;
           var w = ntohl(n);
-          //console.log("w=",w.toString(16));
-          var version = w>>30;
-          var pad = (w>>29)&1;
-          var extension = (w>>28)&1;
-          var cc = (w>>24)&0x0f;
-          var type = (w>>16)&0x7f;
-          var seq =  w&0xffff;
+          var version = w >> 30;
+          var pad = (w >> 29) & 1;
+          var extension = (w >> 28) & 1;
+          var cc = (w >> 24) & 0x0f;
+          var type = (w >> 16) & 0x7f;
+          var seq = w & 0xffff;
 
+          if (!ensure(i, 8)) {
+            console.warn('Truncated header: missing timestamp/ssrc', view.byteLength);
+            return;
+          }
           n = view.getUint32(i);
-          i=i+4;
-          var timestamp=ntohl(n);
+          i += 4;
+          var timestamp = ntohl(n);
           n = view.getUint32(i);
-          i=i+4;
-          var this_ssrc=ntohl(n);
-          i=i+(cc *4);
-          if(extension) {
+          i += 4;
+          var this_ssrc = ntohl(n);
+          // skip CSRCs
+          if (!ensure(i, cc * 4)) {
+            console.warn('Truncated CSRC list, expected', cc * 4, 'bytes');
+            return;
+          }
+          i = i + (cc * 4);
+          if (extension) {
+            if (!ensure(i, 4)) { console.warn('Truncated extension header'); return; }
             n = view.getUint32(i);
-            var ext_len=ntohl(n);
-            i=i+4;
-            i=i+ext_len;
+            var ext_len = ntohl(n);
+            i += 4;
+            if (!ensure(i, ext_len)) { console.warn('Truncated extension payload'); return; }
+            i = i + ext_len;
           }
 
           // i now points to the start of the data
-          var data_length=data.byteLength-i;
-          var update=0;
-          switch(type) {
+          var data_length = data.byteLength - i;
+          var update = 0;
+          switch (type) {
             case 0x7F: // SPECTRUM DATA
             const newBinCount = view.getUint32(i, false); i += 4;
             if (binCount != newBinCount) {
@@ -595,15 +577,25 @@ function applyQuickBW() {
                   break;
                 case 39: // LOW_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
-                    arr_low = new Float32Array(dataBuffer);
-                    filter_low=ntohf(arr_low[0]);
-                        try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
+                    try {
+                      const dvLow = new DataView(dataBuffer);
+                      // Server sends float32 in network (big-endian) order — read explicitly
+                      filter_low = dvLow.getFloat32(0, false);
+                    } catch (e) {
+                      // fallback: try typed array
+                      try { arr_low = new Float32Array(dataBuffer); filter_low = Number(arr_low[0]); } catch (e2) { filter_low = 0; }
+                    }
+                    try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
                   case 40: // HIGH_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
-                    let arr_high = new Float32Array(dataBuffer);
-                    filter_high=ntohf(arr_high[0]);
+                    try {
+                      const dvHigh = new DataView(dataBuffer);
+                      filter_high = dvHigh.getFloat32(0, false);
+                    } catch (e) {
+                      try { let arr_high = new Float32Array(dataBuffer); filter_high = Number(arr_high[0]); } catch (e2) { filter_high = 0; }
+                    }
                     try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
@@ -614,7 +606,18 @@ function applyQuickBW() {
                     break;
                 }
               }
-              spectrum.setFilter(filter_low,filter_high);
+              // Ensure filter edges are numeric (avoid strings/BigInt) before applying
+              try {
+                filter_low = Number(filter_low);
+                filter_high = Number(filter_high);
+                if (Number.isFinite(filter_low) && Number.isFinite(filter_high)) {
+                  spectrum.setFilter(filter_low, filter_high);
+                } else {
+                  console.warn('Invalid filter edges received:', filter_low, filter_high);
+                }
+              } catch (e) {
+                console.warn('Failed to apply filter edges:', e);
+              }
               try {
                 // record ack
                 try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
@@ -658,7 +661,11 @@ function applyQuickBW() {
               player.feed(audio_data);
               break;
             default:
-              console.log("received unknown type:"+type.toString(16));
+              try {
+                console.warn("received unknown type:", type, `(0x${type.toString(16)})`, "data_len=", data_length);
+              } catch (e) {
+                console.warn('received unknown type (and failed to format)');
+              }
               break;
           }
         }
@@ -801,7 +808,7 @@ function applyQuickBW() {
     }
 
     function onWheel(e) {
-      event.preventDefault();
+          e.preventDefault();
       if (!spectrum.cursor_active) {
         if(e.deltaY<0) {
           //scroll up
@@ -1662,13 +1669,15 @@ function buildCSV() {
   t += 315964800;
   t -= 18;
   const smp = Number(input_samples) / Number(input_samprate);
+  // Guard against BigInt/Number mixing for samples_since_over
+  const lastOverSec = (Number(input_samprate) > 0) ? (Number(samples_since_over) / Number(input_samprate)).toFixed(3) : "0";
   const data = [
     ["description", `"${document.title}"`],
     ["gps_time", (new Date(t * 1000)).toTimeString()],
     ["adc_samples", (Number(input_samples)).toFixed(0)],
     ["adc_samp_rate", (input_samprate).toFixed(0)],
     ["adc_overs", ad_over.toString()],
-    ["adc_last_over", (samples_since_over / BigInt(input_samprate)).toString()],
+    ["adc_last_over", lastOverSec],
     ["uptime", smp.toFixed(1)],
     ["rf_gain", rf_gain.toFixed(1)],
     ["rf_attn", rf_atten.toFixed(1)],
@@ -2424,33 +2433,49 @@ function toggleAudioRecording() {
 }
 
 function getZoomTableSize() {
-    return new Promise((resolve, reject) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            reject("WebSocket is not open");
-            return;
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject("WebSocket is not open");
+      return;
+    }
+
+    // Send the command to get the zoom table size
+    ws.send("Z:SIZE");
+
+    let timeoutId = null;
+
+    // Temporary event listener for the ZSIZE response
+    function handleZoomTableSize(event) {
+      try {
+        if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
+          const size = parseInt(event.data.split(":")[1], 10);
+          ws.removeEventListener("message", handleZoomTableSize);
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          resolve(size);
         }
+      } catch (e) {
+        // ignore parse errors and keep waiting until timeout
+      }
+    }
 
-        // Send the command to get the zoom table size
-        ws.send("Z:SIZE");
+    // Add the temporary event listener
+    ws.addEventListener("message", handleZoomTableSize);
 
-        // Temporary event listener for the ZSIZE response
-        function handleZoomTableSize(event) {
-            if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
-                const size = parseInt(event.data.split(":")[1], 10);
-                ws.removeEventListener("message", handleZoomTableSize); // Remove the listener after handling
-                resolve(size);
-            }
-        }
+    // Handle errors — remove listener and reject once
+    const errorHandler = function (error) {
+      ws.removeEventListener("message", handleZoomTableSize);
+      if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+      reject("WebSocket error: " + error);
+    };
+    ws.addEventListener("error", errorHandler, { once: true });
 
-        // Add the temporary event listener
-        ws.addEventListener("message", handleZoomTableSize);
-
-        // Handle errors
-        ws.addEventListener("error", function (error) {
-            ws.removeEventListener("message", handleZoomTableSize); // Clean up the listener
-            reject("WebSocket error: " + error);
-        }, { once: true });
-    });
+    // Timeout: clean up if server doesn't reply in reasonable time
+    timeoutId = setTimeout(() => {
+      try { ws.removeEventListener("message", handleZoomTableSize); } catch (e) {}
+      try { ws.removeEventListener("error", errorHandler); } catch (e) {}
+      reject("getZoomTableSize: timeout waiting for ZSIZE response");
+    }, 3000);
+  });
 }
 
 async function fetchZoomTableSize() {
@@ -2501,16 +2526,20 @@ window.zoomTable = [
 // Utility: Find closest zoom level index for a given value
 window.findClosestZoomIndex = function(requestedZoom) {
   if (!window.zoomTable || window.zoomTable.length === 0) return null;
-  let closest = window.zoomTable[0];
-  let minDiff = Math.abs(requestedZoom - closest.value);
+  let closestIndex = 0;
+  // Treat requestedZoom as a bandwidth (Hz) and compare against entry span (bin_width * bin_count)
+  const req = Number(requestedZoom) || 0;
+  let minDiff = Math.abs(req - ((window.zoomTable[0].bin_width || 0) * (window.zoomTable[0].bin_count || 1)));
   for (let i = 1; i < window.zoomTable.length; ++i) {
-    const diff = Math.abs(requestedZoom - window.zoomTable[i].value);
+    const entry = window.zoomTable[i];
+    const span = (entry.bin_width || 0) * (entry.bin_count || 1);
+    const diff = Math.abs(req - span);
     if (diff < minDiff) {
-      closest = window.zoomTable[i];
+      closestIndex = i;
       minDiff = diff;
     }
   }
-  return closest.index;
+  return closestIndex;
 };
 
 function setSkipWaterfallLines(val) {
