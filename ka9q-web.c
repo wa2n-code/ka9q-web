@@ -1715,7 +1715,7 @@ void *ctrl_thread(void *arg) {
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
           ip += 2;
-          *(uint64_t *)ip = (uint64_t)Frontend.timestamp;
+          *(uint64_t *)ip = (uint64_t)Channel.clocktime;
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
           ip += 2;
