@@ -331,7 +331,7 @@ function applyQuickBW() {
             ws.send(payload);
             // update debug overlay state
             try { cwDebug.lastSent = { low: low, high: high, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
-            console.log('Sent filter edges:', low, high);
+            //console.log('Sent filter edges:', low, high);
             // expect ack from server; set up one-time retry
             try {
               expectedFilterAck = { low: low, high: high, time: Date.now(), retries: 0 };
@@ -347,7 +347,7 @@ function applyQuickBW() {
                   // otherwise resend once
                   if (expectedFilterAck && expectedFilterAck.retries === 0) {
                     expectedFilterAck.retries = 1;
-                    console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
+                    //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
                     if (ws && ws.readyState === WebSocket.OPEN) {
                       ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
                       cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
@@ -628,7 +628,7 @@ function applyQuickBW() {
                   if (expLow !== Number(filter_low) || expHigh !== Number(filter_high)) {
                     if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
                       expectedFilterAck.retries++;
-                      console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
+                      //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
                       if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
