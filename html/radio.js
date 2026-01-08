@@ -974,16 +974,16 @@
     }
     
     // Attach custom step behavior for filter edge inputs so up/down change by 100Hz
-    // when magnitude >= 100, but switch to 10Hz when moving from 100 toward 0.
+    // when magnitude >= 1000, but switch to 10Hz when moving from 1000 toward 0.
     (function attachFilterStepBehavior(){
       function byId(id){ return document.getElementById(id); }
       function parseVal(input){ const v = parseInt(input.value,10); return Number.isNaN(v) ? 0 : v; }
       function computeStep(v, dir){
         const abs = Math.abs(v);
-        if(abs > 100) return 100;
-        if(abs < 100) return 10;
-        // abs == 100 -> if moving toward zero use 10, otherwise 100
-        if((v === 100 && dir === -1) || (v === -100 && dir === 1)) return 10;
+        if(abs > 1000) return 100;
+        if(abs < 1000) return 10;
+        // abs == 1000 -> if moving toward zero use 10, otherwise 100
+        if((v === 1000 && dir === -1) || (v === -1000 && dir === 1)) return 10;
         return 100;
       }
       function attach(id){
