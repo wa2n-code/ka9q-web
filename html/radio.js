@@ -1276,6 +1276,62 @@ function applyQuickBW() {
       lowEl.addEventListener('input', inputHandler);
       highEl.addEventListener('input', inputHandler);
     }
+    
+    // Attach custom step behavior for filter edge inputs so up/down change by 100Hz
+    // when magnitude >= 1000, but switch to 10Hz when moving from 1000 toward 0.
+    (function attachFilterStepBehavior(){
+      function byId(id){ return document.getElementById(id); }
+      function parseVal(input){ const v = parseInt(input.value,10); return Number.isNaN(v) ? 0 : v; }
+      function computeStep(v, dir){
+        const abs = Math.abs(v);
+        if(abs > 1000) return 100;
+        if(abs < 1000) return 10;
+        // abs == 1000 -> if moving toward zero use 10, otherwise 100
+        if((v === 1000 && dir === -1) || (v === -1000 && dir === 1)) return 10;
+        return 100;
+      }
+      function attach(id){
+        const input = byId(id);
+        if(!input) return;
+        // Keyboard arrows: adjust value using computed step
+        input.addEventListener('keydown', function(e){
+          if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const dir = e.key === 'ArrowUp' ? 1 : -1;
+          const v = parseVal(input);
+          const step = computeStep(v, dir);
+          input.value = String(v + dir * step);
+          input.dispatchEvent(new Event('input', {bubbles:true}));
+          input.dispatchEvent(new Event('change', {bubbles:true}));
+        });
+
+        // Pointerdown: set `step` appropriately so spinner clicks use the computed step
+        input.addEventListener('pointerdown', function(e){
+          try{
+            const rect = input.getBoundingClientRect();
+            const isTop = (e.clientY - rect.top) < (rect.height/2);
+            const dir = isTop ? 1 : -1;
+            const v = parseVal(input);
+            input.step = computeStep(v, dir);
+          }catch(err){ }
+        }, {passive:true});
+
+        function updateDefaultStep(){
+          const v = parseVal(input);
+          input.step = Math.abs(v) > 100 ? 100 : 10;
+        }
+        input.addEventListener('focus', updateDefaultStep);
+        input.addEventListener('input', updateDefaultStep);
+        updateDefaultStep();
+      }
+
+      // Try immediately, and also ensure attachment after DOM load
+      attach('filterLowInput');
+      attach('filterHighInput');
+      if(!document.getElementById('filterLowInput')){
+        document.addEventListener('DOMContentLoaded', function(){ attach('filterLowInput'); attach('filterHighInput'); });
+      }
+    })();
   
     function zoomin() {
       // Show warning if overlays are loaded
