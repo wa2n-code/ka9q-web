@@ -1661,16 +1661,19 @@ function rx(x) {
 // --- Band Options: must be defined before use ---
 const bandOptions = {
     amateur: [
+	{ label: "2200M", freq: 136750 },
+	{ label: "630M", freq: 475500 },
         { label: "160M", freq: 1900000 },
         { label: "80M", freq: 3715000 },
-        { label: "60M", freq: 5406500 },
+        { label: "60M", freq: 5359000 },
         { label: "40M", freq: 7150000 },
         { label: "30M", freq: 10130000 },
         { label: "20M", freq: 14185000 },
         { label: "17M", freq: 18111000 },
         { label: "15M", freq: 21300000 },
         { label: "12M", freq: 24931000 },
-        { label: "10M", freq: 28500000 }
+        { label: "10M", freq: 28500000 },
+	{ label: "6M",  freq: 50300000 }
     ],
     broadcast: [
         { label: "120M", freq:2397500 },
@@ -2014,22 +2017,30 @@ async function fetchZoomTableSize() {
 // --- Hardcoded zoom table to match ka9q-web.c ---
 // This must be available before overlays or zoom logic is used
 window.zoomTable = [
+  { bin_width: 100000, bin_count: 1620 },
+  { bin_width: 80000, bin_count: 1620 },
+  { bin_width: 50000, bin_count: 1620 },
   { bin_width: 40000, bin_count: 1620 },
   { bin_width: 20000, bin_count: 1620 },
-  { bin_width: 16000, bin_count: 1620 },
+  { bin_width: 10000, bin_count: 1620 },
   { bin_width: 8000, bin_count: 1620 },
+  { bin_width: 5000, bin_count: 1620 },
   { bin_width: 4000, bin_count: 1620 },
   { bin_width: 2000, bin_count: 1620 },
   { bin_width: 1000, bin_count: 1620 },
   { bin_width: 800, bin_count: 1620 },
+  { bin_width: 500, bin_count: 1620 },
   { bin_width: 400, bin_count: 1620 },
   { bin_width: 200, bin_count: 1620 },
-  { bin_width: 120, bin_count: 1620 },
+  { bin_width: 100, bin_count: 1620 },
   { bin_width: 80, bin_count: 1620 },
+  { bin_width: 50, bin_count: 1620 },
   { bin_width: 40, bin_count: 1620 },
   { bin_width: 20, bin_count: 1620 },
   { bin_width: 10, bin_count: 1620 },
+  { bin_width: 8, bin_count: 1620 },
   { bin_width: 5, bin_count: 1620 },
+  { bin_width: 4, bin_count: 1620 },
   { bin_width: 2, bin_count: 1620 },
   { bin_width: 1, bin_count: 1620 }
 ];
