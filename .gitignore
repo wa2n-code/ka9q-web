@@ -2,3 +2,23 @@ ka9q-web
 *.o
 private
 .vscode/
+\#*\#
+._*
+.apdisk
+.AppleDB
+.AppleDesktop
+.AppleDouble
+.com.apple.timemachine.donotpresent
+.depend
+.DocumentRevisions-V100
+.DS_Store
+.fseventsd
+.LSOverride
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+*~
+Icon
+Network Trash Folder
+Temporary Items
