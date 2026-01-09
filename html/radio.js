@@ -2231,6 +2231,12 @@ const bandOptions = {
         { label: "WWV20", freq: 20000000 },
         { label: "WWV25", freq: 25000000 }
     ]
+    cb: [
+	{ label: "CB 1", freq: 26965000 },
+	{ label: "CB 6", freq: 27025000 },
+	{ label: "CB 40", freq: 27405000 }
+	]
+
 };
 
 // --- Ensure setAnalogMeterVisible is defined before use ---
