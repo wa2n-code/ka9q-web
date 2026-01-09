@@ -1071,11 +1071,11 @@ function applyQuickBW() {
               setMode('usb');
 	  } else if (f >= 5330500 && f < 5406500) {
               setMode('usb');
-          } else if (f < 10000000) {
-              setMode('lsb');
-	  } else if (f >= 26960000 && f < 26360000){
+	  } else if (f >= 26960000 && f < 27360000){
               setMode('am');
-	  } else if (f >= 26360000 && f < 26410000){
+	  } else if (f >= 27360000 && f < 27410000){
+              setMode('lsb');
+          } else if (f < 10000000) {
               setMode('lsb');
           } else {
               setMode('usb');
