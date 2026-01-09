@@ -921,17 +921,25 @@ int init_connections(const char *multicast_group) {
 
   pthread_mutex_init(&ctl_mutex,NULL);
 
-  resolve_mcast(multicast_group,&Metadata_dest_socket,DEFAULT_STAT_PORT,iface,sizeof(iface),0);
-  Status_fd = listen_mcast(NULL,&Metadata_dest_socket,iface);
-  if(Status_fd == -1){
-    fprintf(stderr,"Can't listen to mcast status %s\n",multicast_group);
-    return(EX_IOERR);
+  /* Retry resolving and listening for multicast status until successful.
+     This allows the backend (ka9q-radio) to come up after the web server. */
+  for (;;) {
+    resolve_mcast(multicast_group, &Metadata_dest_socket, DEFAULT_STAT_PORT,
+                  iface, sizeof(iface), 0);
+    Status_fd = listen_mcast(NULL, &Metadata_dest_socket, iface);
+    if (Status_fd != -1)
+      break;
+    fprintf(stderr, "Can't listen to mcast status %s - retrying in 2s\n", multicast_group);
+    sleep(2);
   }
 
-  Ctl_fd = connect_mcast(&Metadata_dest_socket,iface,Mcast_ttl,IP_tos);
-  if(Ctl_fd < 0){
-    fprintf(stderr,"connect to mcast control failed: RX\n");
-    return(EX_IOERR);
+  /* Retry connecting control socket until successful. */
+  for (;;) {
+    Ctl_fd = connect_mcast(&Metadata_dest_socket, iface, Mcast_ttl, IP_tos);
+    if (Ctl_fd >= 0)
+      break;
+    fprintf(stderr, "connect to mcast control failed - retrying in 2s\n");
+    sleep(2);
   }
 
   if(pthread_create(&ctrl_task,NULL,ctrl_thread,NULL) == -1){
