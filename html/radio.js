@@ -8,6 +8,52 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // QuickBW debug overlay state
+      let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
+      // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
+      const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
+      // pending filter edges to send once websocket opens
+      let pendingFilterEdges = null;
+      // expected ack tracking for last sent edges
+      let expectedFilterAck = null; // { low, high, time, retries }
+      const EXPECTED_ACK_MAX_RETRIES = 3;
+
+      function createCWDebugOverlay() {
+        try {
+          if (!CW_DEBUG_OVERLAY) return; // suppressed by in-file flag
+          if (document.getElementById('cw_debug_overlay')) return;
+          const d = document.createElement('div');
+          d.id = 'cw_debug_overlay';
+          d.style.position = 'fixed';
+          d.style.right = '8px';
+          d.style.bottom = '8px';
+          d.style.zIndex = 9999;
+          d.style.background = 'rgba(0,0,0,0.7)';
+          d.style.color = '#0f0';
+          d.style.fontFamily = 'monospace';
+          d.style.fontSize = '12px';
+          d.style.padding = '6px 8px';
+          d.style.borderRadius = '6px';
+          d.style.maxWidth = '320px';
+          d.style.whiteSpace = 'pre-wrap';
+          d.style.pointerEvents = 'none';
+          d.textContent = 'CW Debug overlay initializing...';
+          document.body.appendChild(d);
+        } catch (e) { /* ignore */ }
+      }
+
+      function updateCWDebugOverlay() {
+        try {
+          if (!CW_DEBUG_OVERLAY) return;
+          const d = document.getElementById('cw_debug_overlay');
+          if (!d) return;
+          const s = cwDebug.lastSent ? `${cwDebug.lastSent.low}:${cwDebug.lastSent.high} @ ${new Date(cwDebug.lastSent.time).toLocaleTimeString()}` : 'none';
+          const a = cwDebug.lastAck ? `${cwDebug.lastAck.low}:${cwDebug.lastAck.high} @ ${new Date(cwDebug.lastAck.time).toLocaleTimeString()}` : 'none';
+          const wsst = (ws && ws.readyState != null) ? ws.readyState : cwDebug.wsState;
+          const wait = (expectedFilterAck && expectedFilterAck.retries !== undefined) ? ` waiting(retries=${expectedFilterAck.retries})` : '';
+          d.textContent = `ws:${wsst}${wait}\nlastSent: ${s}\nlastAck:  ${a}`;
+        } catch (e) {}
+      }
       let zoomTableSize = null; // Global variable to store the zoom table size   
       var spectrum;
       let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025 
@@ -15,6 +61,30 @@
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
       var highHz=32400000;
+
+      // Variable to store the actual backend frequency as reported by the server
+      var backendFrequencyHz = 0;
+
+      // Update the CW-mode carrier offset marker based on the tuned frequency.
+      function updateCWMarker() {
+        try {
+          if (typeof spectrum === 'undefined' || !spectrum) return;
+          const modeEl = document.getElementById('mode');
+          const mode = modeEl ? (modeEl.value || '').toLowerCase() : '';
+          if (mode === 'cwu' || mode === 'cwl') {
+            const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
+            if (tuned && Number.isFinite(tuned) && tuned !== 0) {
+              const offset = 500; // Hz
+              const markerHz = (mode === 'cwu') ? (tuned - offset) : (tuned + offset);
+              spectrum.backendMarkerHz = markerHz;
+              spectrum.backendMarkerActive = true;
+              return;
+            }
+          }
+          spectrum.backendMarkerActive = false;
+          spectrum.backendMarkerHz = null;
+        } catch (e) { /* ignore */ }
+      }
   let binCount = 1620;
   let spanHz = binCount * binWidthHz;
   // Spectrum poll interval in milliseconds (client-side default)
@@ -45,10 +115,14 @@
         sampleRate: 12000,
         flushingTime: 250
         });
-      // Ensure player volume matches slider after creation
+      // Ensure player volume matches slider after creation. Defer if DOM not ready.
       const volumeSliderInit = document.getElementById('volume_control');
       if (volumeSliderInit) {
-        setPlayerVolume(volumeSliderInit.value);
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', function() { setPlayerVolume(volumeSliderInit.value); }, { once: true });
+        } else {
+          setPlayerVolume(volumeSliderInit.value);
+        }
       }
 
       var pending_range_update = false;
@@ -64,48 +138,119 @@
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
 
-      function ntohs(value) {
-        const buffer = new ArrayBuffer(2);
-        const view = new DataView(buffer);
-        view.setUint16(0, value);
-
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 8) | byteArray[1];
-
-        return result;
+// QuickBW preset storage: holds lower/upper offsets (Hz) from current frequency
+let quickBWPreset = { lowerOffset: 300, upperOffset: 700 };
+// QuickBW runtime state: whether active and stored previous edges for restore
+let quickBWActive = false;
+let quickBWPrevEdges = null; // { low: number, high: number }
+// Suppress automatic sends when programmatically changing filter edge inputs
+let suppressEdgeAutoSend = false;
+function loadQuickBWPreset() {
+  try {
+    const v = (localStorage.getItem && localStorage.getItem('QuickBWPreset'));
+    if (v) {
+      try {
+        quickBWPreset = JSON.parse(v);
+      } catch (e) {
+        console.warn('Failed to parse QuickBWPreset, using defaults');
       }
+    }
+  } catch (e) {
+    console.warn('Failed to access localStorage for QuickBWPreset, using defaults');
+  }
+}
+function saveQuickBWPreset() {
+  try { localStorage.setItem('QuickBWPreset', JSON.stringify(quickBWPreset)); } catch (e) {}
+  console.log('Saved QuickBWPreset:', quickBWPreset);
+}
 
-      function ntohf(value) {
-        const buffer = new ArrayBuffer(4);
-        let view = new DataView(buffer);
-        view.setFloat32(0, value);
-
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 24) | (byteArray[1] << 16) | (byteArray[2] << 8) | byteArray[3];
-
-        let b0=byteArray[0];
-        let b1=byteArray[1];
-        let b2=byteArray[2];
-        let b3=byteArray[3];
-
-        byteArray[0]=b3;
-        byteArray[1]=b2;
-        byteArray[2]=b1;
-        byteArray[3]=b0;
-
-        return view.getFloat32(0);
+// Update QuickBW button enabled/disabled state based on current mode
+function updateQuickBWButtonState() {
+  try {
+    const btn = document.getElementById('cw_instant_button');
+    const modeEl = document.getElementById('mode');
+    if (!btn || !modeEl) return;
+    const m = (modeEl.value || '').toLowerCase();
+    if (m === 'usb' || m === 'lsb') {
+      btn.removeAttribute('disabled');
+      btn.style.opacity = '';
+    } else {
+      // If mode no longer supports QuickBW but it was active, deactivate and restore edges
+      if (quickBWActive) {
+        try { applyQuickBW(); } catch (e) {}
       }
+      btn.setAttribute('disabled', 'disabled');
+      btn.style.opacity = '0.6';
+    }
+    // Reflect active state visually (bold when active)
+    if (quickBWActive) {
+      btn.style.fontWeight = 'bold';
+      btn.title = 'Restore previous filter bandwidth';
+    } else {
+      btn.style.fontWeight = '';
+      btn.title = 'Apply alternate filter bandwidth';
+    }
+  } catch (e) {}
+}
 
-      function ntohl(value) {
-        const buffer = new ArrayBuffer(4);
-        const view = new DataView(buffer);
-        view.setUint32(0, value);
+// Apply QuickBW preset: set filter input boxes and send edges to backend
+function applyQuickBW() {
+  const lowEl = document.getElementById('filterLowInput');
+  const highEl = document.getElementById('filterHighInput');
+  const modeEl = document.getElementById('mode');
+  if (!lowEl || !highEl || !modeEl) return;
+  const m = (modeEl.value || '').toLowerCase();
+  if (!(m === 'usb' || m === 'lsb')) return;
+  const lowerOffset = Number(quickBWPreset.lowerOffset) || 300;
+  const upperOffset = Number(quickBWPreset.upperOffset) || 700;
+  // Toggle behavior: if already active, restore previous edges; otherwise save current and apply offsets
+  if (quickBWActive) {
+    // restore
+    if (quickBWPrevEdges) {
+      suppressEdgeAutoSend = true;
+      lowEl.value = quickBWPrevEdges.low;
+      highEl.value = quickBWPrevEdges.high;
+      suppressEdgeAutoSend = false;
+      quickBWPrevEdges = null;
+    }
+    quickBWActive = false;
+    updateQuickBWButtonState();
+    sendFilterEdges();
+    return;
+  }
 
-        const byteArray = new Uint8Array(buffer);
-        const result = (byteArray[0] << 24) | (byteArray[1] << 16) | (byteArray[2] << 8) | byteArray[3];
+  // Save current edges for later restore
+  quickBWPrevEdges = { low: lowEl.value, high: highEl.value };
 
-        return result;
-      }
+  let lowVal, highVal;
+  if (m === 'usb') {
+    // USB: add offsets (positive)
+    lowVal = Math.min(lowerOffset, upperOffset);
+    highVal = Math.max(lowerOffset, upperOffset);
+  } else {
+    // LSB: subtract offsets (negative)
+    lowVal = -Math.max(upperOffset, lowerOffset);
+    highVal = -Math.min(upperOffset, lowerOffset);
+  }
+
+  // Programmatic change without marking manual-dirty
+  suppressEdgeAutoSend = true;
+  lowEl.value = lowVal;
+  highEl.value = highVal;
+  suppressEdgeAutoSend = false;
+
+  quickBWActive = true;
+  updateQuickBWButtonState();
+  // Send to backend
+  sendFilterEdges();
+}
+
+      // Network-to-host helpers (explicit, predictable byte swaps)
+      // For this codebase DataView reads explicitly specify endianness where needed.
+      // Make ntoh helpers no-ops to avoid double-swapping values.
+      function ntohs(v) { return v & 0xFFFF; }
+      function ntohl(v) { return v >>> 0; }
+      function ntohf(v) { return v; }
 
       function calcFrequencies() {
         lowHz = centerHz - ((binWidthHz * binCount) / 2);
@@ -119,6 +264,7 @@
         // default to 20 Mtr band
         //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
+        updateCWMarker();
         // can we load the saved frequency/zoom/preset here?
         ws.send("M:" + target_preset);
         //ws.send("Z:" + (22 - target_zoom_level).toString());
@@ -130,8 +276,20 @@
         try {
           setFilterEdgesForMode(target_preset);
         } catch (e) {}
-  // Attach listeners so spinner/caret presses auto-send
-  try { attachEdgeInputListeners(); } catch (e) {}
+        // Attach listeners so spinner/caret presses auto-send
+        try { attachEdgeInputListeners(); } catch (e) {}
+        // If a filter-edge update was queued while WS was closed, send it now
+        try {
+          if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('e:' + pendingFilterEdges.low.toString() + ':' + pendingFilterEdges.high.toString());
+            cwDebug.lastSent = { low: pendingFilterEdges.low, high: pendingFilterEdges.high, time: Date.now() };
+            cwDebug.wsState = ws.readyState;
+            updateCWDebugOverlay();
+            pendingFilterEdges = null;
+          }
+        } catch (e) { console.error('Failed to flush pending filter edges', e); }
+        // create debug overlay when WS opens
+        try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
       }
       
       // Send a request to the server to change the spectrum poll interval (milliseconds).
@@ -169,16 +327,47 @@
         }
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send('e:' + low.toString() + ':' + high.toString());
-            console.log('Sent filter edges:', low, high);
-            // Clear manual-dirty flag and update Edge button state when edges are sent
+            const payload = 'e:' + low.toString() + ':' + high.toString();
+            ws.send(payload);
+            // update debug overlay state
+            try { cwDebug.lastSent = { low: low, high: high, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
+            //console.log('Sent filter edges:', low, high);
+            // expect ack from server; set up one-time retry
+            try {
+              expectedFilterAck = { low: low, high: high, time: Date.now(), retries: 0 };
+              // schedule check
+              setTimeout(() => {
+                try {
+                  // if ack arrived with matching low/high, clear expected
+                  if (expectedFilterAck && cwDebug.lastAck && Number(cwDebug.lastAck.low) === Number(expectedFilterAck.low) && Number(cwDebug.lastAck.high) === Number(expectedFilterAck.high)) {
+                    expectedFilterAck = null;
+                    updateCWDebugOverlay();
+                    return;
+                  }
+                  // otherwise resend once
+                  if (expectedFilterAck && expectedFilterAck.retries === 0) {
+                    expectedFilterAck.retries = 1;
+                    //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                      ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                      cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
+                      updateCWDebugOverlay();
+                    }
+                    // allow more time for ack; clear after another timeout
+                    setTimeout(() => { expectedFilterAck = null; updateCWDebugOverlay(); }, 2000);
+                  }
+                } catch (e) { console.error('expectedFilterAck check failed', e); }
+              }, 800);
+            } catch (e) {}
             edgeManualDirty = false;
             updateEdgeButtonState();
           } catch (e) {
             console.error('Failed to send filter edges:', e);
           }
         } else {
-          console.warn('WebSocket not open, cannot send filter edges');
+          console.warn('WebSocket not open, queueing filter edges');
+          pendingFilterEdges = { low: low, high: high, time: Date.now() };
+          try { cwDebug.lastSent = pendingFilterEdges; cwDebug.wsState = (ws && ws.readyState) || -1; updateCWDebugOverlay(); } catch (e) {}
         }
       }
       
@@ -195,43 +384,58 @@
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
+          // (BFREQ messages ignored for marker placement)
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
           rx(data.byteLength);
-          //console.log("data.byteLength=",data.byteLength);
-          // RTP header
+          // defensive: avoid throws on truncated packets
           const view = new DataView(evt.data);
-          var i=0;
+          var i = 0;
+          const ensure = (off, len) => ((off + len) <= view.byteLength);
+          // Need at least 12 bytes for basic header
+          if (!ensure(0, 12)) {
+            console.warn('Short ArrayBuffer received, length=', view.byteLength);
+            return;
+          }
           var n = view.getUint32(i);
-          i=i+4;
-          //console.log("n=",n.toString(16));
+          i += 4;
           var w = ntohl(n);
-          //console.log("w=",w.toString(16));
-          var version = w>>30;
-          var pad = (w>>29)&1;
-          var extension = (w>>28)&1;
-          var cc = (w>>24)&0x0f;
-          var type = (w>>16)&0x7f;
-          var seq =  w&0xffff;
+          var version = w >> 30;
+          var pad = (w >> 29) & 1;
+          var extension = (w >> 28) & 1;
+          var cc = (w >> 24) & 0x0f;
+          var type = (w >> 16) & 0x7f;
+          var seq = w & 0xffff;
 
+          if (!ensure(i, 8)) {
+            console.warn('Truncated header: missing timestamp/ssrc', view.byteLength);
+            return;
+          }
           n = view.getUint32(i);
-          i=i+4;
-          var timestamp=ntohl(n);
+          i += 4;
+          var timestamp = ntohl(n);
           n = view.getUint32(i);
-          i=i+4;
-          var this_ssrc=ntohl(n);
-          i=i+(cc *4);
-          if(extension) {
+          i += 4;
+          var this_ssrc = ntohl(n);
+          // skip CSRCs
+          if (!ensure(i, cc * 4)) {
+            console.warn('Truncated CSRC list, expected', cc * 4, 'bytes');
+            return;
+          }
+          i = i + (cc * 4);
+          if (extension) {
+            if (!ensure(i, 4)) { console.warn('Truncated extension header'); return; }
             n = view.getUint32(i);
-            var ext_len=ntohl(n);
-            i=i+4;
-            i=i+ext_len;
+            var ext_len = ntohl(n);
+            i += 4;
+            if (!ensure(i, ext_len)) { console.warn('Truncated extension payload'); return; }
+            i = i + ext_len;
           }
 
           // i now points to the start of the data
-          var data_length=data.byteLength-i;
-          var update=0;
-          switch(type) {
+          var data_length = data.byteLength - i;
+          var update = 0;
+          switch (type) {
             case 0x7F: // SPECTRUM DATA
             const newBinCount = view.getUint32(i, false); i += 4;
             if (binCount != newBinCount) {
@@ -246,6 +450,7 @@
                 update=1;
               }
 
+
               n = view.getUint32(i);
               i=i+4;
               hz = ntohl(n);
@@ -253,7 +458,9 @@
                 frequencyHz=hz;
                 update=1;
               }
-
+              // Update backendFrequencyHz to reflect the actual backend frequency
+              backendFrequencyHz = hz;
+              //console.log("Backend frequency updated to: " + backendFrequencyHz + " Hz");
               n = view.getUint32(i);
               i=i+4;
               hz = ntohl(n);;
@@ -298,6 +505,7 @@
                 spectrum.setCenterHz(centerHz);
               }
               spectrum.setFrequency(frequencyHz);
+              updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
               document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? zoomTableSize-1: zoomTableSize-1; // above and below 64.8 Mhz now can do 15 levels of zoom?
@@ -369,14 +577,26 @@
                   break;
                 case 39: // LOW_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
-                    arr_low = new Float32Array(dataBuffer);
-                    filter_low=ntohf(arr_low[0]);
+                    try {
+                      const dvLow = new DataView(dataBuffer);
+                      // Server sends float32 in network (big-endian) order — read explicitly
+                      filter_low = dvLow.getFloat32(0, false);
+                    } catch (e) {
+                      // fallback: try typed array
+                      try { arr_low = new Float32Array(dataBuffer); filter_low = Number(arr_low[0]); } catch (e2) { filter_low = 0; }
+                    }
+                    try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
                   case 40: // HIGH_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
-                    let arr_high = new Float32Array(dataBuffer);
-                    filter_high=ntohf(arr_high[0]);
+                    try {
+                      const dvHigh = new DataView(dataBuffer);
+                      filter_high = dvHigh.getFloat32(0, false);
+                    } catch (e) {
+                      try { let arr_high = new Float32Array(dataBuffer); filter_high = Number(arr_high[0]); } catch (e2) { filter_high = 0; }
+                    }
+                    try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
                     break;
                   case 46: // BASEBAND_POWER
@@ -386,7 +606,46 @@
                     break;
                 }
               }
-              spectrum.setFilter(filter_low,filter_high);
+              // Ensure filter edges are numeric (avoid strings/BigInt) before applying
+              try {
+                filter_low = Number(filter_low);
+                filter_high = Number(filter_high);
+                if (Number.isFinite(filter_low) && Number.isFinite(filter_high)) {
+                  spectrum.setFilter(filter_low, filter_high);
+                } else {
+                  console.warn('Invalid filter edges received:', filter_low, filter_high);
+                }
+              } catch (e) {
+                console.warn('Failed to apply filter edges:', e);
+              }
+              try {
+                // record ack
+                try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
+                // If we expected a different ack, attempt an immediate resend (bounded retries)
+                if (expectedFilterAck) {
+                  const expLow = Number(expectedFilterAck.low);
+                  const expHigh = Number(expectedFilterAck.high);
+                  if (expLow !== Number(filter_low) || expHigh !== Number(filter_high)) {
+                    if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
+                      expectedFilterAck.retries++;
+                      //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
+                      if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                        cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
+                        updateCWDebugOverlay();
+                      }
+                    } else {
+                      // give up after max retries
+                      expectedFilterAck = null;
+                      updateCWDebugOverlay();
+                    }
+                  } else {
+                    // ack matches expected, clear
+                    expectedFilterAck = null;
+                    updateCWDebugOverlay();
+                  }
+                }
+              } catch (e) {}
               break;
             case 0x7A: // 122 - 16bit PCM Audio at 12000 Hz
               // Audio data 1 channel 12000
@@ -402,7 +661,11 @@
               player.feed(audio_data);
               break;
             default:
-              console.log("received unknown type:"+type.toString(16));
+              try {
+                console.warn("received unknown type:", type, `(0x${type.toString(16)})`, "data_len=", data_length);
+              } catch (e) {
+                console.warn('received unknown type (and failed to format)');
+              }
               break;
           }
         }
@@ -434,10 +697,17 @@
                 }, 100); // Small delay to ensure DOM is ready
             }
         });
+        // Ensure sensible in-memory defaults exist before attempting to load stored settings.
+        // Pass `false` to avoid writing defaults to localStorage unless we actually need to create them.
+        setDefaultSettings(false);
         if (!loadSettings()) {
-          console.log("loadSettings() returned false, setting defaults");
-          setDefaultSettings(); 
+          console.log("no saved settings found, committing defaults to localStorage");
+          setDefaultSettings(true);
         }
+        // Run a diagnostic to surface any missing saved keys (alerts the user)
+        try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
+        // Trigger autoscale on first load so spectrum has sensible range
+        //try { autoAutoscale(50, true); } catch (e) { /* ignore */ }
         spectrum.radio_pointer = this;
         page_title = "";
 
@@ -468,6 +738,18 @@
         updateRangeValues();
         player.volume(1.00);
         getVersion();
+        // Attach a listener to the mode selector so switching to CWU/CWL immediately shows the marker
+        try {
+          const modeEl = document.getElementById('mode');
+          const updateBackendMarkerForMode = function() {
+            try { updateCWMarker(); } catch (e) { /* ignore */ }
+          };
+          if (modeEl) {
+            modeEl.addEventListener('change', updateBackendMarkerForMode);
+            // initialize marker based on current mode immediately
+            updateBackendMarkerForMode();
+          }
+        } catch (e) { /* ignore */ }
         settingsReady = true; // Allow saves after initialization
       }
 
@@ -526,7 +808,7 @@
     }
 
     function onWheel(e) {
-      event.preventDefault();
+          e.preventDefault();
       if (!spectrum.cursor_active) {
         if(e.deltaY<0) {
           //scroll up
@@ -562,6 +844,7 @@
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -579,6 +862,7 @@
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -674,6 +958,10 @@
         try {
           const waterfall = document.getElementById('waterfall');
           const active = document.activeElement;
+          // If the memory description input has focus, don't treat 'f' as the global fullscreen hotkey
+          if (active && active.id === 'memory_desc') {
+            return;
+          }
           // Only handle here when the waterfall does NOT have focus
           if (!(waterfall && active === waterfall)) {
             if (typeof spectrum !== 'undefined' && spectrum) {
@@ -750,6 +1038,7 @@
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(f);
         autoAutoscale(asCount,waitToAutoscale);      
@@ -764,6 +1053,7 @@
             return;
         }
         spectrum.setFrequency(f);
+        updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
         ws.send("F:" + (freq / 1000).toFixed(3));
@@ -789,7 +1079,16 @@
     }
 
     function setMode(selected_mode) {
-      //console.log("setMode() called with selected_mode=", selected_mode);
+      // If QuickBW is active and the change is driven by frequency-based switching,
+      // deactivate QuickBW and drop any saved edges so they won't be restored later.
+      if (quickBWActive && switchModesByFrequency) {
+        quickBWActive = false;
+        quickBWPrevEdges = null;
+        // inhibit any auto-sends while applying mode defaults
+        suppressEdgeAutoSend = true;
+        try { updateQuickBWButtonState(); } catch (e) {}
+      }
+
       document.getElementById('mode').value = selected_mode;
       ws.send("M:" + selected_mode);
   
@@ -826,6 +1125,11 @@
       saveSettings();
   // Update filter edge inputs to sensible defaults for this mode
   setFilterEdgesForMode(selected_mode);
+  // restore auto-send allowance (setFilterEdgesForMode already manages this flag,
+  // but ensure it's false here in case we inhibited it above)
+  suppressEdgeAutoSend = false;
+  // Update QuickBW button state when mode changes programmatically
+  try { updateQuickBWButtonState(); } catch (e) {}
   }
 
     function selectMode(mode) {
@@ -833,6 +1137,7 @@
         element.value = mode;
         ws.send("M:"+mode);
       setFilterEdgesForMode(mode);
+      try { updateQuickBWButtonState(); } catch (e) {}
       saveSettings();
     }
 
@@ -883,8 +1188,7 @@
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed
-    // by the `suppressEdgeAutoSend` flag set above.
-    let suppressEdgeAutoSend = false;
+    // by the `suppressEdgeAutoSend` flag declared earlier.
     let edgesListenersAttached = false;
     // Whether the user has manually typed values that require pressing the Edge button
     let edgeManualDirty = false;
@@ -972,6 +1276,62 @@
       lowEl.addEventListener('input', inputHandler);
       highEl.addEventListener('input', inputHandler);
     }
+    
+    // Attach custom step behavior for filter edge inputs so up/down change by 100Hz
+    // when magnitude >= 1000, but switch to 10Hz when moving from 1000 toward 0.
+    (function attachFilterStepBehavior(){
+      function byId(id){ return document.getElementById(id); }
+      function parseVal(input){ const v = parseInt(input.value,10); return Number.isNaN(v) ? 0 : v; }
+      function computeStep(v, dir){
+        const abs = Math.abs(v);
+        if(abs > 1000) return 100;
+        if(abs < 1000) return 10;
+        // abs == 1000 -> if moving toward zero use 10, otherwise 100
+        if((v === 1000 && dir === -1) || (v === -1000 && dir === 1)) return 10;
+        return 100;
+      }
+      function attach(id){
+        const input = byId(id);
+        if(!input) return;
+        // Keyboard arrows: adjust value using computed step
+        input.addEventListener('keydown', function(e){
+          if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const dir = e.key === 'ArrowUp' ? 1 : -1;
+          const v = parseVal(input);
+          const step = computeStep(v, dir);
+          input.value = String(v + dir * step);
+          input.dispatchEvent(new Event('input', {bubbles:true}));
+          input.dispatchEvent(new Event('change', {bubbles:true}));
+        });
+
+        // Pointerdown: set `step` appropriately so spinner clicks use the computed step
+        input.addEventListener('pointerdown', function(e){
+          try{
+            const rect = input.getBoundingClientRect();
+            const isTop = (e.clientY - rect.top) < (rect.height/2);
+            const dir = isTop ? 1 : -1;
+            const v = parseVal(input);
+            input.step = computeStep(v, dir);
+          }catch(err){ }
+        }, {passive:true});
+
+        function updateDefaultStep(){
+          const v = parseVal(input);
+          input.step = Math.abs(v) > 100 ? 100 : 10;
+        }
+        input.addEventListener('focus', updateDefaultStep);
+        input.addEventListener('input', updateDefaultStep);
+        updateDefaultStep();
+      }
+
+      // Try immediately, and also ensure attachment after DOM load
+      attach('filterLowInput');
+      attach('filterHighInput');
+      if(!document.getElementById('filterLowInput')){
+        document.addEventListener('DOMContentLoaded', function(){ attach('filterLowInput'); attach('filterHighInput'); });
+      }
+    })();
   
     function zoomin() {
       // Show warning if overlays are loaded
@@ -1365,13 +1725,15 @@ function buildCSV() {
   t += 315964800;
   t -= 18;
   const smp = Number(input_samples) / Number(input_samprate);
+  // Guard against BigInt/Number mixing for samples_since_over
+  const lastOverSec = (Number(input_samprate) > 0) ? (Number(samples_since_over) / Number(input_samprate)).toFixed(3) : "0";
   const data = [
     ["description", `"${document.title}"`],
     ["gps_time", (new Date(t * 1000)).toTimeString()],
     ["adc_samples", (Number(input_samples)).toFixed(0)],
     ["adc_samp_rate", (input_samprate).toFixed(0)],
     ["adc_overs", ad_over.toString()],
-    ["adc_last_over", (samples_since_over / BigInt(input_samprate)).toString()],
+    ["adc_last_over", lastOverSec],
     ["uptime", smp.toFixed(1)],
     ["rf_gain", rf_gain.toFixed(1)],
     ["rf_attn", rf_atten.toFixed(1)],
@@ -1489,6 +1851,7 @@ function dumpHTML() {
 }
 
 let settingsReady = false; // Block saves until after settings are loaded and UI is initialized
+let frequencyMemoriesInitialized = false;
 function saveSettings() {
   if (!settingsReady) return; // Prevent saves during initialization
   localStorage.setItem("tune_hz", spectrum.frequency.toString());
@@ -1525,8 +1888,8 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
-function setDefaultSettings() {
-  console.log("Setting default settings");
+function setDefaultSettings(writeToStorage = true) {
+  if (writeToStorage) console.log("Setting default settings");
   spectrum.averaging = 4;
   spectrum.frequency = 10000000;
   frequencyHz = 10000000;
@@ -1550,7 +1913,8 @@ function setDefaultSettings() {
   spectrum.decay = 1;
   spectrum.cursor_active = false;
   document.getElementById("mode").value = "am";
-  target_preset = "usb";
+  // Keep target_preset in sync with the UI default mode
+  target_preset = document.getElementById("mode").value;
   increment = 1000;
   document.getElementById("colormap").value = 9;
   spectrum.colorIndex = 9;
@@ -1561,6 +1925,15 @@ function setDefaultSettings() {
   spectrum.cursor_freq = 10000000;
   spectrum.check_max = false;
   spectrum.check_min = false;
+  // Ensure the DOM checkboxes match the spectrum defaults
+  try {
+    const elCheckMax = document.getElementById("check_max");
+    if (elCheckMax) elCheckMax.checked = false;
+  } catch (e) {}
+  try {
+    const elCheckMin = document.getElementById("check_min");
+    if (elCheckMin) elCheckMin.checked = false;
+  } catch (e) {}
   switchModesByFrequency = true;
   document.getElementById("cksbFrequency").checked = switchModesByFrequency;
   onlyAutoscaleByButton = false;
@@ -1572,76 +1945,232 @@ function setDefaultSettings() {
   var beEl = document.getElementById('ckShowBandEdges');
   if (beEl) beEl.checked = enableBandEdges;
   const MEMORY_KEY = 'frequency_memories';
-  let memories = Array(20).fill("");
-  localStorage.setItem(MEMORY_KEY, JSON.stringify(memories));
-  localStorage.setItem("volume_control", 1.0);
-  setPlayerVolume(1.0); // set the volue using the exponential scale
-  document.getElementById("volume_control").value = 1.0;
+  // Use 50 entries to match the memories subsystem expectations
+  // Each memory is an object: { freq: string, desc: string, mode: string }
+  let memories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+  // Initialize memory 0 to WWV10 @ 10,000 kHz AM (10000000 Hz) when creating defaults
+  memories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
+  if (writeToStorage) {
+    try { localStorage.setItem(MEMORY_KEY, JSON.stringify(memories)); } catch (e) {}
+    try { localStorage.setItem("volume_control", 1.0); } catch (e) {}
+    try { setPlayerVolume(1.0); } catch (e) {}
+    try { document.getElementById("volume_control").value = 1.0; } catch (e) {}
+    try { saveQuickBWPreset(); } catch (e) {}
+  } else {
+    // still set in-memory default for player volume and DOM
+    try { setPlayerVolume(1.0); } catch (e) {}
+    try { document.getElementById("volume_control").value = 1.0; } catch (e) {}
+  }
+  // If requested, also persist all the other UI/spectrum defaults so localStorage
+  // contains the full set that `saveSettings()` expects.
+  if (writeToStorage) {
+    try { localStorage.setItem("tune_hz", spectrum.frequency.toString()); } catch (e) {}
+    try { localStorage.setItem("zoom_level", document.getElementById("zoom_level").value.toString()); } catch (e) {}
+    try { localStorage.setItem("min_db", spectrum.min_db.toString()); } catch (e) {}
+    try { localStorage.setItem("max_db", spectrum.max_db.toString()); } catch (e) {}
+    try { localStorage.setItem("graticuleIncrement", spectrum.graticuleIncrement.toString()); } catch (e) {}
+    try { localStorage.setItem("wf_min_db", spectrum.wf_min_db.toString()); } catch (e) {}
+    try { localStorage.setItem("wf_max_db", spectrum.wf_max_db.toString()); } catch (e) {}
+    try { localStorage.setItem("spectrum_percent", spectrum.spectrumPercent.toString()); } catch (e) {}
+    try { localStorage.setItem("spectrum_center_hz", spectrum.centerHz.toString()); } catch (e) {}
+    try { localStorage.setItem("averaging", spectrum.averaging.toString()); } catch (e) {}
+    try { localStorage.setItem("maxHold", spectrum.maxHold.toString()); } catch (e) {}
+    try { localStorage.setItem("paused", spectrum.paused.toString()); } catch (e) {}
+    try { localStorage.setItem("decay", spectrum.decay.toString()); } catch (e) {}
+    try { localStorage.setItem("cursor_active", spectrum.cursor_active.toString()); } catch (e) {}
+    try { localStorage.setItem("preset", document.getElementById("mode").value); } catch (e) {}
+    try { localStorage.setItem("step", document.getElementById("step").value.toString()); } catch (e) {}
+    try { localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString()); } catch (e) {}
+    try { localStorage.setItem("meterIndex", document.getElementById("meter").value.toString()); } catch (e) {}
+    try { localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString()); } catch (e) {}
+    try { localStorage.setItem("check_max", (document.getElementById("check_max") && document.getElementById("check_max").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("check_min", (document.getElementById("check_min") && document.getElementById("check_min").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("switchModesByFrequency", (document.getElementById("cksbFrequency") && document.getElementById("cksbFrequency").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("onlyAutoscaleByButton", (document.getElementById("ckonlyAutoscaleButton") && document.getElementById("ckonlyAutoscaleButton").checked) ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("enableAnalogSMeter", enableAnalogSMeter ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("enableBandEdges", enableBandEdges ? "true" : "false"); } catch (e) {}
+  }
 }
 
 function loadSettings() {
-  console.log(`localStorage.length = ${localStorage.length}`);
- if ((localStorage.length == 0) || localStorage.length != 27) {
-    return false;
-  }
-  spectrum.averaging = parseInt(localStorage.getItem("averaging"));
-  spectrum.frequency = parseFloat(localStorage.getItem("tune_hz"));
-  frequencyHz = parseFloat(localStorage.getItem("tune_hz"));
+  try { console.log(`localStorage.length = ${localStorage.length}`); } catch (e) {}
+  if (typeof localStorage === 'undefined') return false;
+  try { if (localStorage.length === 0) return false; } catch (e) {}
+
+  const getLS = (k, parser, fallback) => {
+    try {
+      const v = localStorage.getItem(k);
+      if (v === null || v === undefined) return fallback;
+      return parser ? parser(v) : v;
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  spectrum.averaging = getLS("averaging", v => parseInt(v, 10), spectrum.averaging);
+  const tune = getLS("tune_hz", v => parseFloat(v), spectrum.frequency);
+  spectrum.frequency = tune;
+  frequencyHz = tune;
   target_frequency = frequencyHz;
-  spectrum.min_db = parseFloat(localStorage.getItem("min_db"));
-  document.getElementById("spectrum_min").value = spectrum.min_db;
-  spectrum.max_db = parseFloat(localStorage.getItem("max_db"));
-  document.getElementById("spectrum_max").value = spectrum.max_db;
-  spectrum.wf_min_db = parseFloat(localStorage.getItem("wf_min_db"));
-  spectrum.graticuleIncrement = parseFloat(localStorage.getItem("graticuleIncrement"));
-  document.getElementById("waterfall_min").value = spectrum.wf_min_db;
-  spectrum.wf_max_db = parseFloat(localStorage.getItem("wf_max_db"));
-  document.getElementById("waterfall_max").value = spectrum.wf_max_db;
-  spectrum.spectrumPercent = parseFloat(localStorage.getItem("spectrum_percent"));
-  spectrum.centerHz = parseFloat(localStorage.getItem("spectrum_center_hz"));
+
+  spectrum.min_db = getLS("min_db", v => parseFloat(v), spectrum.min_db);
+  try { document.getElementById("spectrum_min").value = spectrum.min_db; } catch (e) {}
+
+  spectrum.max_db = getLS("max_db", v => parseFloat(v), spectrum.max_db);
+  try { document.getElementById("spectrum_max").value = spectrum.max_db; } catch (e) {}
+
+  spectrum.wf_min_db = getLS("wf_min_db", v => parseFloat(v), spectrum.wf_min_db);
+  spectrum.graticuleIncrement = getLS("graticuleIncrement", v => parseFloat(v), spectrum.graticuleIncrement);
+  try { document.getElementById("waterfall_min").value = spectrum.wf_min_db; } catch (e) {}
+
+  spectrum.wf_max_db = getLS("wf_max_db", v => parseFloat(v), spectrum.wf_max_db);
+  try { document.getElementById("waterfall_max").value = spectrum.wf_max_db; } catch (e) {}
+
+  spectrum.spectrumPercent = getLS("spectrum_percent", v => parseFloat(v), spectrum.spectrumPercent);
+  spectrum.centerHz = getLS("spectrum_center_hz", v => parseFloat(v), spectrum.centerHz);
   centerHz = spectrum.centerHz;
   target_center = centerHz;
-  spectrum.maxHold = (localStorage.getItem("maxHold") == "true");
-  document.getElementById("max_hold").checked = spectrum.maxHold;
-  spectrum.paused = (localStorage.getItem("paused") == "true");
-  spectrum.decay = parseFloat(localStorage.getItem("decay"));
-  spectrum.cursor_active = (localStorage.getItem("cursor_active") == "true");
-  document.getElementById("mode").value = localStorage.getItem("preset");
-  target_preset = localStorage.getItem("preset");
-  increment = parseFloat(localStorage.getItem("step"));
-  document.getElementById("colormap").value = parseInt(localStorage.getItem("colorIndex"));
-  const c = parseInt(localStorage.getItem("colorIndex"));
-  document.getElementById("colormap").value = c;
-  spectrum.colorIndex = c;
-  document.getElementById("meter").value = parseInt(localStorage.getItem("meterIndex"));
-  const d = parseInt(localStorage.getItem("meterIndex"));
-  document.getElementById("meter").value = d;
-  meterType = d;
-  document.getElementById("zoom_level").value = parseInt(localStorage.getItem("zoom_level"));
-  target_zoom_level = parseInt(localStorage.getItem("zoom_level"));
-  spectrum.cursor_freq = parseFloat(localStorage.getItem("cursor_freq"));
-  spectrum.check_max = check_max.checked = (localStorage.getItem("check_max") == "true");
-  spectrum.check_min = check_min.checked = (localStorage.getItem("check_min") == "true");
-  switchModesByFrequency = (localStorage.getItem("switchModesByFrequency") == "true");
-  document.getElementById("cksbFrequency").checked = switchModesByFrequency;
-  onlyAutoscaleByButton = (localStorage.getItem("onlyAutoscaleByButton") == "true");
-  document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton;
-  enableAnalogSMeter = (localStorage.getItem("enableAnalogSMeter") == "true");
-  document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter;
-  setAnalogMeterVisible(enableAnalogSMeter); // Set the visibility of the analog S-Meter based on the saved setting
-  // Band edges persistence: mirror analog S-meter behavior
-  enableBandEdges = (localStorage.getItem("enableBandEdges") == "true");
-  var beEl = document.getElementById('ckShowBandEdges');
-  if (beEl) beEl.checked = enableBandEdges;
-  // apply to spectrum if present
-  if (typeof spectrum !== 'undefined' && spectrum) {
-      spectrum.showBandEdges = enableBandEdges;
-      spectrum.updateAxes();
+
+  spectrum.maxHold = getLS("maxHold", v => (v === "true"), spectrum.maxHold);
+  try { document.getElementById("max_hold").checked = spectrum.maxHold; } catch (e) {}
+
+  spectrum.paused = getLS("paused", v => (v === "true"), spectrum.paused);
+  spectrum.decay = getLS("decay", v => parseFloat(v), spectrum.decay);
+  spectrum.cursor_active = getLS("cursor_active", v => (v === "true"), spectrum.cursor_active);
+
+  const preset = getLS("preset", v => v, null);
+  if (preset !== null) {
+    try { document.getElementById("mode").value = preset; } catch (e) {}
+    target_preset = preset;
   }
-  //console.log("Loaded volume settings: ",parseFloat(localStorage.getItem("volume_control")));
-  var vc = parseFloat(localStorage.getItem("volume_control"));
-  document.getElementById("volume_control").value = vc;
-  setPlayerVolume(vc); // set the volue using the exponential scale
+
+  increment = getLS("step", v => parseFloat(v), increment);
+
+  const colorIndex = getLS("colorIndex", v => parseInt(v, 10), spectrum.colorIndex);
+  try { document.getElementById("colormap").value = colorIndex; } catch (e) {}
+  spectrum.colorIndex = colorIndex;
+
+  const meterIndex = getLS("meterIndex", v => parseInt(v, 10), meterType);
+  try { document.getElementById("meter").value = meterIndex; } catch (e) {}
+  meterType = meterIndex;
+
+  const zoomLv = getLS("zoom_level", v => parseInt(v, 10), target_zoom_level);
+  try { document.getElementById("zoom_level").value = zoomLv; } catch (e) {}
+  target_zoom_level = zoomLv;
+
+  spectrum.cursor_freq = getLS("cursor_freq", v => parseFloat(v), spectrum.cursor_freq);
+
+  const elCheckMax = document.getElementById("check_max");
+  const ckMaxVal = getLS("check_max", v => (v === "true"), spectrum.check_max);
+  spectrum.check_max = ckMaxVal;
+  if (elCheckMax) elCheckMax.checked = ckMaxVal;
+
+  const elCheckMin = document.getElementById("check_min");
+  const ckMinVal = getLS("check_min", v => (v === "true"), spectrum.check_min);
+  spectrum.check_min = ckMinVal;
+  if (elCheckMin) elCheckMin.checked = ckMinVal;
+
+  switchModesByFrequency = getLS("switchModesByFrequency", v => (v === "true"), switchModesByFrequency);
+  try { document.getElementById("cksbFrequency").checked = switchModesByFrequency; } catch (e) {}
+
+  onlyAutoscaleByButton = getLS("onlyAutoscaleByButton", v => (v === "true"), onlyAutoscaleByButton);
+  try { document.getElementById("ckonlyAutoscaleButton").checked = onlyAutoscaleByButton; } catch (e) {}
+
+  enableAnalogSMeter = getLS("enableAnalogSMeter", v => (v === "true"), enableAnalogSMeter);
+  try { document.getElementById("ckAnalogSMeter").checked = enableAnalogSMeter; } catch (e) {}
+  setAnalogMeterVisible(enableAnalogSMeter);
+
+  enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
+  try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+  if (typeof spectrum !== 'undefined' && spectrum) {
+    spectrum.showBandEdges = enableBandEdges;
+    spectrum.updateAxes();
+  }
+
+  const vc = getLS("volume_control", v => parseFloat(v), null);
+  if (vc !== null && !isNaN(vc)) {
+    try { document.getElementById("volume_control").value = vc; } catch (e) {}
+    setPlayerVolume(vc);
+  }
+
+  // Ensure frequency memories exist in localStorage; create defaults if missing
+  try {
+    const MEMORY_KEY = 'frequency_memories';
+    let mem = null;
+    try { mem = localStorage.getItem(MEMORY_KEY); } catch (e) { mem = null; }
+    if (mem === null) {
+      const defaultMemories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+      defaultMemories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
+      try { localStorage.setItem(MEMORY_KEY, JSON.stringify(defaultMemories)); frequencyMemoriesInitialized = true; } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+
+  return true;
+}
+
+// Diagnostic: check for expected localStorage keys and optionally alert the user
+function diagnosticCheckSettings(showAlert = true) {
+  if (typeof localStorage === 'undefined') return;
+  const expected = [
+    "tune_hz","zoom_level","min_db","max_db","graticuleIncrement",
+    "wf_min_db","wf_max_db","spectrum_percent","spectrum_center_hz",
+    "averaging","maxHold","paused","decay","cursor_active",
+    "preset","step","colorIndex","meterIndex","cursor_freq",
+    "check_max","check_min","switchModesByFrequency","onlyAutoscaleByButton",
+    "enableAnalogSMeter","enableBandEdges","volume_control","frequency_memories"
+  ];
+  const missing = expected.filter(k => {
+    try { return localStorage.getItem(k) === null; } catch (e) { return true; }
+  });
+  // Special validation for frequency_memories: ensure it's a JSON array of length >=50
+  try {
+    const memRaw = localStorage.getItem('frequency_memories');
+    let memInvalid = false;
+    if (memRaw === null) {
+      memInvalid = true;
+    } else {
+      try {
+        const memParsed = JSON.parse(memRaw);
+        if (!Array.isArray(memParsed) || memParsed.length < 50) memInvalid = true;
+        else {
+          // Check memory 0 has expected default values (or at least populated)
+          const m0 = memParsed[0];
+          if (!m0 || typeof m0.freq !== 'string' || m0.freq.trim() === '') memInvalid = true;
+        }
+      } catch (e) { memInvalid = true; }
+    }
+    if (memInvalid) missing.push('frequency_memories (invalid)');
+    // If loadSettings created the memories this run, report that as well
+    try { if (frequencyMemoriesInitialized) missing.push('frequency_memories (created)'); } catch (e) {}
+  } catch (e) { /* ignore */ }
+  if (missing.length > 0) {
+    const msg = `Missing settings keys: ${missing.join(', ')}. Defaults initialized and will be used for this session.`;
+    console.warn(msg);
+    if (showAlert) {
+      const toast = document.createElement('div');
+      toast.id = 'settings_diag_toast';
+      toast.textContent = msg;
+      Object.assign(toast.style, {
+        position: 'fixed',
+        right: '12px',
+        bottom: '12px',
+        background: 'rgba(0,0,0,0.8)',
+        color: '#fff',
+        padding: '10px 14px',
+        borderRadius: '6px',
+        zIndex: 99999,
+        fontSize: '13px',
+        maxWidth: '420px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        try { document.body.removeChild(toast); } catch (e) {}
+      }, 5000);
+    }
+    return false;
+  }
+  // No missing keys — be quiet (no toast).
   return true;
 }
 
@@ -1963,33 +2492,49 @@ function toggleAudioRecording() {
 }
 
 function getZoomTableSize() {
-    return new Promise((resolve, reject) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            reject("WebSocket is not open");
-            return;
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject("WebSocket is not open");
+      return;
+    }
+
+    // Send the command to get the zoom table size
+    ws.send("Z:SIZE");
+
+    let timeoutId = null;
+
+    // Temporary event listener for the ZSIZE response
+    function handleZoomTableSize(event) {
+      try {
+        if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
+          const size = parseInt(event.data.split(":")[1], 10);
+          ws.removeEventListener("message", handleZoomTableSize);
+          if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+          resolve(size);
         }
+      } catch (e) {
+        // ignore parse errors and keep waiting until timeout
+      }
+    }
 
-        // Send the command to get the zoom table size
-        ws.send("Z:SIZE");
+    // Add the temporary event listener
+    ws.addEventListener("message", handleZoomTableSize);
 
-        // Temporary event listener for the ZSIZE response
-        function handleZoomTableSize(event) {
-            if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
-                const size = parseInt(event.data.split(":")[1], 10);
-                ws.removeEventListener("message", handleZoomTableSize); // Remove the listener after handling
-                resolve(size);
-            }
-        }
+    // Handle errors — remove listener and reject once
+    const errorHandler = function (error) {
+      ws.removeEventListener("message", handleZoomTableSize);
+      if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+      reject("WebSocket error: " + error);
+    };
+    ws.addEventListener("error", errorHandler, { once: true });
 
-        // Add the temporary event listener
-        ws.addEventListener("message", handleZoomTableSize);
-
-        // Handle errors
-        ws.addEventListener("error", function (error) {
-            ws.removeEventListener("message", handleZoomTableSize); // Clean up the listener
-            reject("WebSocket error: " + error);
-        }, { once: true });
-    });
+    // Timeout: clean up if server doesn't reply in reasonable time
+    timeoutId = setTimeout(() => {
+      try { ws.removeEventListener("message", handleZoomTableSize); } catch (e) {}
+      try { ws.removeEventListener("error", errorHandler); } catch (e) {}
+      reject("getZoomTableSize: timeout waiting for ZSIZE response");
+    }, 3000);
+  });
 }
 
 async function fetchZoomTableSize() {
@@ -2048,16 +2593,20 @@ window.zoomTable = [
 // Utility: Find closest zoom level index for a given value
 window.findClosestZoomIndex = function(requestedZoom) {
   if (!window.zoomTable || window.zoomTable.length === 0) return null;
-  let closest = window.zoomTable[0];
-  let minDiff = Math.abs(requestedZoom - closest.value);
+  let closestIndex = 0;
+  // Treat requestedZoom as a bandwidth (Hz) and compare against entry span (bin_width * bin_count)
+  const req = Number(requestedZoom) || 0;
+  let minDiff = Math.abs(req - ((window.zoomTable[0].bin_width || 0) * (window.zoomTable[0].bin_count || 1)));
   for (let i = 1; i < window.zoomTable.length; ++i) {
-    const diff = Math.abs(requestedZoom - window.zoomTable[i].value);
+    const entry = window.zoomTable[i];
+    const span = (entry.bin_width || 0) * (entry.bin_count || 1);
+    const diff = Math.abs(req - span);
     if (diff < minDiff) {
-      closest = window.zoomTable[i];
+      closestIndex = i;
       minDiff = diff;
     }
   }
-  return closest.index;
+  return closestIndex;
 };
 
 function setSkipWaterfallLines(val) {
@@ -2290,6 +2839,62 @@ window.addEventListener('DOMContentLoaded', function() {
             };
             // Initialize desc box for first memory
             descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
+
+            // Initialize QuickBW preset and button
+            try {
+              loadQuickBWPreset();
+              const cwBtn = document.getElementById('cw_instant_button');
+              if (cwBtn) {
+                cwBtn.onclick = function() { applyQuickBW(); };
+              }
+              const modeEl = document.getElementById('mode');
+              if (modeEl) {
+                modeEl.addEventListener('change', updateQuickBWButtonState);
+              }
+              // ensure initial button state
+              updateQuickBWButtonState();
+              // Initialize QuickBW inputs and Save button (in options dialog)
+              try {
+                const cwLower = document.getElementById('cw_lower_input');
+                const cwUpper = document.getElementById('cw_upper_input');
+                const cwSave = document.getElementById('cw_save_button');
+                if (cwLower) cwLower.value = quickBWPreset.lowerOffset;
+                if (cwUpper) cwUpper.value = quickBWPreset.upperOffset;
+                if (cwSave) {
+                  cwSave.onclick = function() {
+                    try {
+                      const lo = Number(document.getElementById('cw_lower_input').value);
+                      const hi = Number(document.getElementById('cw_upper_input').value);
+                      if (Number.isFinite(lo) && Number.isFinite(hi)) {
+                        quickBWPreset.lowerOffset = lo;
+                        quickBWPreset.upperOffset = hi;
+                        saveQuickBWPreset();
+                        // If QuickBW currently active, reapply offsets for current mode
+                        if (quickBWActive) {
+                          const modeEl = document.getElementById('mode');
+                          const lowEl = document.getElementById('filterLowInput');
+                          const highEl = document.getElementById('filterHighInput');
+                          const m = (modeEl && modeEl.value) ? modeEl.value.toLowerCase() : '';
+                          if (lowEl && highEl && (m === 'usb' || m === 'lsb')) {
+                            if (m === 'usb') {
+                              lowEl.value = Math.min(lo, hi);
+                              highEl.value = Math.max(lo, hi);
+                            } else {
+                              lowEl.value = -Math.max(lo, hi);
+                              highEl.value = -Math.min(lo, hi);
+                            }
+                            sendFilterEdges();
+                          }
+                        }
+                      } else {
+                        alert('Please enter valid numeric offsets');
+                      }
+                    } catch (e) { console.error('Failed to save QuickBW offsets', e); }
+                  };
+                }
+              } catch (e) { /* ignore */ }
+            } catch (e) { console.error('QuickBW init failed', e); }
+
             // --- END OF ALL INITIALIZATION ---
             settingsReady = true; // Allow saveSettings() from now on
         })

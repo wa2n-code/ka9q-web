@@ -41,10 +41,14 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.77";
+const char *webserver_version = "2.78";
+
 
 // no handlers in /usr/local/include??
 onion_handler *onion_handler_export_local_new(const char *localpath);
+
+// Global variable to mirror Channel.tune.freq for external use
+double current_backend_frequency = 0.0;
 
 int Ctl_fd,Input_fd,Status_fd;
 pthread_mutex_t ctl_mutex;
@@ -80,6 +84,7 @@ struct session {
   float bins_max_db;
   float bins_autorange_gain;
   float bins_autorange_offset;
+  int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
   /* uint32_t last_poll_tag; */
 };
 
@@ -489,30 +494,35 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'F':
       case 'f':
-  sp->frequency = strtod(&tmp[2],0) * 1000;
-    int32_t span = sp->bin_width * sp->bins;
-    int32_t min_f = sp->center_frequency - (span / 2);
-    int32_t max_f = sp->center_frequency + (span / 2);
-    int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
-    int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
-    // Shift if frequency is within edge_bin_margin bins of the edge
-    if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
-      if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
-        // Shift so that frequency is edge_bin_margin bins above the new min edge
-        int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
-        sp->center_frequency -= shift * sp->bin_width;
-      } else {
-        sp->center_frequency = sp->frequency;
-      }
-    } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
-      if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
-        // Shift so that frequency is edge_bin_margin bins below the new max edge
-        int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
-        sp->center_frequency += shift * sp->bin_width;
-      } else {
-        sp->center_frequency = sp->frequency;
-      }
-    }
+        /*{
+          double freq = strtod(&tmp[2],0);
+          fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
+          fflush(stderr);
+        }*/
+        sp->frequency = strtod(&tmp[2],0) * 1000;
+        int32_t span = sp->bin_width * sp->bins;
+        int32_t min_f = sp->center_frequency - (span / 2);
+        int32_t max_f = sp->center_frequency + (span / 2);
+        int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
+        int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
+        // Shift if frequency is within edge_bin_margin bins of the edge
+        if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
+          if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
+            // Shift so that frequency is edge_bin_margin bins above the new min edge
+            int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
+            sp->center_frequency -= shift * sp->bin_width;
+          } else {
+            sp->center_frequency = sp->frequency;
+          }
+        } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
+          if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
+            // Shift so that frequency is edge_bin_margin bins below the new max edge
+            int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
+            sp->center_frequency += shift * sp->bin_width;
+          } else {
+            sp->center_frequency = sp->frequency;
+          }
+        }
         check_frequency(sp);
         control_set_frequency(sp,&tmp[2]);
         break;
@@ -1088,6 +1098,13 @@ Overall, this function safely constructs and sends a frequency-setting command f
 string parsing, buffer management, and thread synchronization.
 */
 void control_set_frequency(struct session *sp,char *str) {
+    // Debug: print when sending frequency command to backend
+    /*    if(strlen(str) > 0){
+      double debug_f = fabs(strtod(str,0) * 1000.0);
+      fprintf(stderr, "[DEBUG] Sending frequency command to backend: %.3f Hz\n", debug_f);
+      fflush(stderr);
+    }
+    */
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   double f;
@@ -1689,6 +1706,7 @@ This design allows the application to efficiently process and forward real-time 
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
 void *ctrl_thread(void *arg) {
+    static double last_sent_backend_frequency = 0.0;
   struct session *sp;
   socklen_t ssize = sizeof(Metadata_source_socket);
   uint8_t buffer[PKTSIZE/sizeof(float)];
@@ -1704,7 +1722,8 @@ void *ctrl_thread(void *arg) {
 
   while(1) {
     int rx_length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
-    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) 
+    {
       uint32_t ssrc = get_ssrc(buffer+1,rx_length-1);
       //      fprintf(stderr,"%s: ssrc=%d\n",__FUNCTION__,ssrc);
       if(ssrc%2==1) { // Spectrum data
@@ -1737,33 +1756,33 @@ void *ctrl_thread(void *arg) {
           // looked painful, so I went quick-n-dirty here
 
 
-	  // The types of some elements of struct frontend and struct channel changed in radiod
-	  // eg, Frontend.samprate became a double. This broke the memcpy calls
-	  // Changed memcpy to assignments with casts, which is much more portable
-	  // But yeah, this message should be TLV encoded or something
-	  // And it's what you get when you steal internal data structures from another
-	  // program maintained by someone else... - 12/13 Dec 2025 KA9Q
-	  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
-	  *ip++ = (uint32_t)Frontend.rf_agc;
-	  *(uint64_t *)ip = (uint64_t)Frontend.samples;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Frontend.overranges;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Channel.clocktime;
-	  ip += 2;
-	  *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
-	  ip += 2;
-	  *(float *)ip++ = (float)Frontend.rf_atten;
-	  *(float *)ip++ = (float)Frontend.rf_gain;
-	  *(float *)ip++ = (float)Frontend.rf_level_cal;
-	  *(float *)ip++ = (float)power2dB(Frontend.if_power);
-	  *(float *)ip++ = (float)sp->noise_density_audio;
-	  *ip++ = (uint32_t)sp->zoom_index;
-	  *ip++ = (uint32_t)bin_precision_bytes;
-	  *ip++ = (uint32_t)sp->bins_autorange_offset;
-	  *ip++ = (uint32_t)sp->bins_autorange_gain;
+          // The types of some elements of struct frontend and struct channel changed in radiod
+          // eg, Frontend.samprate became a double. This broke the memcpy calls
+          // Changed memcpy to assignments with casts, which is much more portable
+          // But yeah, this message should be TLV encoded or something
+          // And it's what you get when you steal internal data structures from another
+          // program maintained by someone else... - 12/13 Dec 2025 KA9Q
+          *ip++ = (uint32_t)round(fabs(Frontend.samprate));
+          *ip++ = (uint32_t)Frontend.rf_agc;
+          *(uint64_t *)ip = (uint64_t)Frontend.samples;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Frontend.overranges;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Channel.clocktime;
+          ip += 2;
+          *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
+          ip += 2;
+          *(float *)ip++ = (float)Frontend.rf_atten;
+          *(float *)ip++ = (float)Frontend.rf_gain;
+          *(float *)ip++ = (float)Frontend.rf_level_cal;
+          *(float *)ip++ = (float)power2dB(Frontend.if_power);
+          *(float *)ip++ = (float)sp->noise_density_audio;
+          *ip++ = (uint32_t)sp->zoom_index;
+          *ip++ = (uint32_t)bin_precision_bytes;
+          *ip++ = (uint32_t)sp->bins_autorange_offset;
+          *ip++ = (uint32_t)sp->bins_autorange_gain;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1898,16 +1917,54 @@ void *ctrl_thread(void *arg) {
               fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
             control_set_mode(sp,sp->requested_preset);
           }
-          // verify tuned frequency is correct, too
-          if (Channel.tune.freq != sp->frequency){
-            if (verbose)
-              fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz, retrying...\n",
-                      sp->ssrc,
-                      0.001 * sp->frequency,
-                      Channel.tune.freq * 0.001);
-            char f[128];
-            sprintf(f,"%.3f",0.001 * sp->frequency);
-            control_set_frequency(sp,f);
+          // Send BFREQ update to frontend whenever backend frequency changes
+          if (last_sent_backend_frequency != Channel.tune.freq) {
+            current_backend_frequency = Channel.tune.freq;
+            last_sent_backend_frequency = Channel.tune.freq;
+            // Send the backend frequency to the client as a text message
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
+            pthread_mutex_lock(&sp->ws_mutex);
+            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+            onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
+            pthread_mutex_unlock(&sp->ws_mutex);
+          }
+          if (Channel.tune.freq != sp->frequency) {
+            // Inhibit resend if preset is CWU or CWL
+/*            if (strcasecmp(sp->requested_preset, "cwu") == 0 || strcasecmp(sp->requested_preset, "cwl") == 0) {
+              if (verbose);
+                //fprintf(stderr, "SSRC %u: backend freq differs (CW mode), but resend is inhibited (preset=%s)\n",
+                //        sp->ssrc, sp->requested_preset);
+            } else */ {
+              /* Hold off resending until we've seen this mismatch N times in a row. */
+              const int MAX_FREQ_MISMATCH = 3;
+              if (Channel.tune.freq == sp->frequency) {
+                /* Frequencies now match; clear any counting. */
+                sp->freq_mismatch_count = 0;
+              } else {
+                sp->freq_mismatch_count++;
+                if (verbose)
+                  fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz (mismatch count=%d)\n",
+                          sp->ssrc,
+                          0.001 * sp->frequency,
+                          Channel.tune.freq * 0.001,
+                          sp->freq_mismatch_count);
+                if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+                  /* Debug: print the actual Channel.tune.freq value */
+                  //fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
+                  char f[128];
+                  sprintf(f,"%.3f",0.001 * sp->frequency);
+                  control_set_frequency(sp,f);
+                  /* reset counter until a new mismatch sequence starts */
+                  sp->freq_mismatch_count = 0;
+                }
+              }
+            }
+          }
+          else {
+            /* Frequencies match; ensure counter is cleared */
+            if (sp->freq_mismatch_count != 0)
+              sp->freq_mismatch_count = 0;
           }
           pthread_mutex_lock(&output_dest_socket_mutex);
           if(Channel.output.dest_socket.sa_family != 0)
@@ -1945,7 +2002,7 @@ void *ctrl_thread(void *arg) {
         }
       }
     } else if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
-fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
+        fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
     }
   }
 //fprintf(stderr,"%s: EXIT\n",__FUNCTION__);

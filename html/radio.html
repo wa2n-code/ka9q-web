@@ -185,6 +185,7 @@
                             <option value="1">SNR</option>
                             <option value="2">OVR</option>
                         </select>
+                        <button id="cw_instant_button" title="Apply alternate bandwidth" style="margin-left:6px; padding:2px 6px; font-size:90%" disabled>QuickBW</button>
                     </td>
                     <td align="center">
                         <button id="zoomminus" onclick="zoomout()" title="Zoom out spectrum">Out</button>
@@ -380,7 +381,8 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.77: Change WWV link to solarhams.com, increase radiod polling max rate to 2000 ms, added band edge arrows, radiod interface compatibility enhancements</li>
+            <li>v2.78: Add red "pip" indicator for base frequency when in CWU or CWL mode, add QuickBW function</li>
+            <li>v2.77: Change WWV link to solarhams.com, increase radiod polling max rate to 2000 ms, added band edge arrows, radiod api fixes</li>
             <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge markers, space toggles audio, set poll rate, adjust filter widths</li>
             <li>v2.75: Overlay trace load aligns spectrum, spectrum slides to follow mouse at ends, new keyboard shortcuts, up/down input boxes for spectrum floor and fft averaging</li>
             <li>v2.74: Added export to disk of max, min & current spectrum with load from disk to new trace and clear buttons, Freeze checkbox, Solar conditions and link</li>
