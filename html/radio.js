@@ -1069,13 +1069,18 @@ function applyQuickBW() {
               setMode('am');
           } else if (f == 3330000 || f == 7850000) {
               setMode('usb');
+	  } else if (f >= 5330500 && f < 5406500) {
+              setMode('usb');
           } else if (f < 10000000) {
+              setMode('lsb');
+	  } else if (f >= 26960000 && f < 26360000){
+              setMode('am');
+	  } else if (f >= 26360000 && f < 26410000){
               setMode('lsb');
           } else {
               setMode('usb');
           }
       }
-
     }
 
     function setMode(selected_mode) {
@@ -2203,10 +2208,10 @@ const bandOptions = {
         { label: "30M", freq: 10125000 },
         { label: "20M", freq: 14150000 },
         { label: "17M", freq: 18110000 },
-        { label: "15M", freq: 21300000 },
-        { label: "12M", freq: 24931000 },
-        { label: "10M", freq: 28500000 },
-	{ label: "6M",  freq: 50300000 }
+        { label: "15M", freq: 21200000 },
+        { label: "12M", freq: 24930000 },
+        { label: "10M", freq: 28300000 },
+	{ label: "6M",  freq: 50100000 }
     ],
     broadcast: [
         { label: "120M", freq:2397500 },
