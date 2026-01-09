@@ -54,9 +54,9 @@
           d.textContent = `ws:${wsst}${wait}\nlastSent: ${s}\nlastAck:  ${a}`;
         } catch (e) {}
       }
-      let zoomTableSize = null; // Global variable to store the zoom table size   
+      let zoomTableSize = null; // Global variable to store the zoom table size
       var spectrum;
-      let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025 
+      let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
       var centerHz = 10000000; // center frequency
       var frequencyHz = 10000000; // tuned frequency
       var lowHz=0;
@@ -291,7 +291,7 @@ function applyQuickBW() {
         // create debug overlay when WS opens
         try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
       }
-      
+
       // Send a request to the server to change the spectrum poll interval (milliseconds).
       function sendSpectrumPoll() {
         const elm = document.getElementById('spectrumPollInput');
@@ -313,7 +313,7 @@ function applyQuickBW() {
           console.warn('WebSocket not open, cannot send spectrum poll');
         }
       }
-      
+
       // Send filter edge settings (low and high) to the server via websocket
       function sendFilterEdges() {
         const lowEl = document.getElementById('filterLowInput');
@@ -370,11 +370,11 @@ function applyQuickBW() {
           try { cwDebug.lastSent = pendingFilterEdges; cwDebug.wsState = (ws && ws.readyState) || -1; updateCWDebugOverlay(); } catch (e) {}
         }
       }
-      
+
       function on_ws_close(evt) {
          console.log("WebSocket closed:", evt);
       }
-    
+
       async function on_ws_message(evt) {
         if(typeof evt.data === 'string') {
           // text data
@@ -474,7 +474,7 @@ function applyQuickBW() {
             // What a pleasant and unexpected surprise!
             // might want to refactor centerHz, frequencyHz, and binWidthHz, too
             input_samprate = view.getUint32(i,true); i+=4;
-            spectrum.input_samprate = input_samprate; 
+            spectrum.input_samprate = input_samprate;
             rf_agc = view.getUint32(i,true); i+=4;
             input_samples = view.getBigUint64(i,true); i+=8;
             ad_over = view.getBigUint64(i,true); i+=8;
@@ -680,7 +680,7 @@ function applyQuickBW() {
                ( navigator.maxTouchPoints > 0 ) ||
                ( navigator.msMaxTouchPoints > 0 );
       }
-      
+
       var init = function(){
         settingsReady = false; // Block saves during initialization
         frequencyHz = 10000000;
@@ -688,7 +688,7 @@ function applyQuickBW() {
         binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         setupFftAvgInput();
-        
+
         // Setup overlay buttons after spectrum is created
         document.addEventListener('DOMContentLoaded', function() {
             if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
@@ -950,7 +950,7 @@ function applyQuickBW() {
         e.preventDefault();
       }
     });
- 
+
     // Allow 'f' to toggle spectrum fullscreen even when the waterfall/canvas does not have focus.
     // If the waterfall canvas already has focus, Spectrum.prototype.onKeypress will handle 'f'.
     document.addEventListener('keydown', function(e) {
@@ -1025,10 +1025,10 @@ function applyQuickBW() {
         let frequencyDifference = Math.abs(spectrum.frequency - f)
         if(frequencyDifference < 100000)
         {
-          waitToAutoscale = false;  // No autoscale if we are within 100 kHz  
+          waitToAutoscale = false;  // No autoscale if we are within 100 kHz
         } else {
           waitToAutoscale = true;  // Autoscale if we are more than 100 kHz away
-          if(frequencyDifference > 3000000) 
+          if(frequencyDifference > 3000000)
             asCount = 0; // set the autoscale counter to 10 for frequencies greater than 3 MHz
           else
             asCount = 3; // set the autoscale counter to 17 between 100 kHz and 3 MHz
@@ -1041,7 +1041,7 @@ function applyQuickBW() {
         updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(f);
-        autoAutoscale(asCount,waitToAutoscale);      
+        autoAutoscale(asCount,waitToAutoscale);
         saveSettings();
     }
 
@@ -1075,7 +1075,7 @@ function applyQuickBW() {
               setMode('usb');
           }
       }
-    
+
     }
 
     function setMode(selected_mode) {
@@ -1091,23 +1091,23 @@ function applyQuickBW() {
 
       document.getElementById('mode').value = selected_mode;
       ws.send("M:" + selected_mode);
-  
+
       // Determine the new sample rate and number of channels based on the mode
       let newSampleRate = 12000;
       let newChannels = 1;
-  
+
       if (selected_mode === "iq") {
           newChannels = 2; // Stereo for IQ mode
       } else {
           newChannels = 1; // Mono for other modes
       }
-  
+
       if (selected_mode === "fm") {
           newSampleRate = 24000; // Higher sample rate for FM mode
       } else {
           newSampleRate = 12000; // Default sample rate for other modes
       }
-  
+
       // Reinitialize the PCMPlayer with the new configuration
       player.destroy(); // Destroy the existing player instance
       player = new PCMPlayer({
@@ -1276,7 +1276,7 @@ function applyQuickBW() {
       lowEl.addEventListener('input', inputHandler);
       highEl.addEventListener('input', inputHandler);
     }
-    
+
     // Attach custom step behavior for filter edge inputs so up/down change by 100Hz
     // when magnitude >= 1000, but switch to 10Hz when moving from 1000 toward 0.
     (function attachFilterStepBehavior(){
@@ -1332,7 +1332,7 @@ function applyQuickBW() {
         document.addEventListener('DOMContentLoaded', function(){ attach('filterLowInput'); attach('filterHighInput'); });
       }
     })();
-  
+
     function zoomin() {
       // Show warning if overlays are loaded
       if (spectrum && spectrum._overlayTraces && spectrum._overlayTraces.length > 0) {
@@ -1345,7 +1345,7 @@ function applyQuickBW() {
       //autoAutoscale(15,true);
       autoAutoscale(100,true);
       saveSettings();
-      
+
     }
 
     function zoomout() {
@@ -1360,14 +1360,14 @@ function applyQuickBW() {
       // autoAutoscale(15,true); // 15 for n0
       autoAutoscale(100,true);
       saveSettings();
-      
+
     }
 
     function bumpAGCWithFM() {
       const originalMode = document.getElementById('mode').value; // Get the currently selected mode
       ws.send("M:fm"); // Switch to FM mode
       //console.log("Switched to FM mode");
-    
+
       // Wait for 500 ms before switching back to the original mode
       setTimeout(() => {
         ws.send("M:" + originalMode); // Switch back to the original mode
@@ -1401,7 +1401,7 @@ function applyQuickBW() {
       ws.send(`Z:${v}`);
       //console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
       //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
-      autoAutoscale(100,false); 
+      autoAutoscale(100,false);
       saveSettings();
     }
 
@@ -1456,7 +1456,7 @@ function applyQuickBW() {
     }
 
 function updateRangeValues(){
-  //console.log("updateRangeValues() called", spectrum.wf_min_db, spectrum.wf_max_db, spectrum.min_db, spectrum.max_db); 
+  //console.log("updateRangeValues() called", spectrum.wf_min_db, spectrum.wf_max_db, spectrum.min_db, spectrum.max_db);
   document.getElementById("waterfall_min").value = spectrum.wf_min_db;
   document.getElementById("waterfall_max").value = spectrum.wf_max_db;
   document.getElementById("waterfall_min_range").value = spectrum.wf_min_db;
@@ -1467,14 +1467,14 @@ function updateRangeValues(){
 }
 
 function autoscaleButtonPush() {                      // autoscale button pressed, definitely do autoscale right away
-  spectrum.forceAutoscale(100,false); 
+  spectrum.forceAutoscale(100,false);
   //console.log("autoscaleButtonPush() called with start value 100");
   //pending_range_update = true;
 }
 
 function autoAutoscale(autoScaleCounterStart,waitToAutoscale = false) {     // Autoscale commanded by a change other than autoscale button press
   if (!onlyAutoscaleByButton) {
-    spectrum.forceAutoscale(autoScaleCounterStart,waitToAutoscale);           
+    spectrum.forceAutoscale(autoScaleCounterStart,waitToAutoscale);
     //pending_range_update = true;
   }
 }
@@ -1608,7 +1608,7 @@ function update_stats() {
 
   // Compute filter bandwidth
   const bw = Math.abs(filter_high - filter_low);
- 
+
   computeSUnits(power,spectrum.maxHold);
   // Update the signal bar meter and get the noise power, since it computes it
   var noisePower = updateSMeter(power,noise_density_audio,bw,spectrum.maxHold);
@@ -1655,9 +1655,9 @@ function update_stats() {
   }
   document.getElementById('version').innerHTML = "Version: v" + webserver_version;
   let bin = spectrum.hz_to_bin(spectrum.frequency);
-  document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString(); 
+  document.getElementById("cursor_data").textContent = "Tune: " + level_to_string(spectrum.frequency) + " @bin: " + bin.toLocaleString();
   // Use Math.round and .toLocaleString for centerHz to avoid floating-point artifacts
-  const centerKHz = Math.round(centerHz) / 1000; // rounds , then divides to get kHz 
+  const centerKHz = Math.round(centerHz) / 1000; // rounds , then divides to get kHz
   document.getElementById("span").textContent = `Span (kHz): ${(lowHz / 1000.0).toLocaleString()} to ${(highHz / 1000.0).toLocaleString()} width: ${((highHz - lowHz)/1000).toLocaleString()} center: ${centerKHz.toLocaleString(undefined, {minimumFractionDigits: 3, maximumFractionDigits: 3})}`;
 
   // Show reordered info into ge_data left table column 1
@@ -1873,7 +1873,7 @@ function saveSettings() {
   localStorage.setItem("colorIndex", document.getElementById("colormap").value.toString());
   localStorage.setItem("meterIndex", document.getElementById("meter").value.toString());
   localStorage.setItem("cursor_freq", spectrum.cursor_freq.toString());
-  localStorage.setItem("check_max", document.getElementById("check_max").checked.toString()); 
+  localStorage.setItem("check_max", document.getElementById("check_max").checked.toString());
   localStorage.setItem("check_min", document.getElementById("check_min").checked.toString());
   localStorage.setItem("switchModesByFrequency", document.getElementById("cksbFrequency").checked.toString());
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
@@ -2193,12 +2193,16 @@ const bandOptions = {
 	{ label: "2200M", freq: 136750 },
 	{ label: "630M", freq: 475500 },
         { label: "160M", freq: 1900000 },
-        { label: "80M", freq: 3715000 },
-        { label: "60M", freq: 5359000 },
-        { label: "40M", freq: 7150000 },
-        { label: "30M", freq: 10130000 },
-        { label: "20M", freq: 14185000 },
-        { label: "17M", freq: 18111000 },
+        { label: "80M", freq: 3600000 },
+        { label: "60Mch1", freq: 5330500 },
+        { label: "60Mch2", freq: 5346500 },
+        { label: "60M", freq: 5357000 },
+        { label: "60Mch4", freq: 5371500 },
+        { label: "60Mch5", freq: 5403500 },
+        { label: "40M", freq: 7125000 },
+        { label: "30M", freq: 10125000 },
+        { label: "20M", freq: 14150000 },
+        { label: "17M", freq: 18110000 },
         { label: "15M", freq: 21300000 },
         { label: "12M", freq: 24931000 },
         { label: "10M", freq: 28500000 },
@@ -2230,10 +2234,52 @@ const bandOptions = {
         { label: "WWV15", freq: 15000000 },
         { label: "WWV20", freq: 20000000 },
         { label: "WWV25", freq: 25000000 }
-    ]
+    ],
     cb: [
 	{ label: "CB 1", freq: 26965000 },
+	{ label: "CB 2", freq: 26975000 },
+	{ label: "CB 3", freq: 26985000 },
+	{ label: "CB 3A", freq: 26995000 },
+	{ label: "CB 4", freq: 27005000 },
+	{ label: "CB 5", freq: 27015000 },
 	{ label: "CB 6", freq: 27025000 },
+	{ label: "CB 7", freq: 27035000 },
+	{ label: "CB 7A", freq: 27045000 },
+	{ label: "CB 8", freq: 27055000 },
+	{ label: "CB 9", freq: 27065000 },
+	{ label: "CB 10", freq: 27075000 },
+	{ label: "CB 11", freq: 27085000 },
+	{ label: "CB 11A", freq: 27095000 },
+	{ label: "CB 12", freq: 27105000 },
+	{ label: "CB 13", freq: 27115000 },
+	{ label: "CB 14", freq: 27125000 },
+	{ label: "CB 15", freq: 27135000 },
+	{ label: "CB 15A", freq: 27145000 },
+	{ label: "CB 16", freq: 27155000 },
+	{ label: "CB 17", freq: 27165000 },
+	{ label: "CB 18", freq: 27175000 },
+	{ label: "CB 19", freq: 27185000 },
+	{ label: "CB 19A", freq: 27195000 },
+	{ label: "CB 20", freq: 27205000 },
+	{ label: "CB 21", freq: 27215000 },
+	{ label: "CB 22", freq: 27225000 },
+	{ label: "CB 23", freq: 27255000 },
+	{ label: "CB 24", freq: 27235000 },
+	{ label: "CB 25", freq: 27245000 },
+	{ label: "CB 26", freq: 27265000 },
+	{ label: "CB 27", freq: 27275000 },
+	{ label: "CB 28", freq: 27285000 },
+	{ label: "CB 29", freq: 27295000 },
+	{ label: "CB 30", freq: 27305000 },
+	{ label: "CB 31", freq: 27315000 },
+	{ label: "CB 32", freq: 27325000 },
+	{ label: "CB 33", freq: 27335000 },
+	{ label: "CB 34", freq: 27345000 },
+	{ label: "CB 35", freq: 27355000 },
+	{ label: "CB 36", freq: 27365000 },
+	{ label: "CB 37", freq: 27375000 },
+	{ label: "CB 38", freq: 27385000 },
+	{ label: "CB 39", freq: 27395000 },
 	{ label: "CB 40", freq: 27405000 }
 	]
 
@@ -2385,7 +2431,7 @@ function initializeDialogEventListeners() {
     // Show the dialog
     optionsDialog.classList.add('open');
     dialogOverlay.classList.add('open');
-    
+
     // Setup the overlay buttons when the dialog is opened
     if (typeof spectrum !== 'undefined' && spectrum && typeof spectrum.setupOverlayButtons === 'function') {
       //console.log('Dialog opened, setting up overlay buttons');
@@ -2459,7 +2505,7 @@ function setPlayerVolume(value) {
     const gain = minGain + (maxGain - minGain) * Math.pow(slider, exponent);
     player.volume(gain);
     //console.log(`Volume set to: ${gain} (slider: ${slider})`);
-  } 
+  }
 
   function setPanner(value) {
     if (typeof player !== 'undefined' && typeof player.pan === 'function') {
@@ -2671,7 +2717,7 @@ function enableBandSelectAlwaysCallsSetBand_Chrome() {
 function enableBandSelectAlwaysCallsSetBand() {
     if (isFirefox()) {
         enableBandSelectAlwaysCallsSetBand_Firefox();
-    } 
+    }
     /* else {
         enableBandSelectAlwaysCallsSetBand_Chrome();
     }
@@ -2702,7 +2748,7 @@ window.addEventListener('DOMContentLoaded', function() {
         .then(response => response.text())
         .then(data => {
             dialogPlaceholder.innerHTML = data;
-            
+
             // Setup the overlay buttons if spectrum exists
             if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
                 spectrum.setupOverlayButtons();
@@ -2816,7 +2862,7 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (!file) return;
                 var reader = new FileReader();
                 reader.onload = function(evt) {
-                                                                                                                                
+
                     try {
                         var arr = JSON.parse(evt.target.result);
                         if (Array.isArray(arr) && arr.length === 50) {
