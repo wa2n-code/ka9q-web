@@ -1752,8 +1752,8 @@ void *ctrl_thread(void *arg) {
           *(float *)ip++ = (float)sp->noise_density_audio;
           *ip++ = (uint32_t)sp->zoom_index;
           *ip++ = (uint32_t)bin_precision_bytes;
-          *ip++ = (uint32_t)sp->bins_autorange_offset;
-          *ip++ = (uint32_t)sp->bins_autorange_gain;
+          *(float *)ip++ = (float)sp->bins_autorange_offset;
+          *(float *)ip++ = (float)sp->bins_autorange_gain;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
