@@ -34,6 +34,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <time.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -117,6 +118,7 @@ int Mcast_ttl = DEFAULT_MCAST_TTL;
 int IP_tos = DEFAULT_IP_TOS;
 const char *App_path;
 int64_t Timeout = BILLION;
+int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
 int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
@@ -640,8 +642,12 @@ int main(int argc,char **argv) {
   App_path=argv[0];
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:hn:vb:r")) != -1){
+    while((c = getopt(argc,argv,"d:p:m:hn:vb:rT:")) != -1){
       switch(c) {
+      case 'T':
+        ConnTimeoutSeconds = atoi(optarg);
+        if (ConnTimeoutSeconds < 0) ConnTimeoutSeconds = 0;
+        break;
         case 'd':
           dirname=optarg;
           break;
@@ -678,7 +684,10 @@ int main(int argc,char **argv) {
 
   fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   pthread_mutex_init(&session_mutex,NULL);
-  init_connections(mcast);
+  if (init_connections(mcast) != EX_OK) {
+    fprintf(stderr, "Failed to initialize multicast connections; exiting\n");
+    return EX_IOERR;
+  }
   onion *o = onion_new(O_THREADED | O_NO_SIGTERM);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
@@ -975,8 +984,9 @@ int init_connections(const char *multicast_group) {
   char iface[1024]; // Multicast interface
 
   pthread_mutex_init(&ctl_mutex,NULL);
+  time_t start = time(NULL);
 
-  /* Retry resolving and listening for multicast status until successful.
+  /* Retry resolving and listening for multicast status until successful or timeout.
      This allows the backend (ka9q-radio) to come up after the web server. */
   for (;;) {
     resolve_mcast(multicast_group, &Metadata_dest_socket, DEFAULT_STAT_PORT,
@@ -984,15 +994,23 @@ int init_connections(const char *multicast_group) {
     Status_fd = listen_mcast(NULL, &Metadata_dest_socket, iface);
     if (Status_fd != -1)
       break;
+    if (ConnTimeoutSeconds > 0 && (int)(time(NULL) - start) >= ConnTimeoutSeconds) {
+      fprintf(stderr, "Timed out (%ds) trying to listen to mcast status %s\n", ConnTimeoutSeconds, multicast_group);
+      return EX_IOERR;
+    }
     fprintf(stderr, "Can't listen to mcast status %s - retrying in 2s\n", multicast_group);
     sleep(2);
   }
 
-  /* Retry connecting control socket until successful. */
+  /* Retry connecting control socket until successful or timeout. */
   for (;;) {
     Ctl_fd = connect_mcast(&Metadata_dest_socket, iface, Mcast_ttl, IP_tos);
     if (Ctl_fd >= 0)
       break;
+    if (ConnTimeoutSeconds > 0 && (int)(time(NULL) - start) >= ConnTimeoutSeconds) {
+      fprintf(stderr, "Timed out (%ds) trying to connect control mcast\n", ConnTimeoutSeconds);
+      return EX_IOERR;
+    }
     fprintf(stderr, "connect to mcast control failed - retrying in 2s\n");
     sleep(2);
   }
@@ -1789,8 +1807,8 @@ void *ctrl_thread(void *arg) {
           *(float *)ip++ = (float)sp->noise_density_audio;
           *ip++ = (uint32_t)sp->zoom_index;
           *ip++ = (uint32_t)bin_precision_bytes;
-          *ip++ = (uint32_t)sp->bins_autorange_offset;
-          *ip++ = (uint32_t)sp->bins_autorange_gain;
+          *(float *)ip++ = (float)sp->bins_autorange_offset;
+          *(float *)ip++ = (float)sp->bins_autorange_gain;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
