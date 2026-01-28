@@ -105,7 +105,6 @@
       var samples_since_over = 0;
       var noise_density_spectrum = 0;
       var noise_density_audio = 0;
-      var blocks_since_last_poll = 0;
       var last_poll = -1;
       //const webpage_version = "2.72";
       var webserver_version = "";
@@ -480,7 +479,6 @@ function applyQuickBW() {
             ad_over = view.getBigUint64(i,true); i+=8;
             samples_since_over = view.getBigUint64(i,true); i+=8;
             gps_time = view.getBigUint64(i,true); i+=8;
-            blocks_since_last_poll = view.getBigUint64(i,true); i+=8;
             rf_atten = view.getFloat32(i,true); i+=4;
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
@@ -1647,7 +1645,6 @@ function update_stats() {
     // fallback to empty if any error
   }
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom: ${zoomLevel}` : '');
-  document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   // Update the fft_avg_input value (number input)
   const fftAvgInput = document.getElementById('fft_avg_input');
   if (fftAvgInput) {
@@ -1748,7 +1745,6 @@ function buildCSV() {
     ["noise_density audio", noise_density_audio.toFixed(1)],
     ["bins", binCount],
     ["bin_width", binWidthHz],
-    ["blocks", blocks_since_last_poll.toString()],
     ["fft_avg", spectrum.averaging.toString()],
     ["decay", spectrum.decay.toString()],
     ["baseband_power", power.toFixed(1)],
