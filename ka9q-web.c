@@ -1798,7 +1798,7 @@ void *ctrl_thread(void *arg) {
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Channel.clocktime;
           ip += 2;
-          *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
+          *(uint64_t *)ip = 0;
           ip += 2;
           *(float *)ip++ = (float)Frontend.rf_atten;
           *(float *)ip++ = (float)Frontend.rf_gain;
