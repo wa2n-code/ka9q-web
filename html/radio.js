@@ -508,8 +508,23 @@ function applyQuickBW() {
               updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
-              document.getElementById("zoom_level").max = (input_samprate <= 64800000) ? zoomTableSize-1: zoomTableSize-1; // above and below 64.8 Mhz now can do 15 levels of zoom?
-              document.getElementById("zoom_level").value = z_level;
+              try {
+                const zoomEl = document.getElementById("zoom_level");
+                if (zoomEl) {
+                  const maxVal = (typeof zoomTableSize === 'number' && !isNaN(zoomTableSize)) ? (zoomTableSize - 1) : Number(zoomEl.max) || 0;
+                  zoomEl.max = maxVal;
+                  // If the frontend sample rate is the lower value (<= 64.8 MHz) disallow zoom level 0
+                  const minVal = (typeof input_samprate === 'number' && input_samprate > 0 && input_samprate <= 64800000) ? 1 : 0;
+                  zoomEl.min = minVal;
+                  // Clamp incoming server-provided zoom level to the allowed range before showing
+                  let clamped = z_level;
+                  if (clamped < minVal) clamped = minVal;
+                  if (clamped > maxVal) clamped = maxVal;
+                  zoomEl.value = clamped;
+                } else {
+                  document.getElementById("zoom_level").value = z_level;
+                }
+              } catch (e) { console.warn('Failed to update zoom control bounds', e); }
               //console.log("Zoom level=",z_level);
               document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
               saveSettings();
@@ -1350,6 +1365,7 @@ function applyQuickBW() {
       //autoAutoscale(15,true);
       autoAutoscale(100,true);
       saveSettings();
+      try { if (typeof window.showZoomBandwidthPopupForValue === 'function') window.showZoomBandwidthPopupForValue(document.getElementById('zoom_level').valueAsNumber); } catch (e) {}
 
     }
 
@@ -1365,6 +1381,7 @@ function applyQuickBW() {
       // autoAutoscale(15,true); // 15 for n0
       autoAutoscale(100,true);
       saveSettings();
+      try { if (typeof window.showZoomBandwidthPopupForValue === 'function') window.showZoomBandwidthPopupForValue(document.getElementById('zoom_level').valueAsNumber); } catch (e) {}
 
     }
 
@@ -3122,11 +3139,14 @@ function fetchAndDisplayWWVSolarData() {
       const table = window.zoomTable || [];
       const entry = table[idx] || table[Math.min(idx, table.length-1)] || null;
       let bwHz = 0;
-      if (entry && typeof entry.bin_width === 'number' && typeof entry.bin_count === 'number') {
-        // Use full span for display
+      // Prefer runtime `binWidthHz * binCount` which is provided by the server
+      // and represents the actual per-bin width and FFT size. If not available,
+      // fall back to the zoom table's nominal entry span.
+      if (typeof binWidthHz === 'number' && binWidthHz > 0 && typeof binCount === 'number' && binCount > 0) {
+        bwHz = binWidthHz * binCount;
+      } else if (entry && typeof entry.bin_width === 'number' && typeof entry.bin_count === 'number') {
         bwHz = (entry.bin_width * entry.bin_count);
       } else {
-        // fallback to binWidthHz * binCount
         bwHz = (typeof binWidthHz === 'number' ? binWidthHz : 1) * (typeof binCount === 'number' ? binCount : 1);
       }
 
@@ -3173,32 +3193,13 @@ function fetchAndDisplayWWVSolarData() {
     const zoomEl = document.getElementById('zoom_level');
     if (!zoomEl) return;
 
-    const onInput = function(e) { showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
-    // Show popup only when user *selects* the slider thumb (left button near the thumb)
-    const onPointerDown = function(e) {
-      try {
-        // Only handle left-button presses
-        if (typeof e.button === 'number' && e.button !== 0) return;
-        const rect = zoomEl.getBoundingClientRect();
-        const min = Number(zoomEl.min) || 0;
-        const max = Number(zoomEl.max) || 0;
-        const v = (typeof zoomEl.valueAsNumber === 'number' && !isNaN(zoomEl.valueAsNumber)) ? zoomEl.valueAsNumber : parseInt(zoomEl.value, 10) || 0;
-        const pct = (v - min) / Math.max(1, (max - min));
-        const thumbX = rect.left + pct * rect.width;
-        // threshold in pixels: adaptive but bounded
-        const threshold = Math.max(8, Math.min(20, rect.width * 0.03));
-        const clientX = (typeof e.clientX === 'number') ? e.clientX : (e.touches && e.touches[0] && e.touches[0].clientX) || 0;
-        if (Math.abs(clientX - thumbX) <= threshold) {
-          showZoomBandwidthPopupForValue(v, e);
-        }
-      } catch (err) {
-        // fallback to permissive behavior on error
-        showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e);
-      }
-    };
-    // Some browsers/devices may fire mousedown instead of pointerdown for the native thumb.
-    const onMouseDown = function(e) { onPointerDown(e); };
-    const onPointerMove = function(e) { if (e.buttons) showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); };
+    // Do NOT show bandwidth popup while the user is dragging the slider.
+    // We'll show the popup explicitly when the In/Out buttons are used.
+    const onInput = function(e) { /* suppressed during drag */ };
+    // Pointer down/mouse down handlers do nothing for popup
+    const onPointerDown = function(e) { /* suppressed */ };
+    const onMouseDown = function(e) { /* suppressed */ };
+    const onPointerMove = function(e) { /* suppressed during drag */ };
     const onPointerUp = function(e) { if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); };
 
     zoomEl.addEventListener('input', onInput, { passive: true });
@@ -3209,7 +3210,8 @@ function fetchAndDisplayWWVSolarData() {
     zoomEl.addEventListener('pointerup', onPointerUp);
     zoomEl.addEventListener('mouseup', onPointerUp);
     zoomEl.addEventListener('touchend', onPointerUp);
-    zoomEl.addEventListener('change', function(e){ showZoomBandwidthPopupForValue(zoomEl.valueAsNumber, e); if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); });
+    // Do not show popup on slider change events (we show it only on button presses)
+    zoomEl.addEventListener('change', function(e){ if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer); zoomPopupHideTimer = setTimeout(hideZoomBandwidthPopupNow, 600); });
 
     // hide on window resize or scroll
     window.addEventListener('resize', hideZoomBandwidthPopupNow);

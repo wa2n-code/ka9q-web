@@ -42,7 +42,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.78-ka9q1";
+const char *webserver_version = "2.79";
 
 
 // no handlers in /usr/local/include??
@@ -316,9 +316,9 @@ const struct zoom_table_t zoom_table[] = {
 };
 #else
 const struct zoom_table_t zoom_table[] = {
-  {100000, 1620}, // useful only for very fast front ends?
-  {80000, 1620},
-  {50000, 1620},
+  //{100000, 1620}, // useful only for very fast front ends?
+  //{80000, 1620},
+  //{50000, 1620},
   {40000, 1620},
   {20000, 1620},
   {10000, 1620},
