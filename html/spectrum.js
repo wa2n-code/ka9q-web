@@ -2467,6 +2467,8 @@ Spectrum.prototype.getExportSuffix = function() {
 // Return bands as { lowHz, highHz, label } for one-label-per-band rendering
 Spectrum.prototype.getHamBands = function() {
     var bands_mhz = [
+	{ low: 0.1357, high: 0.1378, label: '2200m' },
+	{ low: 0.472, high: 0.479, label: '630m' },
         { low: 1.8, high: 2.0, label: '160m' },
         { low: 3.5, high: 4.0, label: '80m' },
 	{ low: 5.3306, high: 5.3334, label: '60m ch1' },
@@ -2480,6 +2482,7 @@ Spectrum.prototype.getHamBands = function() {
         { low: 18.068, high: 18.168, label: '17m' },
         { low: 21.0, high: 21.45, label: '15m' },
         { low: 24.89, high: 24.99, label: '12m' },
+	{ low: 26.96, high: 27.41, label: '11m CB' },
         { low: 28.0, high: 29.7, label: '10m' },
         { low: 50.0, high: 54.0, label: '6m' },
 	{ low: 144.0, high: 148.0, label: '2m' },

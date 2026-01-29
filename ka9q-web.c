@@ -42,7 +42,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.78";
+const char *webserver_version = "2.78-ka9q1";
 
 
 // no handlers in /usr/local/include??
@@ -237,6 +237,9 @@ void websocket_closed(struct session *sp) {
 }
 
 static void check_frequency(struct session *sp) {
+    if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0)
+      return;
+
     int64_t span = (int64_t)sp->bin_width * sp->bins;
     int64_t center_freq = (int64_t)sp->center_frequency;
     int64_t min_f = center_freq - (span / 2);
@@ -290,6 +293,7 @@ struct zoom_table_t {
   int bin_count;
 };
 
+#if 0
 const struct zoom_table_t zoom_table[] = {
   {40000, 1620},
   {20000, 1620},
@@ -310,20 +314,54 @@ const struct zoom_table_t zoom_table[] = {
   {2, 1620},
   {1, 1620}
 };
+#else
+const struct zoom_table_t zoom_table[] = {
+  {100000, 1620}, // useful only for very fast front ends?
+  {80000, 1620},
+  {50000, 1620},
+  {40000, 1620},
+  {20000, 1620},
+  {10000, 1620},
+  {8000, 1620},
+  {5000, 1620},
+  {4000, 1620},
+  {2000, 1620},
+  {1000, 1620},
+  {800, 1620},
+  {500, 1620},
+  {400, 1620},
+  {200, 1620},
+  {100, 1620},
+  {80, 1620},
+  {50, 1620},
+  {40, 1620},
+  {20, 1620},
+  {10, 1620},
+  {8, 1620},
+  {5, 1620},
+  {4, 1620},
+  {2, 1620},
+  {1, 1620}
+};
+#endif
+
 
 static void zoom_to(struct session *sp, int level) {
   const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+
+  if (level < 0)
+    level = 0;
+
+  if(Frontend.samprate != 0){
+    while(zoom_table[level].bin_width * zoom_table[level].bin_count
+	  > Frontend.samprate/2 && level < table_size)
+      level++;
+    if(level == table_size)
+      level--;
+  }
+  sp->bin_width = zoom_table[level].bin_width;
+  sp->bins = zoom_table[level].bin_count;
   sp->zoom_index = level;
-  if (sp->zoom_index >= table_size)
-    sp->zoom_index = table_size-1;
-
-  if (sp->zoom_index < 0)
-    sp->zoom_index = 0;
-
-  if ((Frontend.samprate <= 64800000) && (sp->zoom_index <= 0))
-    sp->zoom_index = 1;
-  sp->bin_width = zoom_table[sp->zoom_index].bin_width;
-  sp->bins = zoom_table[sp->zoom_index].bin_count;
 }
 
 static void zoom(struct session *sp, int shift) {
@@ -333,6 +371,9 @@ static void zoom(struct session *sp, int shift) {
 /* Clamp center frequency so the visible span stays within [0, fs/2]
    but do not force the tuned frequency to be inside the visible window. */
 static void adjust_center_within_bounds(struct session *sp) {
+  if(sp->bin_width == 0 || sp->bins == 0 || Frontend.samprate == 0)
+    return;
+
   int64_t span = (int64_t)sp->bin_width * sp->bins;
   int64_t center_freq = (int64_t)sp->center_frequency;
   int64_t fs2 = Frontend.samprate / 2;
@@ -791,13 +832,27 @@ onion_connection_status home(void *data, onion_request * req,
   sp->ws=ws;
   sp->spectrum_active=true;
   sp->audio_active=false;
+
+
   sp->frequency=10000000;
-  sp->center_frequency = 16200000;
-  sp->bins=MAX_BINS;
-  sp->bin_width=20000; // width of a pixel in hz
+  int level = 0;
+#if 0
+  sp->center_frequency = Frontend.samprate/4;
+  const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+
+
+  for(; level < table_size; level++)
+    if(zoom_table[level].bin_width * zoom_table[level].bin_count <= Frontend.samprate/2)
+      break;
+  sp->zoom_index = level;
+#else
+  level = 6;
+#endif
+  sp->bins=zoom_table[level].bin_count;
+  sp->bin_width=zoom_table[level].bin_width; // width of a pixel in hz
   sp->next=NULL;
   sp->previous=NULL;
-  sp->zoom_index = 1;
+
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
   sp->bins_autorange_offset = -130;
@@ -1009,8 +1064,8 @@ int init_control(struct session *sp) {
   uint8_t *bp = cmdbuffer;
   *bp++ = CMD; // Command
 
-  encode_double(&bp,RADIO_FREQUENCY,10000000);
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+  encode_double(&bp,RADIO_FREQUENCY,10000000);
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
   encode_string(&bp,PRESET,"am",strlen("am"));
@@ -1025,8 +1080,8 @@ int init_control(struct session *sp) {
   bp = cmdbuffer;
   *bp++ = CMD; // Command
 
-  encode_double(&bp,RADIO_FREQUENCY,10000000);
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1); // Specific SSRC
+  encode_double(&bp,RADIO_FREQUENCY,10000000);
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
   encode_eol(&bp);
@@ -1083,10 +1138,10 @@ void control_set_frequency(struct session *sp,char *str) {
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
-  sp->frequency = f;
-    encode_double(&bp,RADIO_FREQUENCY,f);
+    sp->frequency = f;
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_double(&bp,RADIO_FREQUENCY,f);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
@@ -1116,11 +1171,11 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 //          sp ? sp->ssrc : 0, low_str ? low_str : "", high_str ? high_str : "", lowf, highf);
 
   *bp++ = CMD; // Command
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
   /* Encode LOW_EDGE then HIGH_EDGE as floats */
   encode_float(&bp, LOW_EDGE, lowf);
   encode_float(&bp, HIGH_EDGE, highf);
-  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
-  encode_int(&bp, COMMAND_TAG, arc4random());
   encode_eol(&bp);
 
   int const command_len = bp - cmdbuffer;
@@ -1155,9 +1210,9 @@ void control_set_mode(struct session *sp,char *str) {
 
   if(strlen(str) > 0) {
     *bp++ = CMD; // Command
-    encode_string(&bp,PRESET,str,strlen(str));
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_string(&bp,PRESET,str,strlen(str));
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
@@ -1283,9 +1338,9 @@ void control_poll(struct session *sp) {
   *bp++ = 1; // Command
 
   /* sp->last_poll_tag = random(); */
-  /* encode_int(&bp,COMMAND_TAG,sp->last_poll_tag); */
-  encode_int(&bp,COMMAND_TAG,random());
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // poll specific SSRC, or request ssrc list with ssrc = 0
+  encode_int(&bp,COMMAND_TAG,random());
+  /* encode_int(&bp,COMMAND_TAG,sp->last_poll_tag); */
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
@@ -1743,7 +1798,7 @@ void *ctrl_thread(void *arg) {
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Channel.clocktime;
           ip += 2;
-          *(uint64_t *)ip = (uint64_t)Channel.status.blocks_since_poll;
+          *(uint64_t *)ip = 0;
           ip += 2;
           *(float *)ip++ = (float)Frontend.rf_atten;
           *(float *)ip++ = (float)Frontend.rf_gain;
