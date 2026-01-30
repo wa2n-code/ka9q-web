@@ -504,7 +504,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
             /* fprintf(stderr, "%s: received websocket spectrum average g:%s for sp=%p ssrc=%d\n", __FUNCTION__, avg, sp, sp?sp->ssrc:0); */
             /* fflush(stderr); */
             control_set_spectrum_average(sp, avg);
-            fprintf(stderr, "%s: forwarded spectrum average g:%s to control socket\n", __FUNCTION__, avg);
+            //fprintf(stderr, "%s: forwarded spectrum average g:%s to control socket\n", __FUNCTION__, avg);
             fflush(stderr);
           }
         }
