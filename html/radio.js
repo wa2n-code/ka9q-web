@@ -1967,7 +1967,7 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
 
 function setDefaultSettings(writeToStorage = true) {
   if (writeToStorage) console.log("Setting default settings");
-  spectrum.averaging = 4;
+  spectrum.averaging = 10;
   spectrum.frequency = 10000000;
   frequencyHz = 10000000;
   target_frequency = 10000000;
@@ -2103,6 +2103,10 @@ function loadSettings() {
 
   spectrum.wf_max_db = getLS("wf_max_db", v => parseFloat(v), spectrum.wf_max_db);
   try { document.getElementById("waterfall_max").value = spectrum.wf_max_db; } catch (e) {}
+
+  // waterfall bias: how much to bias waterfall autoscale floor/ceiling (persisted)
+  spectrum.waterfallBias = getLS("waterfallBias", v => parseFloat(v), (typeof spectrum.waterfallBias !== 'undefined' ? spectrum.waterfallBias : 5));
+  try { document.getElementById("waterfallBiasInput").value = spectrum.waterfallBias; } catch (e) {}
 
   spectrum.spectrumPercent = getLS("spectrum_percent", v => parseFloat(v), spectrum.spectrumPercent);
   spectrum.centerHz = getLS("spectrum_center_hz", v => parseFloat(v), spectrum.centerHz);
@@ -2746,6 +2750,17 @@ function setSkipWaterfallLines(val) {
   window.skipWaterfallLines = val;
 }
 
+function setWaterfallBias(val) {
+  var v = parseFloat(val);
+  if (isNaN(v)) return;
+  try { localStorage.setItem('waterfallBias', String(v)); } catch (e) {}
+  try { document.getElementById('waterfallBiasInput').value = v; } catch (e) {}
+  if (typeof spectrum !== 'undefined' && spectrum) {
+    spectrum.waterfallBias = v;
+    try { if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false); } catch (e) {}
+  }
+}
+
 function isFirefox() {
     return navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
 }
@@ -3065,6 +3080,8 @@ window.addEventListener('DOMContentLoaded', function() {
 function resetSettings() {
   // Clear all local storage for this origin
   localStorage.clear();
+  // Ensure waterfallBias has a sensible default after reset so Options dialog shows it
+  try { localStorage.setItem('waterfallBias', '5'); } catch (e) {}
   // Reload the current page (preserves URL, reloads from server)
   window.location.reload();
 }

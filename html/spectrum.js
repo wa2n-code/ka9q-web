@@ -118,6 +118,14 @@ function Spectrum(id, options) {
     this.setAveraging(this.averaging);
     this.updateSpectrumRatio();
     this.resize();
+    // Load waterfallBias from localStorage if present, default to 5
+    try {
+        var _wb = localStorage.getItem('waterfallBias');
+        this.waterfallBias = (_wb !== null && _wb !== undefined) ? Number(_wb) : 5;
+        if (isNaN(this.waterfallBias)) this.waterfallBias = 5;
+    } catch (e) {
+        this.waterfallBias = 5;
+    }
     // debug flag for waterfall shift diagnostics (removed)
     
     // Initialize overlay trace functionality
@@ -1227,7 +1235,6 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
 {
         const useN0 = false;
         const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
-        const waterfallBias = 8;    // Further bias the waterfall range by this amount (was 11 changed 11-29-2025)
         if(getNewMinMax){
             if(useN0) { // N0 took too long to settle...
                 this.minimum = Math.round(noise_density_audio) + 17;
@@ -1237,7 +1244,7 @@ Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax)
             else{ 
                 if(this.measureMinMax(data) == true) {
                     //console.log("drawSpectrumWaterfall: this.minimum=", this.minimum.toFixed(1), " this.maximum=", this.maximum.toFixed(1),"getNewMinMax=", getNewMinMax);
-                    this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
+                    this.setRange(Math.round(this.minimum) + rangeBias, this.maximum, true, this.waterfallBias); // Bias max up so peak isn't touching top of graph, bias the wf floor also to darken wf
                 }
             }
         }

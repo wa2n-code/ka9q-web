@@ -59,6 +59,7 @@
    <!-- Spectrum poll input (milliseconds) and send button -->
    <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 4px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Poll</button>
    <input type="number" id="spectrumPollInput" min="30" max="2000" step="10" value="100" style="width:50px; font-size:12px; margin-left:2px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
+      <input type="number" id="waterfallBiasInput" step="1" inputmode="numeric" title="Waterfall bias amount, decrease to lighten waterfall background. Default value 5" style="width:48px; font-size:12px; margin-left:6px;" onchange="setWaterfallBias(this.value)" />
       <input type="number" id="cw_lower_input" step="1" inputmode="numeric" title="QuickBW lower offset (Hz)" style="width:48px; font-size:12px; margin-left:6px;" />
       <input type="number" id="cw_upper_input" step="1" inputmode="numeric" title="QuickBW upper offset (Hz)" style="width:48px; font-size:12px; margin-left:2px;" />
    </div>

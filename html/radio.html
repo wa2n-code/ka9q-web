@@ -303,7 +303,7 @@
                                 <td><span id="rf_gain"></span></td>
                                 <td>
                                     <label for="fft_avg_input" style="margin-right:4px;">FFT average:</label>
-                                    <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging from 1 to 50" />
+                                    <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging (client side) from 1 to 50" />
                                 </td>
                                 <td><span id="gps_time"></span></td>
                         </tr>
@@ -311,7 +311,7 @@
                                 <td><span id="rf_attn"></span></td>
                                 <td>
                                     <label for="spectrum_average_input" style="margin-right:4px;">Spectrum average:</label>
-                                    <input type="number" id="spectrum_average_input" min="1" max="150" step="1" style="width:50px;" title="Set Spectrum averaging from 1 to 150" value="10" />
+                                    <input type="number" id="spectrum_average_input" min="1" max="150" step="1" style="width:50px;" title="Set Spectrum averaging (server side) from 1 to 150" value="10" />
                                 </td>
                                 <td><span id="uptime"></span></td>
                         </tr>
@@ -387,7 +387,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.79: Added CB selector, more zoom levels, spectrum averaging input - by Phil KA9Q</li>
+            <li>v2.79: Added CB band selector & channels, more band edges, more zoom levels, spectrum averaging input, waterfall bias setting - by Phil KA9Q & Wayne WA2N</li>
             <li>v2.78: Add red "pip" indicator for base frequency when in CWU or CWL mode, add QuickBW function</li>
             <li>v2.77: Change WWV link to solarhams.com, increase radiod polling max rate to 2000 ms, added band edge arrows, radiod api fixes</li>
             <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge markers, space toggles audio, set poll rate, adjust filter widths</li>
