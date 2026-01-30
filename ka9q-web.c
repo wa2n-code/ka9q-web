@@ -96,6 +96,7 @@ extern int init_control(struct session *sp);
 extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
+extern void control_set_spectrum_average(struct session *sp, char *val_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -494,6 +495,20 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           }
         }
         break;
+      case 'g':
+      case 'G':
+        {
+          // Expect format: g:<avg>
+          char *avg = strtok(NULL, ":");
+          if (avg != NULL) {
+            /* fprintf(stderr, "%s: received websocket spectrum average g:%s for sp=%p ssrc=%d\n", __FUNCTION__, avg, sp, sp?sp->ssrc:0); */
+            /* fflush(stderr); */
+            control_set_spectrum_average(sp, avg);
+            fprintf(stderr, "%s: forwarded spectrum average g:%s to control socket\n", __FUNCTION__, avg);
+            fflush(stderr);
+          }
+        }
+        break;
       case 'F':
       case 'f':
         /*{
@@ -688,6 +703,8 @@ int main(int argc,char **argv) {
     fprintf(stderr, "Failed to initialize multicast connections; exiting\n");
     return EX_IOERR;
   }
+  /* Send default spectrum averaging to backend at startup (default 10) */
+  control_set_spectrum_average(NULL, "10");
   onion *o = onion_new(O_THREADED | O_NO_SIGTERM);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
@@ -1182,6 +1199,40 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
   pthread_mutex_lock(&ctl_mutex);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "command send error: %s\n", strerror(errno));
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Send spectrum averaging value (integer) to control socket for this session */
+void control_set_spectrum_average(struct session *sp, char *val_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  int val = 0;
+
+  if (val_str && strlen(val_str) > 0)
+    val = atoi(val_str);
+  if (val_str && strlen(val_str) > 0)
+    val = atoi(val_str);
+
+  int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* use ssrc+1 for spectrum stream */
+  /* fprintf(stderr, "%s: control_set_spectrum_average called sp=%p ssrc=%d target_ssrc=%d val=%d\n", __FUNCTION__, sp, sp?sp->ssrc:0, target_ssrc, val); */
+  /* fflush(stderr); */
+
+  *bp++ = CMD; // Command
+  /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
+  encode_int(&bp, OUTPUT_SSRC, target_ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  /* Encode spectrum average as integer SPECTRUM_AVG */
+  encode_int(&bp, SPECTRUM_AVG, val);
+  encode_eol(&bp);
+
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
+  } else {
+    /* fprintf(stderr, "%s: sent SPECTRUM_AVG=%d (len=%d) to control fd=%d\n", __FUNCTION__, val, command_len, Ctl_fd); */
+    /* fflush(stderr); */
   }
   pthread_mutex_unlock(&ctl_mutex);
 }

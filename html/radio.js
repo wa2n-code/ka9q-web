@@ -89,6 +89,8 @@
   let spanHz = binCount * binWidthHz;
   // Spectrum poll interval in milliseconds (client-side default)
   var spectrumPoll = 100;
+      // Spectrum averaging value (separate from FFT averaging)
+      let spectrum_average = 10; // default 10, synced with #spectrum_average_input
       var counter = 0;
       var filter_low = -5000;
       var filter_high = 5000;
@@ -134,6 +136,8 @@
       var onlyAutoscaleByButton = false;
       var enableAnalogSMeter = false;
       var enableBandEdges = false;
+      // pending spectrum average to send once websocket opens
+      var pendingSpectrumAverage = null;
 
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
@@ -288,6 +292,18 @@ function applyQuickBW() {
             pendingFilterEdges = null;
           }
         } catch (e) { console.error('Failed to flush pending filter edges', e); }
+        // If a spectrum_average update was queued while WS was closed, or send current default
+        try {
+          if (pendingSpectrumAverage && ws && ws.readyState === WebSocket.OPEN) {
+            // console.log('Flushing queued spectrum average to backend:', pendingSpectrumAverage.val);
+            ws.send('g:' + pendingSpectrumAverage.val.toString());
+            pendingSpectrumAverage = null;
+          } else if (ws && ws.readyState === WebSocket.OPEN) {
+            // Always send current spectrum_average so backend is in sync
+            // console.log('Sending current spectrum_average to backend on WS open:', spectrum_average);
+            ws.send('g:' + spectrum_average.toString());
+          }
+        } catch (e) { console.error('Failed to flush/send spectrum average', e); }
         // create debug overlay when WS opens
         try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
       }
@@ -703,6 +719,7 @@ function applyQuickBW() {
         binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
         spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
         setupFftAvgInput();
+        setupSpectrumAvgInput();
 
         // Setup overlay buttons after spectrum is created
         document.addEventListener('DOMContentLoaded', function() {
@@ -1670,6 +1687,11 @@ function update_stats() {
   if (fftAvgInput) {
     fftAvgInput.value = spectrum.averaging;
   }
+  // Update the spectrum_average_input value (number input)
+  const spectrumAvgInputEl = document.getElementById('spectrum_average_input');
+  if (spectrumAvgInputEl) {
+    spectrumAvgInputEl.value = spectrum_average;
+  }
   document.getElementById('decay').innerHTML = "Decay: " + spectrum.decay.toString();
   document.getElementById("rx_rate").textContent = `RX rate: ${((rx_rate / 1000.0) * 8.0).toFixed(0)} kbps`;
   if (typeof ssrc !== 'undefined') {
@@ -1723,6 +1745,38 @@ function setupFftAvgInput() {
       //console.log("FFT averaging set to: ", val);
     }
     //update_stats(); // Refresh UI
+  });
+}
+
+// --- Spectrum Averaging input box event handler ---
+function setupSpectrumAvgInput() {
+  const el = document.getElementById('spectrum_average_input');
+  if (!el) return;
+  el.min = 1;
+  el.max = 150;
+  el.step = 1;
+  el.value = spectrum_average;
+  el.addEventListener('input', function () {
+    let val = parseInt(el.value, 10);
+    if (isNaN(val) || val < 1) val = 1;
+    if (val > el.max) val = el.max;
+    if (val !== spectrum_average) {
+      spectrum_average = val;
+      // persist new setting
+      saveSettings();
+      // send to backend if websocket open
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          // console.log('Sending spectrum average to backend:', spectrum_average);
+          ws.send('g:' + spectrum_average.toString());
+        } else {
+          // queue until websocket opens
+          pendingSpectrumAverage = { val: spectrum_average, time: Date.now() };
+          // console.log('Queued spectrum average until WS open:', pendingSpectrumAverage.val);
+        }
+      } catch (e) { console.error('Failed to send spectrum average:', e); }
+    }
+    el.value = val; // clamp in UI
   });
 }
 
@@ -1886,6 +1940,7 @@ function saveSettings() {
   localStorage.setItem("spectrum_percent", spectrum.spectrumPercent.toString());
   localStorage.setItem("spectrum_center_hz", spectrum.centerHz.toString());
   localStorage.setItem("averaging", spectrum.averaging.toString());
+  localStorage.setItem("spectrum_average", spectrum_average.toString());
   localStorage.setItem("maxHold", spectrum.maxHold.toString());
   localStorage.setItem("paused", spectrum.paused.toString());
   localStorage.setItem("decay", spectrum.decay.toString());
@@ -2030,6 +2085,7 @@ function loadSettings() {
   };
 
   spectrum.averaging = getLS("averaging", v => parseInt(v, 10), spectrum.averaging);
+  spectrum_average = getLS("spectrum_average", v => parseInt(v, 10), spectrum_average);
   const tune = getLS("tune_hz", v => parseFloat(v), spectrum.frequency);
   spectrum.frequency = tune;
   frequencyHz = tune;
@@ -2107,6 +2163,8 @@ function loadSettings() {
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();
+    // ensure UI reflects loaded spectrum average
+    try { const sa = document.getElementById('spectrum_average_input'); if (sa) sa.value = spectrum_average; } catch (e) {}
   }
 
   const vc = getLS("volume_control", v => parseFloat(v), null);

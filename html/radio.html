@@ -299,19 +299,27 @@
     <div style="height:1px;font-size:1px;"></div>
     <div style="width: 100%;" id="stat_div">
         <table id="stat_table">
-            <tr>
-                <td><span id="rf_gain"></span></td>
-                <td>
-                  <label for="fft_avg_input" style="margin-right:4px;">FFT average:</label>
-                  <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging from 1 to 50" />
-                </td>
-                <td><span id="gps_time"></span></td>
-            </tr>
-            <tr>
-                <td><span id="rf_attn"></span></td>
-                <td><span id="hz_per_bin"></span></td>
-                <td><span id="uptime"></span></td>
-            </tr>
+                        <tr>
+                                <td><span id="rf_gain"></span></td>
+                                <td>
+                                    <label for="fft_avg_input" style="margin-right:4px;">FFT average:</label>
+                                    <input type="number" id="fft_avg_input" min="1" max="50" step="1" style="width:50px;" title="Set FFT averaging from 1 to 50" />
+                                </td>
+                                <td><span id="gps_time"></span></td>
+                        </tr>
+                        <tr>
+                                <td></td>
+                                <td>
+                                    <label for="spectrum_average_input" style="margin-right:4px;">Spectrum average:</label>
+                                    <input type="number" id="spectrum_average_input" min="1" max="150" step="1" style="width:50px;" title="Set Spectrum averaging from 1 to 150" value="10" />
+                                </td>
+                                <td></td>
+                        </tr>
+                        <tr>
+                                <td><span id="rf_attn"></span></td>
+                                <td><span id="hz_per_bin"></span></td>
+                                <td><span id="uptime"></span></td>
+                        </tr>
             <tr>
                 <td><span id="rf_cal"></span></td>
                 <td><span id="bins"></span></td>
