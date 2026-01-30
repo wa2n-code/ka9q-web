@@ -1756,6 +1756,45 @@ function setupSpectrumAvgInput() {
   el.max = 150;
   el.step = 1;
   el.value = spectrum_average;
+  // Throttle backend sends only for repeated ArrowUp/ArrowDown interactions
+  let lastSendTime = 0;
+  let pendingSend = null;
+  let sendTimer = null;
+  const MIN_INTERVAL_MS = 333; // ~3 sends per second
+  let arrowActive = false; // true while ArrowUp/Down are depressed (including autorepeat)
+
+  function doSend(val) {
+    try {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('g:' + val.toString());
+      } else {
+        pendingSpectrumAverage = { val: val, time: Date.now() };
+      }
+    } catch (e) { console.error('Failed to send spectrum average:', e); }
+  }
+
+  function scheduleSend(val) {
+    const now = Date.now();
+    const elapsed = now - lastSendTime;
+    if (elapsed >= MIN_INTERVAL_MS && !sendTimer) {
+      lastSendTime = now;
+      doSend(val);
+      pendingSend = null;
+    } else {
+      pendingSend = val;
+      if (!sendTimer) {
+        sendTimer = setTimeout(function () {
+          sendTimer = null;
+          if (pendingSend !== null) {
+            lastSendTime = Date.now();
+            doSend(pendingSend);
+            pendingSend = null;
+          }
+        }, Math.max(0, MIN_INTERVAL_MS - elapsed));
+      }
+    }
+  }
+
   el.addEventListener('input', function () {
     let val = parseInt(el.value, 10);
     if (isNaN(val) || val < 1) val = 1;
@@ -1764,19 +1803,48 @@ function setupSpectrumAvgInput() {
       spectrum_average = val;
       // persist new setting
       saveSettings();
-      // send to backend if websocket open
-      try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          // console.log('Sending spectrum average to backend:', spectrum_average);
-          ws.send('g:' + spectrum_average.toString());
-        } else {
-          // queue until websocket opens
-          pendingSpectrumAverage = { val: spectrum_average, time: Date.now() };
-          // console.log('Queued spectrum average until WS open:', pendingSpectrumAverage.val);
-        }
-      } catch (e) { console.error('Failed to send spectrum average:', e); }
+      // If user is using arrow keys, rate-limit; otherwise send immediately
+      if (arrowActive) {
+        scheduleSend(spectrum_average);
+      } else {
+        lastSendTime = Date.now();
+        doSend(spectrum_average);
+      }
     }
     el.value = val; // clamp in UI
+  });
+
+  // Track ArrowUp/ArrowDown key activity so holds are rate-limited
+  el.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      arrowActive = true;
+    }
+  });
+
+  // On keyup (anywhere) clear arrow state and ensure the latest value is sent
+  document.addEventListener('keyup', function (e) {
+    if (!arrowActive) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    arrowActive = false;
+    // flush pending send but still respect MIN_INTERVAL_MS
+    if (pendingSend !== null) {
+      const now = Date.now();
+      const elapsed = now - lastSendTime;
+      if (elapsed >= MIN_INTERVAL_MS && !sendTimer) {
+        lastSendTime = now;
+        doSend(pendingSend);
+        pendingSend = null;
+      } else if (!sendTimer) {
+        sendTimer = setTimeout(function () {
+          sendTimer = null;
+          if (pendingSend !== null) {
+            lastSendTime = Date.now();
+            doSend(pendingSend);
+            pendingSend = null;
+          }
+        }, Math.max(0, MIN_INTERVAL_MS - elapsed));
+      }
+    }
   });
 }
 
