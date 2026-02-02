@@ -477,33 +477,41 @@ Spectrum.prototype.squeeze = function(value, out_min, out_max) {
  * The resulting `imagedata` can be rendered onto the waterfall canvas to visualize signal intensity.
  */
 Spectrum.prototype.rowToImageData = function(bins) {
-    for(var i = 0; i < this.imagedata.data.length; i += 4) {
-        try {
-            //var cindex = this.squeeze(-(bins[i/4]-70), 0, 255);
+    // Defensive: ensure we have a colormap and a valid imagedata buffer
+    const cmap = Array.isArray(this.colormap) && this.colormap.length > 0 ? this.colormap : [[0,0,0]];
+    const cmapMax = cmap.length - 1;
+    const denom = (this.wf_max_db - this.wf_min_db);
 
-            // newell 12/1/2024, 11:44:29
-            // with this new bin amplitude scaling, the colormap lookup need to change
-            // I think the idea is that weak signals use colors from the start
-            // of the colormap array, and stronger ones use colors from the end
-            // I also noticed the default colormaps are not all the same length!
-            // perhaps that's what the catch(err) was all about?
-            var scaled=((bins[i / 4] - this.wf_min_db) / (this.wf_max_db - this.wf_min_db));
-            if (scaled > 1.0) scaled = 1.0;
-            if (scaled < 0) scaled = 0;
-            var cindex = Math.round((this.colormap.length - 1) * scaled);
-          var color = this.colormap[cindex];
-          this.imagedata.data[i+0] = color[0];
-          this.imagedata.data[i+1] = color[1];
-          this.imagedata.data[i+2] = color[2];
-          this.imagedata.data[i+3] = 255;
-        } catch(err) {
-            console.error("rowToImageData() caught an error: color=", color, " colormap.length=", this.colormap.length);
-          var color = this.colormap[this.colormap.length-1];
-          this.imagedata.data[i+0] = color[0];
-          this.imagedata.data[i+1] = color[1];
-          this.imagedata.data[i+2] = color[2];
-          this.imagedata.data[i+3] = 255;
+    for (var i = 0; i < this.imagedata.data.length; i += 4) {
+        // Compute corresponding bin index
+        var binIndex = i / 4;
+        var binVal = bins && binIndex < bins.length ? bins[binIndex] : undefined;
+
+        // Validate bin value: use wf_min_db for invalid entries so they map to darkest color
+        if (typeof binVal !== 'number' || !Number.isFinite(binVal)) {
+            binVal = this.wf_min_db;
         }
+
+        // Safe scaling: avoid divide-by-zero
+        var scaled = 0;
+        if (denom !== 0) scaled = (binVal - this.wf_min_db) / denom;
+        if (scaled > 1.0) scaled = 1.0;
+        if (scaled < 0) scaled = 0;
+
+        // Map scaled value to colormap index and clamp
+        var cindex = Math.round(cmapMax * scaled);
+        if (!Number.isFinite(cindex)) cindex = 0;
+        if (cindex < 0) cindex = 0;
+        if (cindex > cmapMax) cindex = cmapMax;
+
+        var color = cmap[cindex] || cmap[cmapMax] || [0,0,0];
+        // Ensure color has three components
+        if (!Array.isArray(color) || color.length < 3) color = [0,0,0];
+
+        this.imagedata.data[i + 0] = color[0];
+        this.imagedata.data[i + 1] = color[1];
+        this.imagedata.data[i + 2] = color[2];
+        this.imagedata.data[i + 3] = 255;
     }
 }
 
