@@ -482,36 +482,55 @@ Spectrum.prototype.rowToImageData = function(bins) {
     const cmapMax = cmap.length - 1;
     const denom = (this.wf_max_db - this.wf_min_db);
 
-    for (var i = 0; i < this.imagedata.data.length; i += 4) {
-        // Compute corresponding bin index
-        var binIndex = i / 4;
-        var binVal = bins && binIndex < bins.length ? bins[binIndex] : undefined;
+    // Ensure imagedata exists
+    if (!this.imagedata || !this.imagedata.data) return;
 
-        // Validate bin value: use wf_min_db for invalid entries so they map to darkest color
-        if (typeof binVal !== 'number' || !Number.isFinite(binVal)) {
-            binVal = this.wf_min_db;
+    try {
+        for (var i = 0; i < this.imagedata.data.length; i += 4) {
+            // Compute corresponding bin index
+            var binIndex = i / 4;
+            var binVal = bins && binIndex < bins.length ? bins[binIndex] : undefined;
+
+            // Validate bin value: use wf_min_db for invalid entries so they map to darkest color
+            if (typeof binVal !== 'number' || !Number.isFinite(binVal)) {
+                binVal = this.wf_min_db;
+            }
+
+            // Safe scaling: avoid divide-by-zero
+            var scaled = 0;
+            if (denom !== 0) scaled = (binVal - this.wf_min_db) / denom;
+            if (scaled > 1.0) scaled = 1.0;
+            if (scaled < 0) scaled = 0;
+
+            // Map scaled value to colormap index and clamp
+            var cindex = Math.round(cmapMax * scaled);
+            if (!Number.isFinite(cindex)) cindex = 0;
+            if (cindex < 0) cindex = 0;
+            if (cindex > cmapMax) cindex = cmapMax;
+
+            var color = cmap[cindex] || cmap[cmapMax] || [0,0,0];
+            // Ensure color has three components
+            if (!Array.isArray(color) || color.length < 3) color = [0,0,0];
+
+            this.imagedata.data[i + 0] = color[0];
+            this.imagedata.data[i + 1] = color[1];
+            this.imagedata.data[i + 2] = color[2];
+            this.imagedata.data[i + 3] = 255;
         }
-
-        // Safe scaling: avoid divide-by-zero
-        var scaled = 0;
-        if (denom !== 0) scaled = (binVal - this.wf_min_db) / denom;
-        if (scaled > 1.0) scaled = 1.0;
-        if (scaled < 0) scaled = 0;
-
-        // Map scaled value to colormap index and clamp
-        var cindex = Math.round(cmapMax * scaled);
-        if (!Number.isFinite(cindex)) cindex = 0;
-        if (cindex < 0) cindex = 0;
-        if (cindex > cmapMax) cindex = cmapMax;
-
-        var color = cmap[cindex] || cmap[cmapMax] || [0,0,0];
-        // Ensure color has three components
-        if (!Array.isArray(color) || color.length < 3) color = [0,0,0];
-
-        this.imagedata.data[i + 0] = color[0];
-        this.imagedata.data[i + 1] = color[1];
-        this.imagedata.data[i + 2] = color[2];
-        this.imagedata.data[i + 3] = 255;
+    } catch (err) {
+        // Defensive logging: provide enough context to debug intermittent issues
+        try {
+            const dbg = (window && window.spectrumDebug) ? window.spectrumDebug : false;
+            if (dbg) console.error('rowToImageData fatal error', { err: err, binsLen: bins && bins.length, imagedataLen: this.imagedata.data.length, wf_min_db: this.wf_min_db, wf_max_db: this.wf_max_db, colormapLen: cmap.length });
+        } catch (e2) { /* swallow */ }
+        // Fill remaining image with fallback color rather than throwing
+        var fallback = cmap[cmapMax] || [0,0,0];
+        for (var j = 0; j < this.imagedata.data.length; j += 4) {
+            this.imagedata.data[j + 0] = fallback[0];
+            this.imagedata.data[j + 1] = fallback[1];
+            this.imagedata.data[j + 2] = fallback[2];
+            this.imagedata.data[j + 3] = 255;
+        }
     }
 }
 
