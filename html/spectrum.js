@@ -483,7 +483,10 @@ Spectrum.prototype.rowToImageData = function(bins) {
     const denom = (this.wf_max_db - this.wf_min_db);
 
     // Ensure imagedata exists
-    if (!this.imagedata || !this.imagedata.data) return;
+    if (!this.imagedata || !this.imagedata.data) {
+        console.log('Spectrum.rowToImageData: imagedata missing, skipping');
+        return;
+    }
 
     try {
         for (var i = 0; i < this.imagedata.data.length; i += 4) {
