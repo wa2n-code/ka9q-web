@@ -850,9 +850,15 @@ Spectrum.prototype.drawSpectrum = function(bins) {
     if (this.ctx_axes.canvas.height < 1) {
         return;
     }
-    // Scale for FFT
+    // Scale for FFT - guard against invalid wf_size (can happen during rapid zoom changes)
     this.ctx.save();
-    this.ctx.scale(width / this.wf_size, 1);
+    var scaleX = 1;
+    if (this.wf_size && Number.isFinite(this.wf_size) && this.wf_size > 0) {
+        scaleX = width / this.wf_size;
+    } else {
+        console.warn('Spectrum.drawSpectrum: invalid this.wf_size, falling back to scale 1', this.wf_size);
+    }
+    this.ctx.scale(scaleX, 1);
 
     // draw filter band
     this.drawFilter(bins);
