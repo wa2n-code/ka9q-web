@@ -173,11 +173,11 @@
                         </div>
                     </td>
                     <td align="center">
-                        <button onmousedown="startDecrement(10)" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px; margin-right:2px;" title="Decrease frequency by 10× step size">&lt;</button>
-                        <button onmousedown="startDecrement()" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px;" title="Decrease frequency by step size">-</button>
+                        <button onmousedown="startDecrement(event,10)" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px; margin-right:2px;" title="Decrease frequency by 10× step size (hold Ctrl to decrease by 100 Hz)">&lt;</button>
+                        <button onmousedown="startDecrement(event)" onmouseup="stopDecrement()" onmouseout="stopDecrement()" style="width:22px; font-size:14px;" title="Decrease frequency by step size (hold Ctrl to decrease by 10 Hz)">-</button>
                         <button style="color:green; border:solid; padding-left:2px; padding-right:2px;" onclick="setFrequencyW(event)" title="Set frequency (hold Ctrl while clicking to round to nearest 1 kHz)">Set</button>
-                        <button onmousedown="startIncrement()" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px;" title="Increase frequency by step size">+</button>
-                        <button onmousedown="startIncrement(10)" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px; margin-left:2px;" title="Increase frequency by 10× step size">&gt;</button>
+                        <button onmousedown="startIncrement(event)" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px;" title="Increase frequency by step size (hold Ctrl to increase by 10 Hz)">+</button>
+                        <button onmousedown="startIncrement(event,10)" onmouseup="stopIncrement()" onmouseout="stopIncrement()" style="width:22px; font-size:14px; margin-left:2px;" title="Increase frequency by 10× step size (hold Ctrl to increase by 100 Hz)">&gt;</button>
                     </td>
                     <td rowspan=1 colspan=1 align="center">
                         <label for="meter">Meter:</label>
@@ -387,7 +387,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.79: Added CB band selector & channels, more band edges, more zoom levels, spectrum averaging input, waterfall bias setting - by Phil KA9Q & Wayne WA2N</li>
+            <li>v2.79: Added CB band selector & channels, more band edges, more zoom levels, spectrum averaging input, waterfall bias setting, ctrl key modifiers on frequency set buttons - by Phil KA9Q & Wayne WA2N</li>
             <li>v2.78: Add red "pip" indicator for base frequency when in CWU or CWL mode, add QuickBW function</li>
             <li>v2.77: Change WWV link to solarhams.com, increase radiod polling max rate to 2000 ms, added band edge arrows, radiod api fixes</li>
             <li>v2.76: Left click-drag mouse now pans spectrum & waterfall, enunciator added if tuned frequency is outside spectrum, added band edge markers, space toggles audio, set poll rate, adjust filter widths</li>

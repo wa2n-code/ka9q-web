@@ -899,20 +899,55 @@ function applyQuickBW() {
         saveSettings();
     }
 
-    function startIncrement(multiplier = 1) {
-        incrementFrequency(multiplier);
-        counter=setInterval(function() { incrementFrequency(multiplier); },200);
-        saveSettings();
+    function startIncrement(a = 1, b) {
+      // a may be an Event (mouse) or a numeric multiplier. b optionally holds a baseMultiplier when a is Event.
+      var multiplier;
+      if (a && typeof a === 'object' && ('ctrlKey' in a)) {
+        // mouse event path
+        const evt = a;
+        const base = (typeof b === 'number') ? b : 1;
+        // only handle left mouse button
+        if ('button' in evt && evt.button !== 0) {
+          multiplier = base;
+        } else if (evt.ctrlKey) {
+          // If Ctrl held: for single-step +/-, use 10 Hz; for < or > (base==10) use 100 Hz
+          const targetHz = (base === 10) ? 100 : 10;
+          multiplier = targetHz / increment;
+        } else {
+          multiplier = base;
+        }
+      } else {
+        multiplier = (typeof a === 'number') ? a : 1;
+      }
+      incrementFrequency(multiplier);
+      counter=setInterval(function() { incrementFrequency(multiplier); },200);
+      saveSettings();
     }
 
     function stopIncrement() {
         clearInterval(counter);
     }
 
-    function startDecrement(multiplier = 1) {
-        decrementFrequency(multiplier);
-        counter=setInterval(function() { decrementFrequency(multiplier); },200);
-        saveSettings();
+    function startDecrement(a = 1, b) {
+      // a may be an Event (mouse) or a numeric multiplier. b optionally holds a baseMultiplier when a is Event.
+      var multiplier;
+      if (a && typeof a === 'object' && ('ctrlKey' in a)) {
+        const evt = a;
+        const base = (typeof b === 'number') ? b : 1;
+        if ('button' in evt && evt.button !== 0) {
+          multiplier = base;
+        } else if (evt.ctrlKey) {
+          const targetHz = (base === 10) ? 100 : 10;
+          multiplier = targetHz / increment;
+        } else {
+          multiplier = base;
+        }
+      } else {
+        multiplier = (typeof a === 'number') ? a : 1;
+      }
+      decrementFrequency(multiplier);
+      counter=setInterval(function() { decrementFrequency(multiplier); },200);
+      saveSettings();
     }
 
     function stopDecrement() {
