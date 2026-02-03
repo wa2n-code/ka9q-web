@@ -1044,14 +1044,37 @@ function applyQuickBW() {
 
     // ...existing code...
 
-    function setFrequencyW(waitToAutoscale = true)
+    function setFrequencyW(a, b)
     {
+        // Normalize arguments so existing callers still work.
+        // Possible call patterns:
+        //  - setFrequencyW()                      -> no args
+        //  - setFrequencyW(false)                 -> waitToAutoscale=false
+        //  - setFrequencyW(event)                 -> event from onclick
+        //  - setFrequencyW(event, false)          -> event and waitToAutoscale
+        var evt = null;
+        var waitToAutoscale = true;
+        if (a && typeof a === 'object' && ('ctrlKey' in a || 'type' in a)) {
+          evt = a;
+          waitToAutoscale = (typeof b === 'boolean') ? b : true;
+        } else {
+          waitToAutoscale = (typeof a === 'boolean') ? a : true;
+          evt = (b && typeof b === 'object' && ('ctrlKey' in b)) ? b : null;
+        }
+
         var asCount = 0;
         // need to see how far away we'll move in frequency to set the waitToAutoscale value wdr
         let f = parseFloat(document.getElementById("freq").value,10) * 1000.0;
         if (!spectrum.checkFrequencyIsValid(f)) {
             return;
         }
+        // If the user held Ctrl while clicking the Set button, round to nearest 1 kHz
+        try {
+          if (evt && evt.ctrlKey) {
+            f = Math.round(f / 1000.0) * 1000.0;
+            document.getElementById("freq").value = (f / 1000.0).toFixed(3);
+          }
+        } catch (e) {}
         stopDecrement();  // stop decrementing if runaway
         stopIncrement();  // stop incrementing if runaway
         let frequencyDifference = Math.abs(spectrum.frequency - f)
