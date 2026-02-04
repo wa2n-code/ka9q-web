@@ -492,10 +492,19 @@ Spectrum.prototype.rowToImageData = function(bins) {
         for (var i = 0; i < this.imagedata.data.length; i += 4) {
             // Compute corresponding bin index
             var binIndex = i / 4;
-            var binVal = bins && binIndex < bins.length ? bins[binIndex] : undefined;
+            // original value (may be undefined/out of range)
+            var origBinVal = bins && binIndex < bins.length ? bins[binIndex] : undefined;
+            var binVal = origBinVal;
 
             // Validate bin value: use wf_min_db for invalid entries so they map to darkest color
             if (typeof binVal !== 'number' || !Number.isFinite(binVal)) {
+                // One-shot logging for debugging: warn the first time we see an invalid bin
+                if (!this._firstInvalidBinLogged) {
+                    try {
+                        console.warn('rowToImageData: invalid bin value encountered', { binIndex: binIndex, value: origBinVal, binsLen: bins ? bins.length : 0, wf_min_db: this.wf_min_db, wf_max_db: this.wf_max_db });
+                    } catch (e) {}
+                    this._firstInvalidBinLogged = true;
+                }
                 binVal = this.wf_min_db;
             }
 
@@ -848,6 +857,7 @@ Spectrum.prototype.drawSpectrum = function(bins) {
 
     // Do not draw anything if spectrum is not visible
     if (this.ctx_axes.canvas.height < 1) {
+        console.log('Spectrum.drawSpectrum: axes canvas height < 1, skipping draw');
         return;
     }
     // Scale for FFT - guard against invalid wf_size (can happen during rapid zoom changes)
@@ -865,6 +875,13 @@ Spectrum.prototype.drawSpectrum = function(bins) {
 
     // newell 12/1/2024, 16:08:06
     // Something weird here...why does the pointer stroke color affect the already drawn spectrum?
+    // Optional debug logging — enable with `window.spectrumDebug = true` in console
+    try {
+        if (window && window.spectrumDebug) {
+            console.debug('drawSpectrum enter', { binsLen: bins && bins.length, wf_size: this.wf_size, nbins: this.nbins, spanHz: this.spanHz, spectrumHeight: this.spectrumHeight });
+        }
+    } catch (e) {}
+
     // draw pointer
     this.drawCursor(this.frequency, bins, "#ff0000", bins[this.hz_to_bin(this.frequency)]);
 
@@ -985,8 +1002,12 @@ Spectrum.prototype.drawSpectrum = function(bins) {
         console.debug("enunciator draw error", e);
     }
 
-    // Copy axes from offscreen canvas
-    this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
+    // Copy axes from offscreen canvas — guard against occasional canvas draw errors
+    try {
+        this.ctx.drawImage(this.ctx_axes.canvas, 0, 0);
+    } catch (err) {
+        try { console.log('drawSpectrum: ctx.drawImage failed', err); } catch (e) {}
+    }
 }
 
 /**
