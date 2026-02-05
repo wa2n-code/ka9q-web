@@ -496,14 +496,12 @@ function applyQuickBW() {
             ad_over = view.getBigUint64(i,true); i+=8;
             samples_since_over = view.getBigUint64(i,true); i+=8;
             gps_time = view.getBigUint64(i,true); i+=8;
-            blocks_since_last_poll = view.getBigUint64(i,true); i+=8;
             rf_atten = view.getFloat32(i,true); i+=4;
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
             const z_level = view.getUint32(i,true); i+=4;
-            const bin_precision_bytes = view.getUint32(i,true); i+=4;
             const bins_autorange_offset =  view.getFloat32(i,true); i+=4;
             const bins_autorange_gain =  view.getFloat32(i,true); i+=4;
 
@@ -1717,7 +1715,7 @@ function update_stats() {
   if (spectrum.paused)
     return;
 
-  // GPS time isn't UTC
+    // GPS time isn't UTC; it started at Sunday January 6, 1980 at 00:00:00 UTC and there have been 18 UTC leap seconds since
   var t = Number(gps_time) / 1e9;
   t+=315964800;
   t-=18;
@@ -1759,7 +1757,6 @@ function update_stats() {
     // fallback to empty if any error
   }
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom: ${zoomLevel}` : '');
-  document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   // Update the fft_avg_input value (number input)
   const fftAvgInput = document.getElementById('fft_avg_input');
   if (fftAvgInput) {

@@ -1861,15 +1861,12 @@ void *ctrl_thread(void *arg) {
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Channel.clocktime;
           ip += 2;
-          *(uint64_t *)ip = 0;
-          ip += 2;
           *(float *)ip++ = (float)Frontend.rf_atten;
           *(float *)ip++ = (float)Frontend.rf_gain;
           *(float *)ip++ = (float)Frontend.rf_level_cal;
           *(float *)ip++ = (float)power2dB(Frontend.if_power);
           *(float *)ip++ = (float)sp->noise_density_audio;
           *ip++ = (uint32_t)sp->zoom_index;
-          *ip++ = (uint32_t)1;
           *(float *)ip++ = (float)Channel.spectrum.base;
           *(float *)ip++ = (float)Channel.spectrum.step;
 
