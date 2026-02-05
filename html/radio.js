@@ -552,20 +552,7 @@ function applyQuickBW() {
                 }
               } catch (e) { /* ignore popup errors */ }
             }
-            var dataBuffer = evt.data.slice(i,data.byteLength);
-            if (4 == bin_precision_bytes) {
-              const arr = new Float32Array(dataBuffer);
-              spectrum.addData(arr);
-            }
-            else if (2 == bin_precision_bytes) {
-              const i16 = new Int16Array(dataBuffer);
-              const arr = new Float32Array(binCount);
-              for (i = 0; i < binCount; i++) {
-                arr[i] = 0.01 * i16[i];
-              }
-              spectrum.addData(arr);
-            }
-            else if (1 == bin_precision_bytes) {
+              var dataBuffer = evt.data.slice(i,data.byteLength);
               const i8 = new Uint8Array(dataBuffer);
               const arr = new Float32Array(binCount);
               // dynamic autorange of 8 bit bin levels, using offset/gain from webserver
@@ -573,8 +560,6 @@ function applyQuickBW() {
                 arr[i] = bins_autorange_offset + (bins_autorange_gain * i8[i]);
               }
               spectrum.addData(arr);
-            }
-
             /*
             if (pending_range_update) {
                 pending_range_update = false;

@@ -83,9 +83,9 @@ struct session {
   char requested_preset[32];
   float bins_min_db;
   float bins_max_db;
-  float bins_autorange_gain;
-  float bins_autorange_offset;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
+  float spectrum_base;
+  float spectrum_step;
   /* uint32_t last_poll_tag; */
 };
 
@@ -122,7 +122,6 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
-int bin_precision_bytes = 4;    // number of bytes/bin over the websocket connection
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
 
@@ -675,12 +674,6 @@ int main(int argc,char **argv) {
         case 'n':
           description_override=optarg;
           break;
-      case 'b':
-        bin_precision_bytes = atoi(optarg);
-        if ((bin_precision_bytes != 1) && (bin_precision_bytes != 2) && (bin_precision_bytes != 4)){
-          bin_precision_bytes = 4;      //default to float
-        }
-        break;
         case 'v':
           ++verbose;
           break;
@@ -872,8 +865,6 @@ onion_connection_status home(void *data, onion_request * req,
 
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
-  sp->bins_autorange_offset = -130;
-  sp->bins_autorange_gain = 0.1;
   strlcpy(sp->requested_preset,"am",sizeof(sp->requested_preset));
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
@@ -1306,7 +1297,7 @@ void stop_spectrum_stream(struct session *sp) {
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1);
   uint32_t tag = random();
   encode_int(&bp,COMMAND_TAG,tag);
-  encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
+  encode_int(&bp,DEMOD_TYPE,SPECT2_DEMOD);
   encode_double(&bp,RADIO_FREQUENCY,0);
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
@@ -1351,7 +1342,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1);
   uint32_t tag = random();
   encode_int(&bp,COMMAND_TAG,tag);
-  encode_int(&bp,DEMOD_TYPE,SPECT_DEMOD);
+  encode_int(&bp,DEMOD_TYPE,SPECT2_DEMOD);
   encode_double(&bp,RADIO_FREQUENCY,frequency);
   encode_int(&bp,BIN_COUNT,bins);
   encode_float(&bp,RESOLUTION_BW,bin_bw);
@@ -1437,8 +1428,9 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
   int l_ccount = 0;
   uint8_t const *cp = buffer;
   int l_count=1234567;
+  int64_t N = (Frontend.L + Frontend.M - 1);
 
-//fprintf(stderr,"%s: length=%d\n",__FUNCTION__,length);
+//fprintf(stderr,"%s: length=%d\n",__FUNCTION__,length);x
   while(cp - buffer < length){
     enum status_type const type = *cp++; // increment cp to length field
 
@@ -1471,7 +1463,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
     case DEMOD_TYPE:
      {
         const int i = decode_int(cp,optlen);
-        if(i != SPECT_DEMOD)
+        if(i != SPECT_DEMOD && i != SPECT2_DEMOD)
           return -3; // Not what we want
       }
       break;
@@ -1486,26 +1478,46 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       l_lo2 = decode_double(cp,optlen);
       break;
 #endif
+    case BIN_BYTE_DATA:
+      l_count = optlen / sizeof(uint8_t);
+      if(l_count > npower)
+        return -2; // Not enough room in caller's array
+
+      if (0 == N)
+         break;
+      for(int i=0; i < l_count; i++){
+	uint8_t j = decode_int8(cp,sizeof(uint8_t));
+	power[i] = j;
+        cp += sizeof(uint8_t);
+      }
+      break;
     case BIN_DATA:
       l_count = optlen/sizeof(float);
       if(l_count > npower)
         return -2; // Not enough room in caller's array
-      // Note these are still in FFT order
-      int64_t N = (Frontend.L + Frontend.M - 1);
       if (0 == N)
          break;
-      sp->bins_max_db = -9e99;
-      sp->bins_min_db = 9e99;
-      for(int i=0; i < l_count; i++){
-        power[i] = decode_float(cp,sizeof(float));
-        if (power[i] > sp->bins_max_db)
-          sp->bins_max_db = power[i];
-        if (power[i] < sp->bins_min_db)
-          sp->bins_min_db = power[i];
-        cp += sizeof(float);
+      sp->bins_max_db = -INFINITY;
+      sp->bins_min_db = +INFINITY;
+      // Reorder into monotonic frequency order
+      {
+	int i = l_count / 2; // DC
+	do {
+	  float p = decode_float(cp,sizeof(float)); // convert to dB here 
+	  p = power2dB(p);
+	  if(p == -INFINITY)
+	    p = -150;
+	  power[i] = p;
+	  if (p > sp->bins_max_db)
+	    sp->bins_max_db = p;
+	  if (p < sp->bins_min_db)
+	    sp->bins_min_db = p;
+	  cp += sizeof(float);
+	  i++;
+	  if(i == l_count)
+	    i = 0;
+	} while(i != l_count/2);
       }
-      sp->bins_min_db = (sp->bins_min_db == 0) ? -120 : 10.0 * log10(sp->bins_min_db);
-      sp->bins_max_db = (sp->bins_max_db == 0) ? -120 : 10.0 * log10(sp->bins_max_db);
       break;
     case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -1857,9 +1869,9 @@ void *ctrl_thread(void *arg) {
           *(float *)ip++ = (float)power2dB(Frontend.if_power);
           *(float *)ip++ = (float)sp->noise_density_audio;
           *ip++ = (uint32_t)sp->zoom_index;
-          *ip++ = (uint32_t)bin_precision_bytes;
-          *(float *)ip++ = (float)sp->bins_autorange_offset;
-          *(float *)ip++ = (float)sp->bins_autorange_gain;
+          *ip++ = (uint32_t)1;
+          *(float *)ip++ = (float)Channel.spectrum.base;
+          *(float *)ip++ = (float)Channel.spectrum.step;
 
           int header_size=(uint8_t*)ip-&output_buffer[0];
           int length=(PKTSIZE-header_size)/sizeof(float);
@@ -1886,91 +1898,12 @@ void *ctrl_thread(void *arg) {
           /*   } */
           /* } */
           int size;
-          switch(bin_precision_bytes) {
-            default:
-            case 4:
-            {
-              float *fp=(float*)ip;
-              // below center
-              for(int i=npower/2; i < npower; i++) {
-                *fp++=(powers[i] == 0) ? -120.0 : 10*log10f(powers[i]);
-              }
-              // above center
-              for(int i=0; i < npower/2; i++) {
-                *fp++=(powers[i] == 0) ? -120.0 : 10*log10f(powers[i]);
-              }
-              size=(uint8_t*)fp-&output_buffer[0];
-            }
-            break;
-
-            case 2:
-            {
-              int16_t *fp=(int16_t*)ip;
-              // below center
-              for(int i=npower/2; i < npower; i++) {
-                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10f(powers[i]);
-                powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
-                powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
-                *fp++=powers[i] * 100.0;
-              }
-              // above center
-              for(int i=0; i < npower/2; i++) {
-                powers[i] = (powers[i] == 0.0) ? -327.0 : 10.0 * log10f(powers[i]);
-                powers[i] = (powers[i] > 327.0) ? 327.0 : powers[i];
-                powers[i] = (powers[i] < -327.0) ? -327.0 : powers[i];
-                *fp++=powers[i] * 100.0;
-              }
-              size=(uint8_t*)fp-&output_buffer[0];
-            }
-            break;
-
-            case 1:
-            {
-              // 8 bit mode, so scale bin levels to fit 0-255
-              bool rescale = false;
-              if (sp->bins_min_db < sp->bins_autorange_offset){
-                // at least one bin would be under range, so rescale
-                rescale = true;
-              }
-              if (sp->bins_max_db > (sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain))){
-                // at least one bin would be over range, so rescale
-                rescale = true;
-              }
-              if ((sp->bins_max_db - sp->bins_min_db) < (0.5 * (255.0 * sp->bins_autorange_gain))){
-                // all bins are using less than 50% of the current range
-                if ((255.0 * sp->bins_autorange_gain) > 41){
-                  // and the current range is >41 dB, so rescale to fit
-                  rescale = true;
-                }
-              }
-
-              if (rescale){
-                // pick a floor that's below the weakest bin, rounded to a 10 dB increment
-                sp->bins_autorange_offset = 10.0 * (int)((sp->bins_min_db / 10.0) - 1);
-
-                // pick a scale factor above the hottest bin, also rounded to a 10 dB increment
-                sp->bins_autorange_gain = ((10.0 * (int)((sp->bins_max_db / 10.0) + 1)) - sp->bins_autorange_offset) / 255.0;
-                if (sp->bins_autorange_gain == 0)
-                  sp->bins_autorange_gain = 1;
-
-                //fprintf(stderr,"offset: %.2f dB, gain: %.2f db/increment min: %.2f dBm, max: %.2f dBm, range: %.2f db fs: %.2f dBm\n", sp->bins_autorange_offset, sp->bins_autorange_gain, sp->bins_min_db, sp->bins_max_db, sp->bins_max_db - sp->bins_min_db, sp->bins_autorange_offset + (255.0 * sp->bins_autorange_gain));
-              }
-              uint8_t *fp=(uint8_t*)ip;
-              // below center
-              for(int i=npower/2; i < npower; i++) {
-                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10f(powers[i]);
-                *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
-              }
-              // above center
-              for(int i=0; i < npower/2; i++) {
-                powers[i] = (powers[i] == 0.0) ? -127.0 : 10.0 * log10f(powers[i]);
-                *fp++ = ((powers[i] - sp->bins_autorange_offset) / sp->bins_autorange_gain);       // should be 0-255 now
-              }
-              size=(uint8_t*)fp-&output_buffer[0];
-            }
-            break;
-          }
-
+	  // radiod now scales to 255 levels in byte mode
+	  uint8_t *fp=(uint8_t*)ip;
+	  for(int i=0; i < npower; i++) {
+	    *fp++ = powers[i];
+	  }
+	  size=(uint8_t*)fp-&output_buffer[0];
           // send the spectrum data to the client
           pthread_mutex_lock(&sp->ws_mutex);
           onion_websocket_set_opcode(sp->ws,OWS_BINARY);
