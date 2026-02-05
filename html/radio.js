@@ -909,8 +909,8 @@ function applyQuickBW() {
         // only handle left mouse button
         if ('button' in evt && evt.button !== 0) {
           multiplier = base;
-        } else if (evt.ctrlKey) {
-          // If Ctrl held: for single-step +/-, use 10 Hz; for < or > (base==10) use 100 Hz
+        } else if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
+          // If Alt-button active: for single-step +/-, use 10 Hz; for < or > (base==10) use 100 Hz
           const targetHz = (base === 10) ? 100 : 10;
           multiplier = targetHz / increment;
         } else {
@@ -936,7 +936,7 @@ function applyQuickBW() {
         const base = (typeof b === 'number') ? b : 1;
         if ('button' in evt && evt.button !== 0) {
           multiplier = base;
-        } else if (evt.ctrlKey) {
+        } else if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
           const targetHz = (base === 10) ? 100 : 10;
           multiplier = targetHz / increment;
         } else {
@@ -954,6 +954,40 @@ function applyQuickBW() {
         clearInterval(counter);
     }
 
+    // Alternate frequency buttons toggle
+    // Controls visual state of the "Alt" button and exposes a getter
+    (function(){
+      let alternateFreqActive = false;
+
+      function updateAltButton(){
+        const btn = document.getElementById('alternate_freq_buttons');
+        if(!btn) return;
+        btn.classList.toggle('alt-active', alternateFreqActive);
+        btn.setAttribute('aria-pressed', alternateFreqActive ? 'true' : 'false');
+        btn.title = alternateFreqActive ? 'Alternate frequency buttons: ACTIVE' : 'Alternate frequency buttons: inactive';
+      }
+
+      function toggleAlternateFreq(){
+        alternateFreqActive = !alternateFreqActive;
+        updateAltButton();
+        if(window.console) console.log('alternateFreqActive =', alternateFreqActive);
+      }
+
+      window.isAlternateFreqActive = function(){ return alternateFreqActive; };
+      window.toggleAlternateFreq = toggleAlternateFreq;
+
+      // attach handler when button exists
+      function attach(){
+        const btn = document.getElementById('alternate_freq_buttons');
+        if(!btn) return;
+        btn.addEventListener('click', toggleAlternateFreq);
+        updateAltButton();
+      }
+
+      if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach);
+      else attach();
+    })();
+
     // ...existing code...
 
     let incrementing = false;
@@ -961,8 +995,9 @@ function applyQuickBW() {
     let currentMultiplier = 1;
 
     document.addEventListener('keydown', function(e) {
-      // Shift + Ctrl + Right Arrow
-      if (e.shiftKey && e.ctrlKey && e.code === 'ArrowRight') {
+      // Shift + Right Arrow with Alt-button active -> larger multiplier
+      const altActive = (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive());
+      if (e.shiftKey && altActive && e.code === 'ArrowRight') {
         if (!incrementing) {
           currentMultiplier = 10;
           startIncrement(currentMultiplier);
@@ -970,8 +1005,8 @@ function applyQuickBW() {
         }
         e.preventDefault();
       }
-      // Shift + Ctrl + Left Arrow
-      else if (e.shiftKey && e.ctrlKey && e.code === 'ArrowLeft') {
+      // Shift + Left Arrow with Alt-button active -> larger multiplier
+      else if (e.shiftKey && altActive && e.code === 'ArrowLeft') {
         if (!decrementing) {
           currentMultiplier = 10;
           startDecrement(currentMultiplier);
@@ -979,7 +1014,7 @@ function applyQuickBW() {
         }
         e.preventDefault();
       }
-      // Shift + Right Arrow (no Ctrl)
+      // Shift + Right Arrow (no Alt-button)
       else if (e.shiftKey && e.code === 'ArrowRight') {
         if (!incrementing) {
           currentMultiplier = 1;
@@ -988,7 +1023,7 @@ function applyQuickBW() {
         }
         e.preventDefault();
       }
-      // Shift + Left Arrow (no Ctrl)
+      // Shift + Left Arrow (no Alt-button)
       else if (e.shiftKey && e.code === 'ArrowLeft') {
         if (!decrementing) {
           currentMultiplier = 1;
@@ -1103,9 +1138,9 @@ function applyQuickBW() {
         if (!spectrum.checkFrequencyIsValid(f)) {
             return;
         }
-        // If the user held Ctrl while clicking the Set button, round to nearest 1 kHz
+        // If the Alt-button is active when clicking the Set button, round to nearest 1 kHz
         try {
-          if (evt && evt.ctrlKey) {
+          if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
             f = Math.round(f / 1000.0) * 1000.0;
             document.getElementById("freq").value = (f / 1000.0).toFixed(3);
           }
