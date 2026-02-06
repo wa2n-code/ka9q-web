@@ -72,6 +72,7 @@ struct session {
   uint32_t bin_width;
   float tc;
   int bins;
+  char spectrum_shape[64];
   char description[128];
   char client[128];
   struct session *next;
@@ -97,6 +98,7 @@ extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
 extern void control_set_spectrum_average(struct session *sp, char *val_str);
+extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -505,6 +507,17 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
             control_set_spectrum_average(sp, avg);
             //fprintf(stderr, "%s: forwarded spectrum average g:%s to control socket\n", __FUNCTION__, avg);
             fflush(stderr);
+          }
+        }
+        break;
+      case 'w':
+      case 'W':
+        {
+          // Expect format: w:<TYPE>:<PARAM>
+          char *type = strtok(NULL, ":");
+          char *param = strtok(NULL, ":");
+          if (type != NULL) {
+            control_set_window_type(sp, type, param ? param : "");
           }
         }
         break;
@@ -1224,6 +1237,52 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   } else {
     /* fprintf(stderr, "%s: sent SPECTRUM_AVG=%d (len=%d) to control fd=%d\n", __FUNCTION__, val, command_len, Ctl_fd); */
     /* fflush(stderr); */
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Send window type (UINT) to control socket for this session and save spectrum shape locally
+   type_str expected to be names like "KAISER_WINDOW", "GAUSSIAN_WINDOW", etc.
+   shape_str is saved in session->spectrum_shape but not sent to backend for now. */
+void control_set_window_type(struct session *sp, char *type_str, char *shape_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  int val = 0; /* default to KAISER_WINDOW */
+
+  if (type_str && strlen(type_str) > 0) {
+    if (strcmp(type_str, "KAISER_WINDOW") == 0) val = 0;
+    else if (strcmp(type_str, "RECT_WINDOW") == 0) val = 1;
+    else if (strcmp(type_str, "BLACKMAN_WINDOW") == 0) val = 2;
+    else if (strcmp(type_str, "EXACT_BLACKMAN_WINDOW") == 0) val = 3;
+    else if (strcmp(type_str, "GAUSSIAN_WINDOW") == 0) val = 4;
+    else if (strcmp(type_str, "HANN_WINDOW") == 0) val = 5;
+    else if (strcmp(type_str, "HAMMING_WINDOW") == 0) val = 6;
+    else if (strcmp(type_str, "BLACKMAN_HARRIS_WINDOW") == 0) val = 7;
+    else if (strcmp(type_str, "HP5FT_WINDOW") == 0) val = 8;
+    else if (strcmp(type_str, "N_WINDOW") == 0) val = 9;
+    else val = 0;
+  }
+
+  /* save shape string in session for later use */
+  if (sp && shape_str) {
+    strncpy(sp->spectrum_shape, shape_str, sizeof(sp->spectrum_shape)-1);
+    sp->spectrum_shape[sizeof(sp->spectrum_shape)-1] = '\0';
+  }
+
+  int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* target spectrum stream (ssrc+1) */
+
+  *bp++ = CMD; // Command
+  /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
+  encode_int(&bp, OUTPUT_SSRC, target_ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  /* Encode window type as integer using tag WINDOW_TYPE (status.h) */
+  encode_int(&bp, WINDOW_TYPE, val);
+  encode_eol(&bp);
+
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
   }
   pthread_mutex_unlock(&ctl_mutex);
 }

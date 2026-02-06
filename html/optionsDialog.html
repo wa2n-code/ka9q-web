@@ -71,6 +71,23 @@
          <button id="clear_overlay" type="button" style="font-size:12px; padding:2px 4px; min-width:0; min-height:0; height:24px; margin-top:4px; margin-left:4px;" title="Clear loaded overlay trace">Clear</button>
          <button type="button" id="cw_save_button" style="font-size:12px; padding:2px 6px; min-width:0; min-height:0; height:24px; margin-top:4px; margin-left:6px;" title="Save QuickBW offsets">Save QuickBW</button>
       </div>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+         <label for="windowTypeSelect" style="font-size:12px; margin-right:6px;">Window Type:</label>
+         <select id="windowTypeSelect" style="font-size:12px; width:135px;">
+            <option value="KAISER_WINDOW">KAISER</option>
+            <option value="RECT_WINDOW">RECT</option>
+            <option value="BLACKMAN_WINDOW">BLACKMAN</option>
+            <option value="EXACT_BLACKMAN_WINDOW">EXACT BLACKMAN</option>
+            <option value="GAUSSIAN_WINDOW">GAUSSIAN</option>
+            <option value="HANN_WINDOW">HANN</option>
+            <option value="HAMMING_WINDOW">HAMMING</option>
+            <option value="BLACKMAN_HARRIS_WINDOW">BLACKMAN HARRIS</option>
+            <option value="HP5FT_WINDOW">HP5FT</option>
+            <option value="N_WINDOW">N</option>
+         </select>
+         <input type="text" id="spectrumShapeInput" placeholder="spectrum shape" title="Spectrum shape parameter — applicable only to KAISER (beta 0 to 15) and GAUSSIAN (alpha 2.5 to 6). Other windows ignore this value." style="width:48px; font-size:12px; margin-left:6px;">
+         <button type="button" id="sendWindowParamButton" style="font-size:12px; padding:2px 6px; height:24px; margin-left:6px;" onclick="sendWindowParameter()">SendW</button>
+      </div>
      </form>
 </div>
    <!-- Script for Show Band Edges moved to radio.js: setShowBandEdges, persistence and initialization are handled centrally in radio.js -->

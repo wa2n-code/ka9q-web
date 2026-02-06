@@ -139,6 +139,8 @@
       var enableBandEdges = false;
       // pending spectrum average to send once websocket opens
       var pendingSpectrumAverage = null;
+      // pending window prefs to send once websocket opens
+      var pendingWindowPrefs = null;
 
       /** @type {number} */
       window.skipWaterfallLines = 0; // Set to how many lines to skip drawing waterfall (0 = none)
@@ -305,6 +307,13 @@ function applyQuickBW() {
             ws.send('g:' + spectrum_average.toString());
           }
         } catch (e) { console.error('Failed to flush/send spectrum average', e); }
+        // Flush queued window prefs if any
+        try {
+          if (pendingWindowPrefs && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''));
+            pendingWindowPrefs = null;
+          }
+        } catch (e) { console.error('Failed to flush/send window prefs', e); }
         // create debug overlay when WS opens
         try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
       }
@@ -329,6 +338,105 @@ function applyQuickBW() {
         } else {
           console.warn('WebSocket not open, cannot send spectrum poll');
         }
+      }
+
+      // Send selected window type and parameter to backend via WebSocket
+      function sendWindowParameter() {
+        const tEl = document.getElementById('windowTypeSelect');
+        const pEl = document.getElementById('spectrumShapeInput');
+        if (!tEl || !pEl) return;
+        const t = tEl.value;
+        const p = (pEl.value || '').trim();
+        console.log('sendWindowParameter', t, p);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            // Format: w:<WINDOW_TYPE>:<PARAM>
+            ws.send('w:' + t + ':' + p);
+            // persist selection when sent
+            try { saveWindowPrefs(); } catch (e) {}
+          } catch (e) { console.error('Failed to send window parameter', e); }
+        } else {
+          console.warn('WebSocket not open, cannot send window parameter');
+          // still persist selection locally
+          try { saveWindowPrefs(); } catch (e) {}
+        }
+      }
+
+      // Persist/load window selection and spectrum shape to/from localStorage
+      function saveWindowPrefs() {
+        try {
+          const tEl = document.getElementById('windowTypeSelect');
+          const pEl = document.getElementById('spectrumShapeInput');
+          if (tEl && window.localStorage) localStorage.setItem('windowType', tEl.value);
+          if (pEl && window.localStorage) localStorage.setItem('spectrumShape', pEl.value);
+        } catch (e) { console.warn('saveWindowPrefs failed', e); }
+      }
+
+      function loadWindowPrefs(attempts) {
+        attempts = (typeof attempts === 'number') ? attempts : 10;
+        try {
+          if (!window.localStorage) return;
+          const tVal = localStorage.getItem('windowType');
+          const pVal = localStorage.getItem('spectrumShape');
+          const tEl = document.getElementById('windowTypeSelect');
+          const pEl = document.getElementById('spectrumShapeInput');
+          if (!tEl || !pEl) {
+            if (attempts > 0) {
+              setTimeout(() => loadWindowPrefs(attempts - 1), 200);
+            }
+            return;
+          }
+          if (tEl && tVal) {
+            let found = false;
+            for (let i = 0; i < tEl.options.length; i++) {
+              if (tEl.options[i].value === tVal) { tEl.selectedIndex = i; found = true; break; }
+            }
+            if (!found) {
+              // try matching display text (in case values changed)
+              for (let i = 0; i < tEl.options.length; i++) {
+                if (tEl.options[i].text === tVal) { tEl.selectedIndex = i; found = true; break; }
+              }
+            }
+          }
+          if (pEl && pVal) pEl.value = pVal;
+          // attach listeners once elements are present
+          attachWindowOptionsListeners();
+          // queue or send loaded prefs to backend
+          try {
+            const t = tEl ? tEl.value : null;
+            const p = pEl ? (pEl.value || '').trim() : '';
+            if (t) {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try { ws.send('w:' + t + ':' + p); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
+              } else {
+                pendingWindowPrefs = { t: t, p: p };
+              }
+            }
+          } catch (e) { console.warn('Failed to queue/send loaded window prefs', e); }
+        } catch (e) { console.warn('loadWindowPrefs failed', e); }
+      }
+
+      function attachWindowOptionsListeners() {
+        try {
+          const tEl = document.getElementById('windowTypeSelect');
+          const pEl = document.getElementById('spectrumShapeInput');
+          if (tEl && !tEl.dataset.windowPrefsBound) {
+            tEl.addEventListener('change', saveWindowPrefs);
+            tEl.dataset.windowPrefsBound = '1';
+          }
+          if (pEl && !pEl.dataset.windowPrefsBound) {
+            pEl.addEventListener('input', saveWindowPrefs);
+            pEl.addEventListener('change', saveWindowPrefs);
+            pEl.dataset.windowPrefsBound = '1';
+          }
+        } catch (e) { console.warn('attachWindowOptionsListeners failed', e); }
+      }
+
+      // Initialize persistence and listeners when DOM is ready (and retry if elements load later)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { loadWindowPrefs(10); }, { once: true });
+      } else {
+        try { loadWindowPrefs(10); } catch (e) {}
       }
 
       // Send filter edge settings (low and high) to the server via websocket
