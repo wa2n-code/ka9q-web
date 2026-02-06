@@ -98,6 +98,7 @@
       var gps_time = 0;
       var input_samples = 0;
       var input_samprate = 0;
+      var noise_bw = 0;
       var rf_gain = 0;
       var rf_atten = 0;
       var rf_level_cal = 0;
@@ -496,14 +497,13 @@ function applyQuickBW() {
             ad_over = view.getBigUint64(i,true); i+=8;
             samples_since_over = view.getBigUint64(i,true); i+=8;
             gps_time = view.getBigUint64(i,true); i+=8;
-            blocks_since_last_poll = view.getBigUint64(i,true); i+=8;
+	      noise_bw = view.getFloat32(i,true); i+= 4;
             rf_atten = view.getFloat32(i,true); i+=4;
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
             if_power = view.getFloat32(i,true); i+=4;
             noise_density_audio = view.getFloat32(i,true); i+=4;
             const z_level = view.getUint32(i,true); i+=4;
-            const bin_precision_bytes = view.getUint32(i,true); i+=4;
             const bins_autorange_offset =  view.getFloat32(i,true); i+=4;
             const bins_autorange_gain =  view.getFloat32(i,true); i+=4;
 
@@ -552,20 +552,7 @@ function applyQuickBW() {
                 }
               } catch (e) { /* ignore popup errors */ }
             }
-            var dataBuffer = evt.data.slice(i,data.byteLength);
-            if (4 == bin_precision_bytes) {
-              const arr = new Float32Array(dataBuffer);
-              spectrum.addData(arr);
-            }
-            else if (2 == bin_precision_bytes) {
-              const i16 = new Int16Array(dataBuffer);
-              const arr = new Float32Array(binCount);
-              for (i = 0; i < binCount; i++) {
-                arr[i] = 0.01 * i16[i];
-              }
-              spectrum.addData(arr);
-            }
-            else if (1 == bin_precision_bytes) {
+              var dataBuffer = evt.data.slice(i,data.byteLength);
               const i8 = new Uint8Array(dataBuffer);
               const arr = new Float32Array(binCount);
               // dynamic autorange of 8 bit bin levels, using offset/gain from webserver
@@ -573,8 +560,6 @@ function applyQuickBW() {
                 arr[i] = bins_autorange_offset + (bins_autorange_gain * i8[i]);
               }
               spectrum.addData(arr);
-            }
-
             /*
             if (pending_range_update) {
                 pending_range_update = false;
@@ -1732,7 +1717,7 @@ function update_stats() {
   if (spectrum.paused)
     return;
 
-  // GPS time isn't UTC
+    // GPS time isn't UTC; it started at Sunday January 6, 1980 at 00:00:00 UTC and there have been 18 UTC leap seconds since
   var t = Number(gps_time) / 1e9;
   t+=315964800;
   t-=18;
@@ -1751,6 +1736,7 @@ function update_stats() {
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toLocaleString();
   let seconds_since_over = Number(samples_since_over) / Number(input_samprate);
   document.getElementById('adc_last_over').innerHTML = "Last overrange: " + formatUptimeDHMS(Number(seconds_since_over));
+    document.getElementById('noise_bw').innerHTML = "Noise BW: " + noise_bw.toFixed(1) + " Hz " + (10*Math.log10(noise_bw/binWidthHz)).toFixed(1) + " dB";
   document.getElementById('uptime').innerHTML = "Uptime: " + formatUptimeDHMS(smp);
   document.getElementById('rf_gain').innerHTML = "RF Gain: " + rf_gain.toFixed(1) + " dB";
   document.getElementById('rf_attn').innerHTML = "RF Atten: " + rf_atten.toFixed(1) + " dB";
@@ -1774,7 +1760,6 @@ function update_stats() {
     // fallback to empty if any error
   }
   document.getElementById('hz_per_bin').textContent = `Bin width: ${binWidthHz.toLocaleString()} Hz` + (zoomLevel !== '' ? `, Zoom: ${zoomLevel}` : '');
-  document.getElementById('blocks').innerHTML = "Blocks/poll: " + blocks_since_last_poll.toString();
   // Update the fft_avg_input value (number input)
   const fftAvgInput = document.getElementById('fft_avg_input');
   if (fftAvgInput) {
