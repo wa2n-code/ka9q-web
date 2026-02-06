@@ -98,6 +98,7 @@
       var gps_time = 0;
       var input_samples = 0;
       var input_samprate = 0;
+      var noise_bw = 0;
       var rf_gain = 0;
       var rf_atten = 0;
       var rf_level_cal = 0;
@@ -496,6 +497,7 @@ function applyQuickBW() {
             ad_over = view.getBigUint64(i,true); i+=8;
             samples_since_over = view.getBigUint64(i,true); i+=8;
             gps_time = view.getBigUint64(i,true); i+=8;
+	      noise_bw = view.getFloat32(i,true); i+= 4;
             rf_atten = view.getFloat32(i,true); i+=4;
             rf_gain = view.getFloat32(i,true); i+=4;
             rf_level_cal = view.getFloat32(i,true); i+=4;
@@ -1734,6 +1736,7 @@ function update_stats() {
   document.getElementById('adc_overs').innerHTML = "Overranges: " + ad_over.toLocaleString();
   let seconds_since_over = Number(samples_since_over) / Number(input_samprate);
   document.getElementById('adc_last_over').innerHTML = "Last overrange: " + formatUptimeDHMS(Number(seconds_since_over));
+    document.getElementById('noise_bw').innerHTML = "Noise BW: " + noise_bw.toFixed(1) + " Hz " + (10*Math.log10(noise_bw/binWidthHz)).toFixed(1) + " dB";
   document.getElementById('uptime').innerHTML = "Uptime: " + formatUptimeDHMS(smp);
   document.getElementById('rf_gain').innerHTML = "RF Gain: " + rf_gain.toFixed(1) + " dB";
   document.getElementById('rf_attn').innerHTML = "RF Atten: " + rf_atten.toFixed(1) + " dB";

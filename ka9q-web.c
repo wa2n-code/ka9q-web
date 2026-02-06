@@ -1861,6 +1861,7 @@ void *ctrl_thread(void *arg) {
           ip += 2;
           *(uint64_t *)ip = (uint64_t)Channel.clocktime;
           ip += 2;
+	  *(float *)ip++ = (float)Channel.spectrum.noise_bw;
           *(float *)ip++ = (float)Frontend.rf_atten;
           *(float *)ip++ = (float)Frontend.rf_gain;
           *(float *)ip++ = (float)Frontend.rf_level_cal;
