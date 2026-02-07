@@ -368,7 +368,11 @@ function applyQuickBW() {
           const tEl = document.getElementById('windowTypeSelect');
           const pEl = document.getElementById('spectrumShapeInput');
           if (tEl && window.localStorage) localStorage.setItem('windowType', tEl.value);
-          if (pEl && window.localStorage) localStorage.setItem('spectrumShape', pEl.value);
+          if (pEl && window.localStorage) {
+            const v = (pEl.value || '').trim();
+            if (v !== '') localStorage.setItem('spectrumShape', v);
+            else localStorage.removeItem('spectrumShape');
+          }
         } catch (e) { console.warn('saveWindowPrefs failed', e); }
       }
 
@@ -398,9 +402,28 @@ function applyQuickBW() {
               }
             }
           }
-          if (pEl && pVal) pEl.value = pVal;
+          if (pEl) {
+            if (pVal) {
+              pEl.value = pVal;
+            } else {
+              // No stored spectrumShape: apply defaults based on selected or stored window type
+              var winType = tVal || (tEl ? tEl.value : null);
+              if (!winType && tEl) winType = tEl.value;
+              if (winType === 'KAISER_WINDOW') pEl.value = '7.0';
+              else if (winType === 'GAUSSIAN_WINDOW') pEl.value = '2.5';
+              // otherwise leave blank
+            }
+            // enable/disable input depending on selected window type
+            try {
+              var curWin = tEl ? tEl.value : null;
+              if (curWin === 'KAISER_WINDOW' || curWin === 'GAUSSIAN_WINDOW') pEl.disabled = false;
+              else pEl.disabled = true;
+            } catch (e) {}
+          }
           // attach listeners once elements are present
           attachWindowOptionsListeners();
+          // If the options dialog provided a global update function, call it
+          try { if (window.updateSpectrumShapeStateForOptionsDialog) window.updateSpectrumShapeStateForOptionsDialog(); } catch (e) {}
           // queue or send loaded prefs to backend
           try {
             const t = tEl ? tEl.value : null;
@@ -420,17 +443,65 @@ function applyQuickBW() {
         try {
           const tEl = document.getElementById('windowTypeSelect');
           const pEl = document.getElementById('spectrumShapeInput');
+          // Do not persist preferences on change/input. Persist only when
+          // the user explicitly presses the SendW button (sendWindowParameter()).
+          // Keep a bound flag to avoid repeated work, but don't attach save handlers.
           if (tEl && !tEl.dataset.windowPrefsBound) {
-            tEl.addEventListener('change', saveWindowPrefs);
             tEl.dataset.windowPrefsBound = '1';
           }
           if (pEl && !pEl.dataset.windowPrefsBound) {
-            pEl.addEventListener('input', saveWindowPrefs);
-            pEl.addEventListener('change', saveWindowPrefs);
             pEl.dataset.windowPrefsBound = '1';
           }
         } catch (e) { console.warn('attachWindowOptionsListeners failed', e); }
       }
+
+      // Options dialog spectrum-shape behavior (moved from inline script)
+      (function() {
+        function getEls() { return { sel: document.getElementById('windowTypeSelect'), input: document.getElementById('spectrumShapeInput') }; }
+        var hadStoredShape = null;
+
+        function updateSpectrumShapeState() {
+          const els = getEls();
+          if (!els.sel || !els.input) return;
+          const val = els.sel.value;
+          const enabled = (val === 'KAISER_WINDOW' || val === 'GAUSSIAN_WINDOW');
+          els.input.disabled = !enabled;
+          const storedShape = localStorage.getItem('spectrumShape');
+          if (storedShape !== null && storedShape !== '') {
+            els.input.value = storedShape;
+          } else {
+            if (enabled) {
+              if (val === 'KAISER_WINDOW') els.input.value = '7.0';
+              else if (val === 'GAUSSIAN_WINDOW') els.input.value = '2.5';
+            }
+          }
+        }
+
+        // expose for compatibility and external calls
+        window.updateSpectrumShapeStateForOptionsDialog = updateSpectrumShapeState;
+
+        function initOptionsDialogSpectrum() {
+          hadStoredShape = !!localStorage.getItem('spectrumShape');
+          const els = getEls();
+          if (!els.sel || !els.input) { setTimeout(initOptionsDialogSpectrum, 200); return; }
+          const storedWin = localStorage.getItem('windowType');
+          if (storedWin) els.sel.value = storedWin;
+          const storedShape = localStorage.getItem('spectrumShape');
+          if (storedShape !== null && storedShape !== '') els.input.value = storedShape;
+          else {
+            if (els.sel.value === 'KAISER_WINDOW') els.input.value = '7.0';
+            else if (els.sel.value === 'GAUSSIAN_WINDOW') els.input.value = '2.5';
+          }
+          updateSpectrumShapeState();
+          // attach direct and document-level listeners
+          els.sel.addEventListener('change', updateSpectrumShapeState);
+          document.addEventListener('change', function(e) { if (e && e.target && e.target.id === 'windowTypeSelect') updateSpectrumShapeState(); });
+          document.addEventListener('input', function(e) { if (e && e.target && e.target.id === 'windowTypeSelect') updateSpectrumShapeState(); });
+        }
+
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOptionsDialogSpectrum, { once: true });
+        else initOptionsDialogSpectrum();
+      })();
 
       // Initialize persistence and listeners when DOM is ready (and retry if elements load later)
       if (document.readyState === 'loading') {
