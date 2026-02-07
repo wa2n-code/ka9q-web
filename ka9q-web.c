@@ -72,7 +72,6 @@ struct session {
   uint32_t bin_width;
   float tc;
   int bins;
-  char spectrum_shape[64];
   char description[128];
   char client[128];
   struct session *next;
@@ -1242,8 +1241,7 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
 }
 
 /* Send window type (UINT) to control socket for this session and save spectrum shape locally
-   type_str expected to be names like "KAISER_WINDOW", "GAUSSIAN_WINDOW", etc.
-   shape_str is saved in session->spectrum_shape but not sent to backend for now. */
+   type_str expected to be names like "KAISER_WINDOW", "GAUSSIAN_WINDOW", etc. */
 void control_set_window_type(struct session *sp, char *type_str, char *shape_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
@@ -1259,15 +1257,9 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
     else if (strcmp(type_str, "HAMMING_WINDOW") == 0) val = 6;
     else if (strcmp(type_str, "BLACKMAN_HARRIS_WINDOW") == 0) val = 7;
     else if (strcmp(type_str, "HP5FT_WINDOW") == 0) val = 8;
-    else if (strcmp(type_str, "N_WINDOW") == 0) val = 9;
     else val = 0;
   }
 
-  /* save shape string in session for later use */
-  if (sp && shape_str) {
-    strncpy(sp->spectrum_shape, shape_str, sizeof(sp->spectrum_shape)-1);
-    sp->spectrum_shape[sizeof(sp->spectrum_shape)-1] = '\0';
-  }
 
   int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* target spectrum stream (ssrc+1) */
 
@@ -1277,6 +1269,10 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
   encode_int(&bp, COMMAND_TAG, arc4random());
   /* Encode window type as integer using tag WINDOW_TYPE (status.h) */
   encode_int(&bp, WINDOW_TYPE, val);
+  if (sp && shape_str){
+    double shape = strtod(shape_str,NULL);
+    encode_float(&bp,SPECTRUM_SHAPE,shape);
+  }
   encode_eol(&bp);
 
   int const command_len = bp - cmdbuffer;

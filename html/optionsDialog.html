@@ -83,7 +83,6 @@
             <option value="HAMMING_WINDOW">HAMMING</option>
             <option value="BLACKMAN_HARRIS_WINDOW">BLACKMAN HARRIS</option>
             <option value="HP5FT_WINDOW">HP5FT</option>
-            <option value="N_WINDOW">N</option>
          </select>
          <input type="text" id="spectrumShapeInput" placeholder="shape" title="Spectrum shape parameter — applicable only to KAISER (beta 0 to 15) and GAUSSIAN (alpha 2.5 to 6). Other windows ignore this value." style="width:48px; font-size:12px; margin-left:6px;">
          <button type="button" id="sendWindowParamButton" title="Send window type and shape to radiod" style="font-size:12px; padding:2px 6px; height:24px; margin-left:6px;" onclick="sendWindowParameter()">SendW</button>
