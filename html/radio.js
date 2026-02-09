@@ -3023,9 +3023,9 @@ async function fetchZoomTableSize() {
 // --- Hardcoded zoom table to match ka9q-web.c ---
 // This must be available before overlays or zoom logic is used
 window.zoomTable = [
-  { bin_width: 100000, bin_count: 1620 },
-  { bin_width: 80000, bin_count: 1620 },
-  { bin_width: 50000, bin_count: 1620 },
+ // { bin_width: 100000, bin_count: 1620 },
+ // { bin_width: 80000, bin_count: 1620 },
+ // { bin_width: 50000, bin_count: 1620 },
   { bin_width: 40000, bin_count: 1620 },
   { bin_width: 20000, bin_count: 1620 },
   { bin_width: 10000, bin_count: 1620 },
