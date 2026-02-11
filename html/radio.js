@@ -332,7 +332,7 @@ function applyQuickBW() {
                 try { ws.send('v:' + ovVal); console.log('Sent deferred spectrum overlap on WS open', ovVal); } catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
               }
             } catch (e) {}
-          }, 5000);
+          }, 10000);
         } catch (e) {}
       }
 
