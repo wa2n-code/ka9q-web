@@ -277,6 +277,7 @@ function applyQuickBW() {
         updateCWMarker();
         // can we load the saved frequency/zoom/preset here?
         ws.send("M:" + target_preset);
+          // Auto-send of stored spectrum overlap suppressed for testing; use SendOv button to send manually
         //ws.send("Z:" + (22 - target_zoom_level).toString());
         ws.send("Z:" + (target_zoom_level).toString());
         ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
@@ -317,8 +318,22 @@ function applyQuickBW() {
             pendingWindowPrefs = null;
           }
         } catch (e) { console.error('Failed to flush/send window prefs', e); }
+        // Auto-send of stored spectrum overlap suppressed for testing; use SendOv button to send manually
         // create debug overlay when WS opens
         try { createCWDebugOverlay(); updateCWDebugOverlay(); } catch (e) {}
+
+        // Deferred auto-send of stored spectrum overlap to give backend time to process startup commands
+        try {
+          setTimeout(() => {
+            try {
+              let ovVal = null;
+              try { ovVal = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null; } catch (e) { ovVal = null; }
+              if (ovVal !== null && ovVal !== '' && ws && ws.readyState === WebSocket.OPEN) {
+                try { ws.send('v:' + ovVal); console.log('Sent deferred spectrum overlap on WS open', ovVal); } catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
+              }
+            } catch (e) {}
+          }, 5000);
+        } catch (e) {}
       }
 
       // Send a request to the server to change the spectrum poll interval (milliseconds).
@@ -350,7 +365,7 @@ function applyQuickBW() {
         if (!tEl || !pEl) return;
         const t = tEl.value;
         const p = (pEl.value || '').trim();
-        console.log('sendWindowParameter', t, p);
+        //console.log('sendWindowParameter', t, p);
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
             // Format: w:<WINDOW_TYPE>:<PARAM>
@@ -362,6 +377,28 @@ function applyQuickBW() {
           console.warn('WebSocket not open, cannot send window parameter');
           // still persist selection locally
           try { saveWindowPrefs(); } catch (e) {}
+        }
+      }
+
+      // Send spectrum overlap (float 0 <= x < 1) to backend
+      function sendSpectrumOverlap() {
+        const el = document.getElementById('spectrumOverlapInput');
+        if (!el) return;
+        const v = parseFloat(el.value);
+        if (!isFinite(v) || v < 0 || v >= 1) {
+          console.warn('Invalid spectrum overlap value', el.value);
+          return;
+        }
+        // Format matches console interface: 'v:<float>'
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send('v:' + v.toString());
+            try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
+            //console.log('Sent spectrum overlap', v);
+          } catch (e) { console.error('Failed to send spectrum overlap', e); }
+        } else {
+          console.warn('WebSocket not open, cannot send spectrum overlap');
+          try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
         }
       }
 
@@ -511,6 +548,28 @@ function applyQuickBW() {
         document.addEventListener('DOMContentLoaded', function() { loadWindowPrefs(10); }, { once: true });
       } else {
         try { loadWindowPrefs(10); } catch (e) {}
+      }
+      // Initialize spectrum overlap input from localStorage if present.
+      // Retry a few times if element isn't yet in the DOM (options dialog may load later).
+      function initSpectrumOverlapInput(attempts) {
+        attempts = (typeof attempts === 'number') ? attempts : 10;
+        try {
+          const el = document.getElementById('spectrumOverlapInput');
+          if (!el) {
+            if (attempts > 0) setTimeout(() => initSpectrumOverlapInput(attempts - 1), 200);
+            return;
+          }
+          const v = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null;
+          if (v !== null && v !== '') el.value = v;
+          else el.value = '0.6';
+        } catch (e) {
+          if (attempts > 0) setTimeout(() => initSpectrumOverlapInput(attempts - 1), 200);
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { initSpectrumOverlapInput(10); }, { once: true });
+      } else {
+        try { initSpectrumOverlapInput(10); } catch (e) { /* ignore */ }
       }
 
       // Send filter edge settings (low and high) to the server via websocket
@@ -3209,6 +3268,8 @@ window.addEventListener('DOMContentLoaded', function() {
             if (typeof init === "function") {
                 init();
             }
+            // Ensure spectrum overlap input is populated now that options dialog is injected
+            try { if (typeof initSpectrumOverlapInput === 'function') initSpectrumOverlapInput(10); } catch (e) {}
             // --- Memories UI Setup ---
             // Defensive: check for required memory elements
             var sel = document.getElementById('memory_select');

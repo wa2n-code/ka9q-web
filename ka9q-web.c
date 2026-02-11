@@ -97,6 +97,7 @@ extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
 extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
 extern void control_set_spectrum_average(struct session *sp, char *val_str);
+extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
 extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
@@ -448,6 +449,11 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
   }
   tmp[len] = 0;
 
+  // Debug: log incoming websocket text for troubleshooting message ordering
+  if (len > 0 && tmp[0] != '\0') {
+    fprintf(stderr, "%s: received websocket text: '%s'\n", __FUNCTION__, tmp);
+  }
+
   //ONION_INFO("Read from websocket: %d: %s", len, tmp);
 
 
@@ -520,6 +526,17 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           }
         }
         break;
+      case 'v':
+      case 'V':
+        {
+          // Expect format: v:<overlap_float>
+          char *ov = strtok(NULL, ":");
+          if (ov != NULL) {
+            control_set_spectrum_overlap(sp, ov);
+            fflush(stderr);
+          }
+        }
+        break;
       case 'F':
       case 'f':
         /*{
@@ -534,6 +551,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
         int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
         // Shift if frequency is within edge_bin_margin bins of the edge
+      
         if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
           if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
             // Shift so that frequency is edge_bin_margin bins above the new min edge
@@ -710,6 +728,8 @@ int main(int argc,char **argv) {
   }
   /* Send default spectrum averaging to backend at startup (default 10) */
   control_set_spectrum_average(NULL, "10");
+    /* Do not send a default spectrum overlap at startup; prefer client-provided value.
+      control_set_spectrum_overlap(NULL, "0.5"); */
   onion *o = onion_new(O_THREADED | O_NO_SIGTERM);
   onion_url *urls=onion_root_url(o);
   onion_set_port(o, port);
@@ -1200,8 +1220,11 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
+  if (verbose) fprintf(stderr, "%s: sending filter edges low=%f high=%f (len=%d) to control fd=%d\n", __FUNCTION__, lowf, highf, command_len, Ctl_fd);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
-    fprintf(stderr, "command send error: %s\n", strerror(errno));
+    fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
+  } else {
+    if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1236,6 +1259,35 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   } else {
     /* fprintf(stderr, "%s: sent SPECTRUM_AVG=%d (len=%d) to control fd=%d\n", __FUNCTION__, val, command_len, Ctl_fd); */
     /* fflush(stderr); */
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Send spectrum FFT overlap (float 0 <= x < 1) to control socket for this session */
+void control_set_spectrum_overlap(struct session *sp, char *val_str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  float val = 0.0f;
+
+  if (val_str && strlen(val_str) > 0)
+    val = strtof(val_str, NULL);
+
+  int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* use ssrc+1 for spectrum stream */
+
+  *bp++ = CMD; // Command
+  /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
+  encode_int(&bp, OUTPUT_SSRC, target_ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  /* Encode spectrum overlap as float SPECTRUM_OVERLAP */
+  encode_float(&bp, SPECTRUM_OVERLAP, val);
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (true) fprintf(stderr, "%s: sending SPECTRUM_OVERLAP=%f (len=%d) to control fd=%d\n", __FUNCTION__, (double)val, command_len, Ctl_fd);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
+  } else {
+    if (true) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
