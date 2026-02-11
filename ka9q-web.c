@@ -450,9 +450,12 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
   tmp[len] = 0;
 
   // Debug: log incoming websocket text for troubleshooting message ordering
-  if (len > 0 && tmp[0] != '\0') {
-    fprintf(stderr, "%s: received websocket text: '%s'\n", __FUNCTION__, tmp);
+  if(verbose) {
+    if (len > 0 && tmp[0] != '\0') {
+      fprintf(stderr, "%s: received websocket text: '%s'\n", __FUNCTION__, tmp);
+    }
   }
+
 
   //ONION_INFO("Read from websocket: %d: %s", len, tmp);
 
@@ -1283,11 +1286,11 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
-  if (true) fprintf(stderr, "%s: sending SPECTRUM_OVERLAP=%f (len=%d) to control fd=%d\n", __FUNCTION__, (double)val, command_len, Ctl_fd);
+  if (verbose) fprintf(stderr, "%s: sending SPECTRUM_OVERLAP=%f (len=%d) to control fd=%d\n", __FUNCTION__, (double)val, command_len, Ctl_fd);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
   } else {
-    if (true) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
+    if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
