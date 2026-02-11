@@ -134,6 +134,9 @@
       var target_preset = "am";
       var target_zoom_level = 14;
       var switchModesByFrequency = false;
+      // If the user manually types or clicks Set, avoid automatic mode switching
+      let userTypedFreq = false;
+      let userTypedFreqTimer = null;
       var onlyAutoscaleByButton = false;
       var enableAnalogSMeter = false;
       var enableBandEdges = false;
@@ -1329,7 +1332,18 @@ function applyQuickBW() {
         spectrum.setFrequency(f);
         updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
-        setModeBasedOnFrequencyIfAllowed(f);
+        // If this change was initiated by the user (typed in the `freq` box or
+        // they pressed the Set button), do NOT auto-switch mode even if
+        // `switchModesByFrequency` is enabled. Otherwise allow automatic mode
+        // selection based on frequency.
+        if (!(evt || userTypedFreq)) {
+          setModeBasedOnFrequencyIfAllowed(f);
+        } else {
+          // clear transient manual flag so subsequent programmatic changes
+          // will behave normally
+          userTypedFreq = false;
+          if (userTypedFreqTimer) { clearTimeout(userTypedFreqTimer); userTypedFreqTimer = null; }
+        }
         autoAutoscale(asCount,waitToAutoscale);
         saveSettings();
     }
@@ -1358,11 +1372,11 @@ function applyQuickBW() {
               setMode('am');
           } else if (f == 3330000 || f == 7850000) {
               setMode('usb');
-	  } else if (f >= 5330500 && f < 5406500) {
-              setMode('usb');
-	  } else if (f >= 26960000 && f < 27360000){
-              setMode('am');
-	  } else if (f >= 27360000 && f < 27410000){
+          } else if (f >= 5330500 && f < 5406500) {
+                    setMode('usb');
+          } else if (f >= 26960000 && f < 27360000){
+                    setMode('am');
+          } else if (f >= 27360000 && f < 27410000){
               setMode('lsb');
           } else if (f < 10000000) {
               setMode('lsb');
@@ -3628,4 +3642,31 @@ function fetchAndDisplayWWVSolarData() {
 window.addEventListener('DOMContentLoaded', function() {
     fetchAndDisplayWWVSolarData();
     setInterval(fetchAndDisplayWWVSolarData, 60 * 60 * 1000);
+});
+
+// Attach listeners to detect when the user manually edits the frequency
+window.addEventListener('DOMContentLoaded', function() {
+  try {
+    const freqEl = document.getElementById('freq');
+    if (freqEl) {
+      const markUserTyped = function() {
+        userTypedFreq = true;
+        if (userTypedFreqTimer) clearTimeout(userTypedFreqTimer);
+        // Keep the flag true for a short window so onchange/blurs are
+        // considered user-initiated. 3 seconds is ample.
+        userTypedFreqTimer = setTimeout(function(){ userTypedFreq = false; userTypedFreqTimer = null; }, 3000);
+      };
+      freqEl.addEventListener('input', markUserTyped, { passive: true });
+      freqEl.addEventListener('change', markUserTyped, { passive: true });
+    }
+    // Also mark clicks on any Set button that invokes setFrequencyW()
+    const setBtn = document.querySelector('button[onclick*="setFrequencyW"]');
+    if (setBtn) {
+      setBtn.addEventListener('click', function() {
+        userTypedFreq = true;
+        if (userTypedFreqTimer) clearTimeout(userTypedFreqTimer);
+        userTypedFreqTimer = setTimeout(function(){ userTypedFreq = false; userTypedFreqTimer = null; }, 3000);
+      });
+    }
+  } catch (e) { console.error('Failed to attach freq input listeners', e); }
 });
