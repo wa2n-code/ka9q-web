@@ -329,7 +329,7 @@ function applyQuickBW() {
               let ovVal = null;
               try { ovVal = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null; } catch (e) { ovVal = null; }
               if (ovVal !== null && ovVal !== '' && ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send('v:' + ovVal); console.log('Sent deferred spectrum overlap on WS open', ovVal); } catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
+                try { ws.send('v:' + ovVal); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
               }
             } catch (e) {}
           }, 100);
