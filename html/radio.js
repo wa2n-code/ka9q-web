@@ -1196,7 +1196,7 @@ function applyQuickBW() {
       function toggleAlternateFreq(){
         alternateFreqActive = !alternateFreqActive;
         updateAltButton();
-        if(window.console) console.log('alternateFreqActive =', alternateFreqActive);
+        //if(window.console) console.log('alternateFreqActive =', alternateFreqActive);
       }
 
       window.isAlternateFreqActive = function(){ return alternateFreqActive; };
