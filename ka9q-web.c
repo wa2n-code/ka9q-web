@@ -57,6 +57,8 @@ pthread_t ctrl_task;
 pthread_t audio_task;
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
+/* microseconds to sleep after successful control send to avoid overrunning backend */
+#define CONTROL_USLEEP_US 20000
 
 struct session {
   bool spectrum_active;
@@ -1117,6 +1119,8 @@ int init_control(struct session *sp) {
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
     fprintf(stderr,"command send error: %s\n",strerror(errno));
+  } else {
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 
@@ -1132,6 +1136,8 @@ int init_control(struct session *sp) {
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
     fprintf(stderr,"command send error: %s\n",strerror(errno));
+  } else {
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 
@@ -1190,6 +1196,9 @@ void control_set_frequency(struct session *sp,char *str) {
     pthread_mutex_lock(&ctl_mutex);
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+    } else {
+      /* allow backend a short time to process this command before sending another */
+      usleep(CONTROL_USLEEP_US);
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
@@ -1224,10 +1233,11 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
   if (verbose) fprintf(stderr, "%s: sending filter edges low=%f high=%f (len=%d) to control fd=%d\n", __FUNCTION__, lowf, highf, command_len, Ctl_fd);
-  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
   } else {
     if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1249,8 +1259,9 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
 
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
-  encode_int(&bp, OUTPUT_SSRC, target_ssrc);
-  encode_int(&bp, COMMAND_TAG, arc4random());
+  /* Use fixed 32-bit encodings to keep command packet length deterministic */
+  encode_int32(&bp, OUTPUT_SSRC, (uint32_t)target_ssrc);
+  encode_int32(&bp, COMMAND_TAG, (uint32_t)arc4random());
   /* Encode spectrum average as integer SPECTRUM_AVG */
   encode_int(&bp, SPECTRUM_AVG, val);
   encode_eol(&bp);
@@ -1262,6 +1273,7 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   } else {
     /* fprintf(stderr, "%s: sent SPECTRUM_AVG=%d (len=%d) to control fd=%d\n", __FUNCTION__, val, command_len, Ctl_fd); */
     /* fflush(stderr); */
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1291,6 +1303,7 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
   } else {
     if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1334,6 +1347,8 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
   pthread_mutex_lock(&ctl_mutex);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "command send error: %s\n", strerror(errno));
+  } else {
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1371,6 +1386,8 @@ void control_set_mode(struct session *sp,char *str) {
     strlcpy(sp->requested_preset,str,sizeof(sp->requested_preset));
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+    } else {
+      usleep(CONTROL_USLEEP_US);
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
@@ -1461,6 +1478,8 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     perror("command send: Spectrum");
+  } else {
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -1498,6 +1517,8 @@ void control_poll(struct session *sp) {
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     perror("command send: Poll");
+  } else {
+    usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
