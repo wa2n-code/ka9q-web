@@ -1198,7 +1198,7 @@ void control_set_frequency(struct session *sp,char *str) {
       fprintf(stderr,"command send error: %s\n",strerror(errno));
     } else {
       /* allow backend a short time to process this command before sending another */
-      usleep(CONTROL_USLEEP_US);
+      usleep(CONTROL_USLEEP_US/2);
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
