@@ -42,7 +42,7 @@
 #include "radio.h"
 #include "config.h"
 
-const char *webserver_version = "2.79";
+const char *webserver_version = "2.80";
 
 
 // no handlers in /usr/local/include??

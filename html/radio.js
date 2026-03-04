@@ -17,6 +17,16 @@
       // expected ack tracking for last sent edges
       let expectedFilterAck = null; // { low, high, time, retries }
       const EXPECTED_ACK_MAX_RETRIES = 3;
+      let zoomTableSize = null; // Global variable to store the zoom table size
+      var spectrum;
+      let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
+      var centerHz = 10000000; // center frequency
+      var frequencyHz = 10000000; // tuned frequency
+      var lowHz=0;
+      var highHz=32400000;
+
+      // Variable to store the actual backend frequency as reported by the server
+      var backendFrequencyHz = 0;
 
       function createCWDebugOverlay() {
         try {
@@ -54,16 +64,72 @@
           d.textContent = `ws:${wsst}${wait}\nlastSent: ${s}\nlastAck:  ${a}`;
         } catch (e) {}
       }
-      let zoomTableSize = null; // Global variable to store the zoom table size
-      var spectrum;
-      let binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
-      var centerHz = 10000000; // center frequency
-      var frequencyHz = 10000000; // tuned frequency
-      var lowHz=0;
-      var highHz=32400000;
+      // Generic throttled/coalesced control sender to avoid overloading WS/backend
+      // Use `sendControl(type, msg, minIntervalMs)` to send control messages.
+      (function(){
+        const DEFAULT_CONTROL_MIN_MS = 150; // default per-type min interval
+        const _controlState = {
+          lastSend: new Map(),   // type -> timestamp
+          pending:  new Map(),   // type -> message
+          timers:   new Map()    // type -> timer id
+        };
 
-      // Variable to store the actual backend frequency as reported by the server
-      var backendFrequencyHz = 0;
+        function _flushControl(type) {
+          const msg = _controlState.pending.get(type);
+          if (!msg) return;
+          _controlState.pending.delete(type);
+          const t = _controlState.timers.get(type);
+          if (t) { clearTimeout(t); _controlState.timers.delete(type); }
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(msg);
+            } catch (e) {
+              console.warn('sendControl flush failed for', type, e);
+              // re-schedule a retry
+              _controlState.pending.set(type, msg);
+              if (!_controlState.timers.has(type)) {
+                _controlState.timers.set(type, setTimeout(() => _flushControl(type), DEFAULT_CONTROL_MIN_MS));
+              }
+              return;
+            }
+          } else {
+            // keep pending until ws opens
+          }
+          _controlState.lastSend.set(type, Date.now());
+        }
+
+        window.sendControl = function sendControl(type, msg, minIntervalMs) {
+          minIntervalMs = (typeof minIntervalMs === 'number') ? minIntervalMs : DEFAULT_CONTROL_MIN_MS;
+          const now = Date.now();
+          const last = _controlState.lastSend.get(type) || 0;
+          const since = now - last;
+          if (since >= minIntervalMs) {
+            // immediate send
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(msg);
+                _controlState.lastSend.set(type, now);
+                return;
+              } catch (e) {
+                console.warn('sendControl immediate ws.send failed', e);
+                // fallthrough to coalesce
+              }
+            }
+            // ws not open: queue as pending
+            _controlState.pending.set(type, msg);
+            if (!_controlState.timers.has(type)) {
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
+            }
+            return;
+          }
+          // coalesce pending message and schedule flush
+          _controlState.pending.set(type, msg);
+          if (!_controlState.timers.has(type)) {
+            const wait = Math.max(1, minIntervalMs - since);
+            _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+          }
+        };
+      })();
 
       // Update the CW-mode carrier offset marker based on the tuned frequency.
       function updateCWMarker() {
@@ -270,18 +336,18 @@ function applyQuickBW() {
 
       function on_ws_open() {
         // get the SSRC
-        ws.send("S:");
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
+        }
         // default to 20 Mtr band
         //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         updateCWMarker();
-        // can we load the saved frequency/zoom/preset here?
-        ws.send("M:" + target_preset);
-          // Auto-send of stored spectrum overlap suppressed for testing; use SendOv button to send manually
-        //ws.send("Z:" + (22 - target_zoom_level).toString());
-        ws.send("Z:" + (target_zoom_level).toString());
-        ws.send("Z:c:" + (target_center / 1000.0).toFixed(3));
-        ws.send("F:" + (target_frequency / 1000.0).toFixed(3));
+        // Stagger initial control messages slightly to avoid overwhelming backend
+        setTimeout(() => { try { sendControl('mode','M:' + target_preset, 50); } catch (e) {} }, 30);
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString(), 80); } catch (e) {} }, 90);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), 80); } catch (e) {} }, 150);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), 80); } catch (e) {} }, 210);
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
@@ -292,7 +358,7 @@ function applyQuickBW() {
         // If a filter-edge update was queued while WS was closed, send it now
         try {
           if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send('e:' + pendingFilterEdges.low.toString() + ':' + pendingFilterEdges.high.toString());
+            sendControl('edges', 'e:' + pendingFilterEdges.low.toString() + ':' + pendingFilterEdges.high.toString(), 200);
             cwDebug.lastSent = { low: pendingFilterEdges.low, high: pendingFilterEdges.high, time: Date.now() };
             cwDebug.wsState = ws.readyState;
             updateCWDebugOverlay();
@@ -303,18 +369,18 @@ function applyQuickBW() {
         try {
           if (pendingSpectrumAverage && ws && ws.readyState === WebSocket.OPEN) {
             // console.log('Flushing queued spectrum average to backend:', pendingSpectrumAverage.val);
-            ws.send('g:' + pendingSpectrumAverage.val.toString());
+            sendControl('spectrum_avg', 'g:' + pendingSpectrumAverage.val.toString(), 333);
             pendingSpectrumAverage = null;
           } else if (ws && ws.readyState === WebSocket.OPEN) {
             // Always send current spectrum_average so backend is in sync
             // console.log('Sending current spectrum_average to backend on WS open:', spectrum_average);
-            ws.send('g:' + spectrum_average.toString());
+            sendControl('spectrum_avg', 'g:' + spectrum_average.toString(), 333);
           }
         } catch (e) { console.error('Failed to flush/send spectrum average', e); }
         // Flush queued window prefs if any
         try {
           if (pendingWindowPrefs && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send('w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''));
+            sendControl('window', 'w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''), 200);
             pendingWindowPrefs = null;
           }
         } catch (e) { console.error('Failed to flush/send window prefs', e); }
@@ -329,7 +395,7 @@ function applyQuickBW() {
               let ovVal = null;
               try { ovVal = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null; } catch (e) { ovVal = null; }
               if (ovVal !== null && ovVal !== '' && ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send('v:' + ovVal); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
+                try { sendControl('spectrum_overlap', 'v:' + ovVal, 200); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
               }
             } catch (e) {}
           }, 100);
@@ -348,7 +414,7 @@ function applyQuickBW() {
         spectrumPoll = v;
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send('r:' + v.toString());
+            sendControl('spectrum_poll', 'r:' + v.toString(), 200);
             console.log('Sent spectrum poll request:', v);
           } catch (e) {
             console.error('Failed to send spectrum poll:', e);
@@ -369,7 +435,7 @@ function applyQuickBW() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
             // Format: w:<WINDOW_TYPE>:<PARAM>
-            ws.send('w:' + t + ':' + p);
+            sendControl('window', 'w:' + t + ':' + p, 200);
             // persist selection when sent
             try { saveWindowPrefs(); } catch (e) {}
           } catch (e) { console.error('Failed to send window parameter', e); }
@@ -392,7 +458,7 @@ function applyQuickBW() {
         // Format matches console interface: 'v:<float>'
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            ws.send('v:' + v.toString());
+            sendControl('spectrum_overlap', 'v:' + v.toString(), 200);
             try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
             //console.log('Sent spectrum overlap', v);
           } catch (e) { console.error('Failed to send spectrum overlap', e); }
@@ -470,7 +536,7 @@ function applyQuickBW() {
             const p = pEl ? (pEl.value || '').trim() : '';
             if (t) {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                try { ws.send('w:' + t + ':' + p); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
+                try { sendControl('window', 'w:' + t + ':' + p, 200); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
               } else {
                 pendingWindowPrefs = { t: t, p: p };
               }
@@ -586,8 +652,9 @@ function applyQuickBW() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
             const payload = 'e:' + low.toString() + ':' + high.toString();
-            ws.send(payload);
-            // update debug overlay state
+            // Throttled send to avoid overrunning backend
+            sendControl('edges', payload, 100);
+            // update debug overlay state (record attempt)
             try { cwDebug.lastSent = { low: low, high: high, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
             //console.log('Sent filter edges:', low, high);
             // expect ack from server; set up one-time retry
@@ -603,11 +670,11 @@ function applyQuickBW() {
                     return;
                   }
                   // otherwise resend once
-                  if (expectedFilterAck && expectedFilterAck.retries === 0) {
+                    if (expectedFilterAck && expectedFilterAck.retries === 0) {
                     expectedFilterAck.retries = 1;
                     //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                      ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                      sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 200);
                       cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                       updateCWDebugOverlay();
                     }
@@ -835,12 +902,25 @@ function applyQuickBW() {
                 case 39: // LOW_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
                     try {
-                      const dvLow = new DataView(dataBuffer);
-                      // Server sends float32 in network (big-endian) order — read explicitly
-                      filter_low = dvLow.getFloat32(0, false);
+                      // Defensive: ensure we have at least 4 bytes for a float32
+                      if (dataBuffer && dataBuffer.byteLength >= 4) {
+                        const dvLow = new DataView(dataBuffer);
+                        // Server sends float32 in network (big-endian) order — read explicitly
+                        const val = dvLow.getFloat32(0, false);
+                        if (Number.isFinite(val)) filter_low = val;
+                        else throw new Error('Float32 result not finite');
+                      } else {
+                        throw new Error('LOW_EDGE payload too short');
+                      }
                     } catch (e) {
-                      // fallback: try typed array
-                      try { arr_low = new Float32Array(dataBuffer); filter_low = Number(arr_low[0]); } catch (e2) { filter_low = 0; }
+                      // fallback: try typed array or default
+                      try {
+                        const arr = new Float32Array(dataBuffer);
+                        const v = Number(arr[0]);
+                        filter_low = Number.isFinite(v) ? v : 0;
+                      } catch (e2) {
+                        filter_low = 0;
+                      }
                     }
                     try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
@@ -848,10 +928,23 @@ function applyQuickBW() {
                   case 40: // HIGH_EDGE
                     dataBuffer = evt.data.slice(i,i+l);
                     try {
-                      const dvHigh = new DataView(dataBuffer);
-                      filter_high = dvHigh.getFloat32(0, false);
+                      // Defensive: ensure we have at least 4 bytes for a float32
+                      if (dataBuffer && dataBuffer.byteLength >= 4) {
+                        const dvHigh = new DataView(dataBuffer);
+                        const val = dvHigh.getFloat32(0, false);
+                        if (Number.isFinite(val)) filter_high = val;
+                        else throw new Error('Float32 result not finite');
+                      } else {
+                        throw new Error('HIGH_EDGE payload too short');
+                      }
                     } catch (e) {
-                      try { let arr_high = new Float32Array(dataBuffer); filter_high = Number(arr_high[0]); } catch (e2) { filter_high = 0; }
+                      try {
+                        const arr_high = new Float32Array(dataBuffer);
+                        const v = Number(arr_high[0]);
+                        filter_high = Number.isFinite(v) ? v : 0;
+                      } catch (e2) {
+                        filter_high = 0;
+                      }
                     }
                     try { cwDebug.lastAck = { low: filter_low, high: filter_high, time: Date.now() }; updateCWDebugOverlay(); } catch (e) {}
                     i=i+l;
@@ -883,11 +976,11 @@ function applyQuickBW() {
                   const expLow = Number(expectedFilterAck.low);
                   const expHigh = Number(expectedFilterAck.high);
                   if (expLow !== Number(filter_low) || expHigh !== Number(filter_high)) {
-                    if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
+                        if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
                       expectedFilterAck.retries++;
                       //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
                       if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send('e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString());
+                        sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 200);
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                         updateCWDebugOverlay();
                       }
@@ -1098,7 +1191,7 @@ function applyQuickBW() {
             return;
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
-        ws.send("F:" + (value / 1000.0).toFixed(3));
+        sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
@@ -1116,7 +1209,7 @@ function applyQuickBW() {
             return;
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
-        ws.send("F:" + (value / 1000.0).toFixed(3));
+        sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
@@ -1385,7 +1478,7 @@ function applyQuickBW() {
             asCount = 3; // set the autoscale counter to 17 between 100 kHz and 3 MHz
         }
         //console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
-        ws.send("F:" + (f / 1000.0).toFixed(3));
+        sendControl('freq', "F:" + (f / 1000.0).toFixed(3), 50);
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(f);
@@ -1418,7 +1511,7 @@ function applyQuickBW() {
         updateCWMarker();
         spectrum.checkFrequencyAndClearOverlays(f);
         setModeBasedOnFrequencyIfAllowed(freq);
-        ws.send("F:" + (freq / 1000).toFixed(3));
+        sendControl('freq', "F:" + (freq / 1000).toFixed(3), 50);
         autoAutoscale(0, true);  // wait for autoscale
         saveSettings();
     }
@@ -1457,7 +1550,7 @@ function applyQuickBW() {
       }
 
       document.getElementById('mode').value = selected_mode;
-      ws.send("M:" + selected_mode);
+      sendControl('mode', "M:" + selected_mode, 100);
 
       // Determine the new sample rate and number of channels based on the mode
       let newSampleRate = 12000;
@@ -1502,7 +1595,7 @@ function applyQuickBW() {
     function selectMode(mode) {
         let element = document.getElementById('mode');
         element.value = mode;
-        ws.send("M:"+mode);
+        sendControl('mode', "M:"+mode, 100);
       setFilterEdgesForMode(mode);
       try { updateQuickBWButtonState(); } catch (e) {}
       saveSettings();
@@ -1706,7 +1799,7 @@ function applyQuickBW() {
         //alertOverlayMisalignment();
         spectrum.clearOverlayTrace();
       }
-      ws.send("Z:+:"+document.getElementById('freq').value);
+      sendControl('zoom', "Z:+:"+document.getElementById('freq').value, 150);
       //console.log("zoomed in from",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomin(): ",document.getElementById('freq').value);
       //autoAutoscale(15,true);
@@ -1722,7 +1815,7 @@ function applyQuickBW() {
         //alertOverlayMisalignment();
         spectrum.clearOverlayTrace();
       }
-      ws.send("Z:-:"+document.getElementById('freq').value);
+      sendControl('zoom', "Z:-:"+document.getElementById('freq').value, 150);
       //console.log("zoomed out from ",document.getElementById("zoom_level").valueAsNumber);
       //console.log("zoomout(): ",document.getElementById('freq').value);
       // autoAutoscale(15,true); // 15 for n0
@@ -1734,12 +1827,12 @@ function applyQuickBW() {
 
     function bumpAGCWithFM() {
       const originalMode = document.getElementById('mode').value; // Get the currently selected mode
-      ws.send("M:fm"); // Switch to FM mode
+      sendControl('mode', "M:fm", 100); // Switch to FM mode
       //console.log("Switched to FM mode");
 
       // Wait for 500 ms before switching back to the original mode
       setTimeout(() => {
-        ws.send("M:" + originalMode); // Switch back to the original mode
+        sendControl('mode', "M:" + originalMode, 100); // Switch back to the original mode
         //console.log("Switched back to original mode: " + originalMode);
       }, 100); // 100 ms delay
     }
@@ -1751,7 +1844,7 @@ function applyQuickBW() {
         spectrum.clearOverlayTrace();
       }
   // Send explicit center (kHz) so backend will center on the tuned frequency
-  ws.send("Z:c:" + document.getElementById('freq').value);
+  sendControl('zoom_center', "Z:c:" + document.getElementById('freq').value, 150);
       //console.log("zoom center at level ",document.getElementById("zoom_level").valueAsNumber);
       autoAutoscale(100,true);
       saveSettings();
@@ -1767,7 +1860,7 @@ function applyQuickBW() {
         //alertOverlayMisalignment();
         spectrum.clearOverlayTrace();
       }
-      ws.send(`Z:${v}`);
+      sendControl('zoom', `Z:${v}`, 150);
       //console.log("setZoom(): ",v,"zoomControlActive=",zoomControlActive);
       //if(!zoomControlActive)  // Mouse wheel turn on zoom control, autoscale - commented this out just let it autoscale when mouse wheel or drag zoom slider
       autoAutoscale(100,false);
@@ -1782,7 +1875,7 @@ function applyQuickBW() {
     window.setZoomDuringTraceLoad = setZoomDuringTraceLoad;
     function setZoomDuringTraceLoad() {
       const v = document.getElementById("zoom_level").valueAsNumber;
-      ws.send(`Z:${v}`);
+      sendControl('zoom', `Z:${v}`, 150);
       // No alert for overlay misalignment here
       autoAutoscale(100, false);
       saveSettings();
@@ -1812,7 +1905,7 @@ function applyQuickBW() {
         if(btn.value==="START") {
           btn.value = "STOP";
           btn.innerHTML = "Stop Audio";
-          ws.send("A:START:"+ssrc.toString());
+          sendControl('audio', "A:START:"+ssrc.toString(), 50);
           player.resume();
           // Ensure volume is set after resuming audio context
           const volumeSlider = document.getElementById('volume_control');
@@ -1820,7 +1913,7 @@ function applyQuickBW() {
         } else {
           btn.value = "START";
           btn.innerHTML = "Start Audio";
-          ws.send("A:STOP:"+ssrc.toString());
+          sendControl('audio', "A:STOP:"+ssrc.toString(), 50);
         }
     }
 
@@ -2095,10 +2188,16 @@ function setupSpectrumAvgInput() {
 
   function doSend(val) {
     try {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send('g:' + val.toString());
-      } else {
-        pendingSpectrumAverage = { val: val, time: Date.now() };
+      const msg = 'g:' + val.toString();
+      // Use throttled sender to avoid bursts on Arrow holds
+      try {
+        sendControl('spectrum_avg', msg, 333);
+      } catch (e) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(msg); } catch (e2) { pendingSpectrumAverage = { val: val, time: Date.now() }; }
+        } else {
+          pendingSpectrumAverage = { val: val, time: Date.now() };
+        }
       }
     } catch (e) { console.error('Failed to send spectrum average:', e); }
   }
