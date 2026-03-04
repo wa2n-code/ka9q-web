@@ -979,8 +979,8 @@ function applyQuickBW() {
                         if (expectedFilterAck.retries < EXPECTED_ACK_MAX_RETRIES) {
                       expectedFilterAck.retries++;
                       //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
-                      if (ws && ws.readyState === WebSocket.OPEN) {
-                        sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 200);
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                        sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 300);
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                         updateCWDebugOverlay();
                       }
@@ -1036,73 +1036,103 @@ function applyQuickBW() {
         frequencyHz = 10000000;
         centerHz = 10000000;
         binWidthHz = 20001; // Change from 20000 Hz per bin fixes the zoom = 1 issue on load.  Must be different than a table entry!  WDR 7-3-2025
-        spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
-        setupFftAvgInput();
-        setupSpectrumAvgInput();
-
-        // Setup overlay buttons after spectrum is created
-        document.addEventListener('DOMContentLoaded', function() {
-            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
-                setTimeout(function() {
-                    spectrum.setupOverlayButtons();
-                }, 100); // Small delay to ensure DOM is ready
+        function createSpectrumWithRetry(attempts, cb) {
+          attempts = (typeof attempts === 'number') ? attempts : 5;
+          if (typeof Spectrum === 'undefined') {
+            if (attempts <= 0) {
+              console.error('Spectrum constructor not found after retries; continuing without spectrum.');
+              if (typeof cb === 'function') cb(false);
+              return;
             }
-        });
-        // Ensure sensible in-memory defaults exist before attempting to load stored settings.
-        // Pass `false` to avoid writing defaults to localStorage unless we actually need to create them.
-        setDefaultSettings(false);
-        if (!loadSettings()) {
-          console.log("no saved settings found, committing defaults to localStorage");
-          setDefaultSettings(true);
+            setTimeout(function() { createSpectrumWithRetry(attempts - 1, cb); }, 100);
+            return;
+          }
+          try {
+            spectrum = new Spectrum("waterfall", {spectrumPercent: 50, bins: binCount});
+            if (typeof cb === 'function') cb(true);
+          } catch (err) {
+            console.error('Failed to construct Spectrum:', err);
+            if (attempts <= 0) {
+              if (typeof cb === 'function') cb(false);
+            } else {
+              setTimeout(function() { createSpectrumWithRetry(attempts - 1, cb); }, 100);
+            }
+          }
         }
-        // Run a diagnostic to surface any missing saved keys (alerts the user)
-        try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
+        createSpectrumWithRetry(5, function(created) {
+          if (!created) return;
+          try { setupFftAvgInput(); } catch (e) { console.warn('setupFftAvgInput failed', e); }
+          try { setupSpectrumAvgInput(); } catch (e) { console.warn('setupSpectrumAvgInput failed', e); }
+          // Setup overlay buttons after spectrum is created
+          try {
+            if (spectrum && typeof spectrum.setupOverlayButtons === 'function') {
+              setTimeout(function() { spectrum.setupOverlayButtons(); }, 100);
+            }
+          } catch (e) { console.warn('setupOverlayButtons failed', e); }
+          // Ensure sensible in-memory defaults exist before attempting to load stored settings.
+          // Pass `false` to avoid writing defaults to localStorage unless we actually need to create them.
+          try { setDefaultSettings(false); } catch (e) { console.warn('setDefaultSettings failed', e); }
+          try {
+            if (!loadSettings()) {
+              console.log("no saved settings found, committing defaults to localStorage");
+              setDefaultSettings(true);
+            }
+          } catch (e) { console.warn('loadSettings failed', e); }
+          // Run a diagnostic to surface any missing saved keys (alerts the user)
+          try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
+
+          // Continue with remaining initialization that depends on spectrum
+          try {
+            // Trigger autoscale on first load so spectrum has sensible range
+            //try { autoAutoscale(50, true); } catch (e) { /* ignore */ }
+
+            spectrum.radio_pointer = window;
+            page_title = "";
+
+            ws=new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
+            ws.onmessage=on_ws_message;
+            ws.onopen=on_ws_open;
+            ws.onclose=on_ws_close;
+            ws.binaryType = "arraybuffer";
+            ws.onerror = on_ws_error;
+            // Attach input handlers now that DOM may be ready
+            try { document.getElementById('waterfall').addEventListener("wheel", onWheel, false); } catch (e) {}
+            try { document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false); } catch (e) {}
+            try { document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3); } catch (e) {}
+            try { document.getElementById('step').value = increment.toString(); } catch (e) {}
+            try { document.getElementById('colormap').value = spectrum.colorIndex; } catch (e) {}
+            try { document.getElementById('decay_list').value = spectrum.decay.toString(); } catch (e) {}
+            try { document.getElementById('cursor').checked = spectrum.cursor_active; } catch (e) {}
+            try { document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause"); } catch (e) {}
+            try { document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on"); } catch (e) {}
+
+            // set zoom, preset, spectrum percentage?
+            try { spectrum.setAveraging(spectrum.averaging); } catch (e) {}
+            try { spectrum.setColormap(spectrum.colorIndex); } catch (e) {}
+            try { updateRangeValues(); } catch (e) {}
+            try { player.volume(1.00); } catch (e) {}
+            try { getVersion(); } catch (e) {}
+            // Attach a listener to the mode selector so switching to CWU/CWL immediately shows the marker
+            try {
+              const modeEl = document.getElementById('mode');
+              const updateBackendMarkerForMode = function() {
+                try { updateCWMarker(); } catch (e) { /* ignore */ }
+              };
+              if (modeEl) {
+                modeEl.addEventListener('change', updateBackendMarkerForMode);
+                // initialize marker based on current mode immediately
+                updateBackendMarkerForMode();
+              }
+            } catch (e) { /* ignore */ }
+            settingsReady = true; // Allow saves after initialization
+          } catch (e) { console.warn('Continuing init failed', e); }
+        });
+      };
+
+        
         // Trigger autoscale on first load so spectrum has sensible range
         //try { autoAutoscale(50, true); } catch (e) { /* ignore */ }
-        spectrum.radio_pointer = this;
-        page_title = "";
-
-        //msg=document.getElementById('msg');
-        //msg.focus();
-        ws=new WebSocket(
-            (window.location.protocol == 'https:' ? 'wss://' : 'ws://') +
-            window.location.host
-        );
-        ws.onmessage=on_ws_message;
-        ws.onopen=on_ws_open;
-        ws.onclose=on_ws_close;
-        ws.binaryType = "arraybuffer";
-        ws.onerror = on_ws_error;
-        document.getElementById('waterfall').addEventListener("wheel", onWheel, false);
-        document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false);
-        document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
-        document.getElementById('step').value = increment.toString();
-        document.getElementById('colormap').value = spectrum.colorIndex;
-        document.getElementById('decay_list').value = spectrum.decay.toString();
-        document.getElementById('cursor').checked = spectrum.cursor_active;
-        document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause");
-        document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on");
-
-        // set zoom, preset, spectrum percentage?
-        spectrum.setAveraging(spectrum.averaging);
-        spectrum.setColormap(spectrum.colorIndex);
-        updateRangeValues();
-        player.volume(1.00);
-        getVersion();
-        // Attach a listener to the mode selector so switching to CWU/CWL immediately shows the marker
-        try {
-          const modeEl = document.getElementById('mode');
-          const updateBackendMarkerForMode = function() {
-            try { updateCWMarker(); } catch (e) { /* ignore */ }
-          };
-          if (modeEl) {
-            modeEl.addEventListener('change', updateBackendMarkerForMode);
-            // initialize marker based on current mode immediately
-            updateBackendMarkerForMode();
-          }
-        } catch (e) { /* ignore */ }
-        settingsReady = true; // Allow saves after initialization
-      }
+        
 
     // removed addevent listener for load and call init in the fetch script in radio.html
     // window.addEventListener('load', init, false);

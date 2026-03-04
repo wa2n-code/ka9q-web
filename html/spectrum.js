@@ -166,6 +166,9 @@ function Spectrum(id, options) {
     let pendingCenterHz = null;
     let startFreqHz = 0;
     let pendingFreqHz = null;
+    // Pending frequency message to hold latest desired frequency when WS backpressure is high
+    let pendingFreqMsg = null;
+    const WS_BUFFER_BACKPRESSURE_THRESHOLD = 200000; // bytes; tune as needed
     // Left-button drag / click state
     let leftDown = false;
     let leftDragStarted = false;
@@ -174,8 +177,29 @@ function Spectrum(id, options) {
     let leftStartCenterHz = 0;
     // Throttle sending center requests to backend during drag (ms)
     let lastCenterSend = 0;
-    const centerSendInterval = 150; // ms
+    const centerSendInterval = 300; // ms
     const spectrum = this;
+
+    // Try to flush any pending frequency message when websocket buffer drains
+    function tryFlushPendingFreq() {
+        if (!pendingFreqMsg) return;
+        if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            const buffered = ws.bufferedAmount || 0;
+            if (buffered > 50000) return; // wait until buffer drops below this smaller threshold
+            if (typeof sendControl === 'function') {
+                sendControl('freq', pendingFreqMsg, 50);
+            } else {
+                ws.send(pendingFreqMsg);
+            }
+            pendingFreqMsg = null;
+        } catch (e) {
+            // keep pending if send fails
+            console.warn('tryFlushPendingFreq failed', e);
+        }
+    }
+    // Periodically attempt to flush pending frequency messages
+    setInterval(tryFlushPendingFreq, 200);
 
     // Helper to save and set FFT averaging for the duration of a drag
     this._savedAveraging = undefined;
@@ -195,10 +219,22 @@ function Spectrum(id, options) {
     };
     this._restoreAveraging = function() {
         if (typeof this._savedAveraging !== 'undefined') {
-            this.averaging = this._savedAveraging;
-            if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
-            //console.log('Restored averaging to', this._savedAveraging);
-            this._savedAveraging = undefined;
+            try {
+                if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                    const finalCenterMsg = "Z:c:" + (spectrum.centerHz / 1000.0).toFixed(3);
+                    if (typeof sendControl === 'function') sendControl('zoom_center', finalCenterMsg, centerSendInterval);
+                    else ws.send(finalCenterMsg);
+                }
+            } catch (err) {
+                console.warn('Failed to send final center update', err);
+            }
+            try {
+                this.averaging = this._savedAveraging;
+                this._savedAveraging = undefined;
+                if (typeof this.alpha !== 'undefined') this.alpha = 2 / (this.averaging + 1);
+            } catch (err2) {
+                // ignore
+            }
         }
     };
 
@@ -288,8 +324,10 @@ function Spectrum(id, options) {
                 try {
                     const now = Date.now();
                     if ((now - lastCenterSend) >= centerSendInterval) {
-                            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-                                ws.send("Z:c:" + (newCenterHz / 1000.0).toFixed(3));
+                                if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+                                const msg = "Z:c:" + (newCenterHz / 1000.0).toFixed(3);
+                                if (typeof sendControl === 'function') sendControl('zoom_center', msg, centerSendInterval);
+                                else ws.send(msg);
                             }
                         lastCenterSend = now;
                     }
@@ -320,7 +358,25 @@ function Spectrum(id, options) {
 
         spectrum.setFrequency(pendingFreqHz);
         document.getElementById("freq").value = (pendingFreqHz / 1000).toFixed(3);
-        ws.send("F:" + (pendingFreqHz / 1000).toFixed(3));
+        const freqMsg = "F:" + (pendingFreqHz / 1000).toFixed(3);
+        try {
+            if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) {
+                // WebSocket not open: keep the latest pending message
+                pendingFreqMsg = freqMsg;
+            } else {
+                const buffered = ws.bufferedAmount || 0;
+                if (buffered > WS_BUFFER_BACKPRESSURE_THRESHOLD) {
+                    // Backpressure: coalesce to pending and avoid sending now
+                    pendingFreqMsg = freqMsg;
+                } else {
+                    if (typeof sendControl === 'function') sendControl('freq', freqMsg, 200);
+                    else ws.send(freqMsg);
+                }
+            }
+        } catch (e) {
+            // On any error, keep latest pending and avoid throwing from mousemove
+            pendingFreqMsg = freqMsg;
+        }
 
         if (spectrum.bin_copy) {
             spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
@@ -347,7 +403,9 @@ function Spectrum(id, options) {
                     }
                 } else {
                     document.getElementById("freq").value = snapped_khz.toFixed(3);
-                    ws.send("F:" + snapped_khz.toFixed(3));
+                    const snapMsg = "F:" + snapped_khz.toFixed(3);
+                    if (typeof sendControl === 'function') sendControl('freq', snapMsg, 200);
+                    else ws.send(snapMsg);
                     spectrum.frequency = snapped_khz * 1000;
                     if (spectrum.bin_copy) {
                         spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
@@ -357,7 +415,9 @@ function Spectrum(id, options) {
                 // Drag finished — send final center to backend so it will return freshly centered bins
                 try {
                     if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send("Z:c:" + (spectrum.centerHz / 1000.0).toFixed(3));
+                        const finalCenterMsg = "Z:c:" + (spectrum.centerHz / 1000.0).toFixed(3);
+                        if (typeof sendControl === 'function') sendControl('zoom_center', finalCenterMsg, centerSendInterval);
+                        else ws.send(finalCenterMsg);
                     }
                 } catch (err) {
                     console.warn('Failed to send final center update', err);
@@ -420,11 +480,16 @@ function Spectrum(id, options) {
                 }
                 spectrum.setFrequency(snapped_freq);
                 document.getElementById("freq").value = (snapped_freq / 1000).toFixed(3);
-                ws.send("F:" + (snapped_freq / 1000).toFixed(3));
+                    const snapFreqMsg = "F:" + (snapped_freq / 1000).toFixed(3);
+                    if (typeof sendControl === 'function') sendControl('freq', snapFreqMsg, 200);
+                    else ws.send(snapFreqMsg);
             }
             isDragging = false;
             dragStarted = false;
             pendingFreqHz = null;
+            try {
+                tryFlushPendingFreq();
+            } catch (e) {}
         }
     });
 }
@@ -1631,7 +1696,9 @@ Spectrum.prototype.setSpanHz = function(hz) {
                 // Optionally, we could update the center locally for immediate UI feedback:
                 // this.setCenterHz(this.frequency);
                 if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+                    const zoomCenterMsg = "Z:c:" + (this.frequency / 1000.0).toFixed(3);
+                    if (typeof sendControl === 'function') sendControl('zoom_center', zoomCenterMsg, centerSendInterval);
+                    else ws.send(zoomCenterMsg);
                     //console.log("Zoomed center on frequency: " + this.frequency);
                 }
             }
@@ -1781,17 +1848,21 @@ Spectrum.prototype.onKeypress = function(e) {
         // Send explicit center = tuned frequency in kHz so server centers where we expect
         try {
             if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send("Z:c:" + (this.frequency / 1000.0).toFixed(3));
+                const msg = "Z:c:" + (this.frequency / 1000.0).toFixed(3);
+                if (typeof sendControl === 'function') sendControl('zoom_center', msg, centerSendInterval);
+                else ws.send(msg);
             }
         } catch (err) {
             // ignore
         }
         saveSettings();
     } else if (e.key == "i") {
-        ws.send("Z:+:"+document.getElementById('freq').value);
+        const imsg = "Z:+:"+document.getElementById('freq').value;
+        if (typeof sendControl === 'function') sendControl('zoom', imsg, 150); else ws.send(imsg);
         saveSettings();
     } else if (e.key == "o") {
-        ws.send("Z:-:"+document.getElementById('freq').value);
+        const omsg = "Z:-:"+document.getElementById('freq').value;
+        if (typeof sendControl === 'function') sendControl('zoom', omsg, 150); else ws.send(omsg);
         saveSettings();
     } else if (e.key == "a") {
         // In fullscreen, 'a' triggers autoscale as if the Autoscale button was pressed
@@ -2105,12 +2176,14 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     if (typeof ws !== 'undefined' && ws.readyState === 1) {
                         if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
                             console.log(`[Overlay CSV] Sending center frequency to backend: ${(fileCenterHz / 1000).toFixed(3)}`);
-                            ws.send("F:" + (fileCenterHz / 1000).toFixed(3));
+                            const fm = "F:" + (fileCenterHz / 1000).toFixed(3);
+                            if (typeof sendControl === 'function') sendControl('freq', fm, 80); else ws.send(fm);
                         }
                         if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
                             let spanKHz = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
                             console.log(`[Overlay CSV] Sending span to backend: ${spanKHz} kHz`);
-                            ws.send("Z:" + spanKHz);
+                            const zm = "Z:" + spanKHz;
+                            if (typeof sendControl === 'function') sendControl('zoom', zm, 150); else ws.send(zm);
                         }
                     }
                     // Set spectrum to match file
@@ -2201,7 +2274,9 @@ Spectrum.prototype.loadOverlayTrace = function() {
                             if (typeof ws !== 'undefined' && ws.readyState === 1) {
                                 let freqElem = document.getElementById('freq');
                                 if (freqElem) freqElem.value = (newTunedFreq / 1000).toFixed(3);
-                                ws.send("f:" + (newTunedFreq / 1000).toFixed(3));
+                                const fm = "f:" + (newTunedFreq / 1000).toFixed(3);
+                                if (typeof sendControl === 'function') sendControl('freq', fm, 80);
+                                else ws.send(fm);
                             }
                             self.setFrequency(newTunedFreq);
                         }
