@@ -1725,7 +1725,7 @@ function applyQuickBW() {
       const wheelHandler = function() {
         lastEdgeInteraction = 'pointer';
         if (wheelTimer) clearTimeout(wheelTimer);
-        wheelTimer = setTimeout(() => { lastEdgeInteraction = null; wheelTimer = null; }, 200);
+        wheelTimer = setTimeout(() => { lastEdgeInteraction = null; wheelTimer = null; }, 100);
       };
       lowEl.addEventListener('wheel', wheelHandler);
       highEl.addEventListener('wheel', wheelHandler);
