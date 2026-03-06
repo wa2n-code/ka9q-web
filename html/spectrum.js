@@ -1173,7 +1173,8 @@ Spectrum.prototype.updateAxes = function() {
           inc = (this.spanHz / this.nbins) * 100;
           break;
     }
-    inc = isNaN(inc) ? 2000000 : inc;
+    // Ensure inc is finite (not NaN or Infinity); fallback to large default if not
+    if (!isFinite(inc)) inc = 2000000;
 
     //console.log("inc=",inc,"spanHz=",this.spanHz,"nbins=",this.nbins,"this.spanHz/this.nbins=",this.spanHz/this.nbins);
     var precision = 3;
@@ -2173,18 +2174,16 @@ Spectrum.prototype.loadOverlayTrace = function() {
                     }
                    
                     // ALWAYS send commands to backend to match file center frequency
-                    if (typeof ws !== 'undefined' && ws.readyState === 1) {
+                    if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
                         if (fileCenterHz !== null && !isNaN(fileCenterHz)) {
                             console.log(`[Overlay CSV] Sending center frequency to backend: ${(fileCenterHz / 1000).toFixed(3)}`);
                             const fm = "F:" + (fileCenterHz / 1000).toFixed(3);
                             if (typeof sendControl === 'function') sendControl('freq', fm, 80); else ws.send(fm);
                         }
-                        if (fileLowHz !== null && fileHighHz !== null && !isNaN(fileLowHz) && !isNaN(fileHighHz)) {
-                            let spanKHz = ((fileHighHz - fileLowHz) / 1000).toFixed(3);
-                            console.log(`[Overlay CSV] Sending span to backend: ${spanKHz} kHz`);
-                            const zm = "Z:" + spanKHz;
-                            if (typeof sendControl === 'function') sendControl('zoom', zm, 150); else ws.send(zm);
-                        }
+                        // Do NOT send a raw span via "Z:<kHz>" — server expects zoom index or special Z commands.
+                        // The code below sets the zoom element value and dispatches events which will send the correct
+                        // zoom index to the server. Leaving a raw span send here caused the server to interpret a
+                        // kHz value as a zoom index and break the visible window calculations.
                     }
                     // Set spectrum to match file
                     // --- Determine and set zoom level ---
@@ -2271,10 +2270,10 @@ Spectrum.prototype.loadOverlayTrace = function() {
                                 return;
                             }
                             // Send command to backend to restore the tuned frequency
-                            if (typeof ws !== 'undefined' && ws.readyState === 1) {
+                            if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
                                 let freqElem = document.getElementById('freq');
                                 if (freqElem) freqElem.value = (newTunedFreq / 1000).toFixed(3);
-                                const fm = "f:" + (newTunedFreq / 1000).toFixed(3);
+                                const fm = "F:" + (newTunedFreq / 1000).toFixed(3);
                                 if (typeof sendControl === 'function') sendControl('freq', fm, 80);
                                 else ws.send(fm);
                             }
