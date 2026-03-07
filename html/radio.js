@@ -70,23 +70,40 @@
         const DEFAULT_CONTROL_MIN_MS = 150; // default per-type min interval
         const _controlState = {
           lastSend: new Map(),   // type -> timestamp
-          pending:  new Map(),   // type -> message
+          // lastMsg: type -> last message string sent
+          lastMsg: new Map(),
+          // pending: type -> { msg, when }
+          pending:  new Map(),   // type -> { msg, when }
           timers:   new Map()    // type -> timer id
         };
 
         function _flushControl(type) {
-          const msg = _controlState.pending.get(type);
-          if (!msg) return;
+          const pendingObj = _controlState.pending.get(type);
+          if (!pendingObj) return;
           _controlState.pending.delete(type);
           const t = _controlState.timers.get(type);
           if (t) { clearTimeout(t); _controlState.timers.delete(type); }
+          const msg = pendingObj.msg;
+          const queuedWhen = pendingObj.when || 0;
+          // If we already sent a newer message for this type after this was queued, skip
+          const last = _controlState.lastSend.get(type) || 0;
+          if (last >= queuedWhen) {
+            return; // newer send already occurred; avoid duplicate
+          }
+          // If the pending message matches the most recently-sent message, skip
+          try {
+            const lastMsg = _controlState.lastMsg.get(type);
+            if (lastMsg && lastMsg === msg) return;
+          } catch (e) {}
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(msg);
+              // record last message string
+              try { _controlState.lastMsg.set(type, msg); } catch (e) {}
             } catch (e) {
               console.warn('sendControl flush failed for', type, e);
               // re-schedule a retry
-              _controlState.pending.set(type, msg);
+              _controlState.pending.set(type, { msg: msg, when: Date.now() });
               if (!_controlState.timers.has(type)) {
                 _controlState.timers.set(type, setTimeout(() => _flushControl(type), DEFAULT_CONTROL_MIN_MS));
               }
@@ -108,22 +125,29 @@
             if (ws && ws.readyState === WebSocket.OPEN) {
               try {
                 ws.send(msg);
+                try { _controlState.lastMsg.set(type, msg); } catch (e) {}
                 _controlState.lastSend.set(type, now);
+                // clear any pending/coalesced entry and timer for this type to avoid a later duplicate flush
+                try {
+                  _controlState.pending.delete(type);
+                  const t = _controlState.timers.get(type);
+                  if (t) { clearTimeout(t); _controlState.timers.delete(type); }
+                } catch (e) {}
                 return;
               } catch (e) {
                 console.warn('sendControl immediate ws.send failed', e);
                 // fallthrough to coalesce
               }
             }
-            // ws not open: queue as pending
-            _controlState.pending.set(type, msg);
+            // ws not open or fallback: queue as pending with timestamp
+            _controlState.pending.set(type, { msg: msg, when: now });
             if (!_controlState.timers.has(type)) {
               _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
             }
             return;
           }
           // coalesce pending message and schedule flush
-          _controlState.pending.set(type, msg);
+          _controlState.pending.set(type, { msg: msg, when: now });
           if (!_controlState.timers.has(type)) {
             const wait = Math.max(1, minIntervalMs - since);
             _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
@@ -356,10 +380,11 @@ function applyQuickBW() {
         // Attach listeners so spinner/caret presses auto-send
         try { attachEdgeInputListeners(); } catch (e) {}
         // If a filter-edge update was queued while WS was closed, send it now
-        try {
-          if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
-            sendControl('edges', 'e:' + pendingFilterEdges.low.toString() + ':' + pendingFilterEdges.high.toString(), 200);
-            cwDebug.lastSent = { low: pendingFilterEdges.low, high: pendingFilterEdges.high, time: Date.now() };
+          try {
+            if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
+            // normalize pending edges
+            sendControl('edges', 'e:' + Math.round(pendingFilterEdges.low).toString() + ':' + Math.round(pendingFilterEdges.high).toString(), 200);
+            cwDebug.lastSent = { low: Math.round(pendingFilterEdges.low), high: Math.round(pendingFilterEdges.high), time: Date.now() };
             cwDebug.wsState = ws.readyState;
             updateCWDebugOverlay();
             pendingFilterEdges = null;
@@ -651,15 +676,18 @@ function applyQuickBW() {
         }
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            const payload = 'e:' + low.toString() + ':' + high.toString();
+            // Normalize to integers to ensure consistent payload formatting
+            const lowInt = Math.round(low);
+            const highInt = Math.round(high);
+            const payload = 'e:' + lowInt.toString() + ':' + highInt.toString();
             // Throttled send to avoid overrunning backend
             sendControl('edges', payload, 100);
             // update debug overlay state (record attempt)
-            try { cwDebug.lastSent = { low: low, high: high, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
+            try { cwDebug.lastSent = { low: lowInt, high: highInt, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
             //console.log('Sent filter edges:', low, high);
             // expect ack from server; set up one-time retry
             try {
-              expectedFilterAck = { low: low, high: high, time: Date.now(), retries: 0 };
+              expectedFilterAck = { low: lowInt, high: highInt, time: Date.now(), retries: 0 };
               // schedule check
               setTimeout(() => {
                 try {
@@ -674,7 +702,7 @@ function applyQuickBW() {
                     expectedFilterAck.retries = 1;
                     //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                      sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 200);
+                      sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 200);
                       cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                       updateCWDebugOverlay();
                     }
@@ -980,7 +1008,7 @@ function applyQuickBW() {
                       expectedFilterAck.retries++;
                       //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
                         if (ws && ws.readyState === WebSocket.OPEN) {
-                        sendControl('edges', 'e:' + expectedFilterAck.low.toString() + ':' + expectedFilterAck.high.toString(), 300);
+                        sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 300);
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                         updateCWDebugOverlay();
                       }
@@ -1784,6 +1812,7 @@ function applyQuickBW() {
         const input = byId(id);
         if(!input) return;
         // Keyboard arrows: adjust value using computed step
+        // Stop other keydown handlers and send directly to avoid double-sends
         input.addEventListener('keydown', function(e){
           if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
           e.preventDefault();
@@ -1791,8 +1820,10 @@ function applyQuickBW() {
           const v = parseVal(input);
           const step = computeStep(v, dir);
           input.value = String(v + dir * step);
-          input.dispatchEvent(new Event('input', {bubbles:true}));
-          input.dispatchEvent(new Event('change', {bubbles:true}));
+          try { e.stopImmediatePropagation(); } catch (err) {}
+          if (!suppressEdgeAutoSend) {
+            try { sendFilterEdges(); } catch (err) { console.error('sendFilterEdges failed', err); }
+          }
         });
 
         // Pointerdown: set `step` appropriately so spinner clicks use the computed step
