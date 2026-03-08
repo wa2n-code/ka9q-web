@@ -1101,8 +1101,7 @@ function applyQuickBW() {
                 filter_high = Number(filter_high);
                 if (Number.isFinite(filter_low) && Number.isFinite(filter_high)) {
                   spectrum.setFilter(filter_low, filter_high);
-                  // Infer and apply mode from incoming edges so UI reflects remote changes
-                  try { inferModeFromFilterEdges(filter_low, filter_high); } catch (e) {}
+                  // Client no longer infers mode from filter edges; skip
                 } else {
                   console.warn('Invalid filter edges received:', filter_low, filter_high);
                 }
@@ -1826,37 +1825,8 @@ function applyQuickBW() {
   updateEdgeButtonState();
     }
 
-    // Infer likely mode from filter edge values received from server and apply
-    function inferModeFromFilterEdges(low, high) {
-      try {
-        const l = Number(low);
-        const h = Number(high);
-        if (!Number.isFinite(l) || !Number.isFinite(h)) return;
-        let inferred = null;
-        // If both edges are positive -> USB; both negative -> LSB
-        if (l >= 0 && h > 0) inferred = 'usb';
-        else if (h <= 0 && l < 0) inferred = 'lsb';
-        else {
-          // Wide symmetric => AM
-          if (l <= -4000 && h >= 4000) inferred = 'am';
-          // Narrow around zero => CW (choose CWU as representative)
-          else if (Math.abs(l) <= 300 && Math.abs(h) <= 300) inferred = 'cwu';
-        }
-        if (!inferred) return;
-        const modeEl = document.getElementById('mode');
-        if (!modeEl) return;
-        if ((modeEl.value || '').toLowerCase() === inferred) return;
-        const prevSuppress = suppressProgrammaticUI;
-        suppressProgrammaticUI = true;
-        try {
-          modeEl.value = inferred;
-          try { setMode(inferred, false); } catch (e) { console.warn('inferModeFromFilterEdges setMode failed', e); }
-          console.info('[radio.js] inferred mode from edges:', inferred);
-        } finally {
-          suppressProgrammaticUI = prevSuppress;
-        }
-      } catch (e) { console.debug('inferModeFromFilterEdges failed', e); }
-    }
+    // inferModeFromFilterEdges and updateModeUI removed — no client-side mode
+    // inference from filter edges. Mode changes are handled explicitly elsewhere.
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed
