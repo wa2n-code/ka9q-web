@@ -2090,7 +2090,8 @@ void *ctrl_thread(void *arg) {
                           sp->freq_mismatch_count);
                 if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
                   /* Debug: print the actual Channel.tune.freq value */
-                  //fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
+                  if (verbose)
+                    fprintf(stderr, "Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
                   char f[128];
                   sprintf(f,"%.3f",0.001 * sp->frequency);
                   control_set_frequency(sp,f);
