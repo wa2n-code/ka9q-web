@@ -86,6 +86,7 @@ struct session {
   float bins_min_db;
   float bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
+  int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
   float spectrum_base;
   float spectrum_step;
   /* uint32_t last_poll_tag; */
@@ -126,6 +127,7 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
+/* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
 
@@ -2052,9 +2054,32 @@ void *ctrl_thread(void *arg) {
           }
           // check to see if the preset matches our request
           if (strncmp(Channel.preset,sp->requested_preset,sizeof(sp->requested_preset))) {
-            if (verbose)
-              fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s, retry preset\n",sp->ssrc,sp->requested_preset,Channel.preset);
-            control_set_mode(sp,sp->requested_preset);
+            /* Track consecutive preset mismatches and adopt the backend-reported
+               preset if it persists for MAX_PRESET_MISMATCH cycles. This prevents
+               repeated mismatch churn when another client on the same SSRC
+               changes the preset. */
+            const int MAX_PRESET_MISMATCH = 3;
+            sp->preset_mismatch_count++;
+            if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
+              if (verbose)
+                fprintf(stderr,"SSRC %u: adopting polled preset %s after %d mismatches\n", sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+              /* Adopt backend preset into session requested_preset */
+              strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+              sp->preset_mismatch_count = 0;
+              /* Notify this client so its UI can update */
+              char pm[64];
+              snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
+              pthread_mutex_lock(&sp->ws_mutex);
+              onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+              onion_websocket_write(sp->ws, pm, strlen(pm));
+              pthread_mutex_unlock(&sp->ws_mutex);
+            } else {
+              if (verbose)
+                fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",sp->ssrc,sp->requested_preset,Channel.preset,sp->preset_mismatch_count,MAX_PRESET_MISMATCH);
+            }
+          } else {
+            /* Preset matches; clear any accumulated mismatch count */
+            sp->preset_mismatch_count = 0;
           }
           // Send BFREQ update to frontend whenever backend frequency changes
           if (last_sent_backend_frequency != Channel.tune.freq) {
@@ -2089,12 +2114,11 @@ void *ctrl_thread(void *arg) {
                           Channel.tune.freq * 0.001,
                           sp->freq_mismatch_count);
                 if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-                  /* Debug: print the actual Channel.tune.freq value */
-                  //fprintf(stderr, "[DEBUG] Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
-                  char f[128];
-                  sprintf(f,"%.3f",0.001 * sp->frequency);
-                  control_set_frequency(sp,f);
-                  /* reset counter until a new mismatch sequence starts */
+                  if (verbose)
+                    fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n", sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+                  /* Adopt the backend frequency into the session so we stop
+                     repeating mismatch logs. Channel.tune.freq is in Hz. */
+                  sp->frequency = (uint32_t)lround(Channel.tune.freq);
                   sp->freq_mismatch_count = 0;
                 }
               }
