@@ -1927,271 +1927,226 @@ and WebSocket connections. The code is robust, handling errors gracefully and pr
 This design allows the application to efficiently process and forward real-time radio or spectrum data to
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
-void *ctrl_thread(void *arg) {
-    static double last_sent_backend_frequency = 0.0;
-  struct session *sp;
-  socklen_t ssize = sizeof(Metadata_source_socket);
-  uint8_t buffer[PKTSIZE/sizeof(float)];
-  uint8_t output_buffer[PKTSIZE];
-  float powers[PKTSIZE / sizeof(float)];
-  uint64_t time;
-  double r_freq;
-  double r_bin_bw;
-//fprintf(stderr,"%s\n",__FUNCTION__);
+/* Forward declarations for helpers used by ctrl_thread (helpers defined later) */
+static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
+static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
+
+void *ctrl_thread(void *arg)
+{
+  static double last_sent_backend_frequency = 0.0;
+  uint8_t buffer[PKTSIZE / sizeof(float)];
 
   if (run_with_realtime)
     set_realtime();
 
-  while(1) {
-    int rx_length = recvfrom(Status_fd,buffer,sizeof(buffer),0,(struct sockaddr *)&Metadata_source_socket,&ssize);
-    if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) 
-    {
-      uint32_t ssrc = get_ssrc(buffer+1,rx_length-1);
-      //      fprintf(stderr,"%s: ssrc=%d\n",__FUNCTION__,ssrc);
-      if(ssrc%2==1) { // Spectrum data
-        if((sp=find_session_from_ssrc(ssrc-1)) != NULL){
-          //      fprintf(stderr,"forward spectrum: ws=%p\n",sp->ws);
+  while (1) {
+    uint32_t ssrc = 0;
+    ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
+    if (rx_length <= 2)
+      continue;
 
-          // newell 12/1/2024, 19:07:31
-          // is it kosher to call this here? It made some of the stat values
-          // update more often, so I hacked it in.
-          decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
-
-          struct rtp_header rtp;
-          memset(&rtp,0,sizeof(rtp));
-          rtp.type = 0x7F; // spectrum data
-          rtp.version = RTP_VERS;
-          rtp.ssrc = sp->ssrc;
-          rtp.marker = true; // Start with marker bit on to reset playout buffer
-          rtp.seq = rtp_seq++;
-          uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
-
-          uint32_t *ip=(uint32_t*)bp;
-          *ip++=htonl(sp->bins);
-          *ip++=htonl(sp->center_frequency);
-          *ip++=htonl(sp->frequency);
-          *ip++=htonl(sp->bin_width);
-
-          // newell 12/1/2024, 19:04:37
-          // Should this be TLV encoding like the radiod RTP streams?
-          // Dealing with endian and zero suppression in javascript
-          // looked painful, so I went quick-n-dirty here
-
-
-          // The types of some elements of struct frontend and struct channel changed in radiod
-          // eg, Frontend.samprate became a double. This broke the memcpy calls
-          // Changed memcpy to assignments with casts, which is much more portable
-          // But yeah, this message should be TLV encoded or something
-          // And it's what you get when you steal internal data structures from another
-          // program maintained by someone else... - 12/13 Dec 2025 KA9Q
-          *ip++ = (uint32_t)round(fabs(Frontend.samprate));
-          *ip++ = (uint32_t)Frontend.rf_agc;
-          *(uint64_t *)ip = (uint64_t)Frontend.samples;
-          ip += 2;
-          *(uint64_t *)ip = (uint64_t)Frontend.overranges;
-          ip += 2;
-          *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over;
-          ip += 2;
-          *(uint64_t *)ip = (uint64_t)Channel.clocktime;
-          ip += 2;
-	  *(float *)ip++ = (float)Channel.spectrum.noise_bw;
-          *(float *)ip++ = (float)Frontend.rf_atten;
-          *(float *)ip++ = (float)Frontend.rf_gain;
-          *(float *)ip++ = (float)Frontend.rf_level_cal;
-          *(float *)ip++ = (float)power2dB(Frontend.if_power);
-          *(float *)ip++ = (float)sp->noise_density_audio;
-          *ip++ = (uint32_t)sp->zoom_index;
-          *(float *)ip++ = (float)Channel.spectrum.base;
-          *(float *)ip++ = (float)Channel.spectrum.step;
-
-          int header_size=(uint8_t*)ip-&output_buffer[0];
-          int length=(PKTSIZE-header_size)/sizeof(float);
-          int npower = extract_powers(powers,length,&time,&r_freq,&r_bin_bw,sp->ssrc+1,buffer+1,rx_length-1,sp);
-          if(npower < 0){
-            /* char filename[256]; */
-            /* sprintf(filename,"%d_%d_%08X.bin",error_count,ssrc,sp->last_poll_tag); */
-            /* FILE *f = fopen(filename,"w"); */
-            /* if (f) { */
-            /*   fwrite(buffer,rx_length,1,f); */
-            /*   fclose(f); */
-            /* } */
-            pthread_mutex_unlock(&session_mutex);
-            continue; // Invalid for some reason
-          }
-          /* ++ok_count; */
-          /* if (!(ok_count % 100)){ */
-          /*   char filename[256]; */
-          /*   sprintf(filename,"%d_%d.bin",ok_count,ssrc); */
-          /*   FILE *f = fopen(filename,"w"); */
-          /*   if (f) { */
-          /*     fwrite(buffer,rx_length,1,f); */
-          /*     fclose(f); */
-          /*   } */
-          /* } */
-          int size;
-	  // radiod now scales to 255 levels in byte mode
-	  uint8_t *fp=(uint8_t*)ip;
-	  for(int i=0; i < npower; i++) {
-	    *fp++ = powers[i];
-	  }
-	  size=(uint8_t*)fp-&output_buffer[0];
-          // send the spectrum data to the client
-          pthread_mutex_lock(&sp->ws_mutex);
-          onion_websocket_set_opcode(sp->ws,OWS_BINARY);
-          int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
-          if(r<=0) {
-            fprintf(stderr,"%s: write failed: %d(size=%d)\n",__FUNCTION__,r,size);
-          }
-          pthread_mutex_unlock(&sp->ws_mutex);
-          pthread_mutex_unlock(&session_mutex);
-        }
-      } else {
-        if((sp=find_session_from_ssrc(ssrc)) != NULL){
-          decode_radio_status(&Frontend,&Channel,buffer+1,rx_length-1);
-          float n0 = 0.0;
-          if (0 == extract_noise(&n0,buffer+1,rx_length-1,sp)){
-            sp->noise_density_audio = n0;
-          }
-          // check to see if the preset matches our request
-          if (strncmp(Channel.preset,sp->requested_preset,sizeof(sp->requested_preset))) {
-            /* Track consecutive preset mismatches and adopt the backend-reported
-               preset if it persists for MAX_PRESET_MISMATCH cycles. This prevents
-               repeated mismatch churn when another client on the same SSRC
-               changes the preset. */
-            const int MAX_PRESET_MISMATCH = 3;
-            sp->preset_mismatch_count++;
-            if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-              bool adopt_preset = true;
-              if(adopt_preset){
-                if (verbose)
-                  fprintf(stderr,"SSRC %u: adopting polled preset %s after %d mismatches\n", sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
-                /* Adopt backend preset into session requested_preset */
-                strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
-                sp->preset_mismatch_count = 0;
-                /* Notify this client so its UI can update */
-                char pm[64];
-                snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
-                pthread_mutex_lock(&sp->ws_mutex);
-                onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-                onion_websocket_write(sp->ws, pm, strlen(pm));
-                pthread_mutex_unlock(&sp->ws_mutex);
-              }
-              else {
-                if (verbose)
-                  fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",sp->ssrc,sp->requested_preset,Channel.preset,sp->preset_mismatch_count);
-                control_set_mode(sp,sp->requested_preset);
-              }
-            } else {
-              if (verbose)
-                fprintf(stderr,"SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",sp->ssrc,sp->requested_preset,Channel.preset,sp->preset_mismatch_count,MAX_PRESET_MISMATCH);
-            }
-          } else {
-            /* Preset matches; clear any accumulated mismatch count */
-            sp->preset_mismatch_count = 0;
-          }
-          // Send BFREQ update to frontend whenever backend frequency changes
-          if (last_sent_backend_frequency != Channel.tune.freq) {
-            current_backend_frequency = Channel.tune.freq;
-            last_sent_backend_frequency = Channel.tune.freq;
-            // Send the backend frequency to the client as a text message
-            char freq_msg[64];
-            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
-            pthread_mutex_lock(&sp->ws_mutex);
-            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-            onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
-            pthread_mutex_unlock(&sp->ws_mutex);
-          }
-          if (Channel.tune.freq != sp->frequency) {
-            // Inhibit resend if preset is CWU or CWL
-/*            if (strcasecmp(sp->requested_preset, "cwu") == 0 || strcasecmp(sp->requested_preset, "cwl") == 0) {
-              if (verbose);
-                //fprintf(stderr, "SSRC %u: backend freq differs (CW mode), but resend is inhibited (preset=%s)\n",
-                //        sp->ssrc, sp->requested_preset);
-            } else */ {
-              /* Hold off resending until we've seen this mismatch N times in a row. */
-              const int MAX_FREQ_MISMATCH = 3;
-              if (Channel.tune.freq == sp->frequency) {
-                /* Frequencies now match; clear any counting. */
-                sp->freq_mismatch_count = 0;
-              } else {
-                sp->freq_mismatch_count++;
-                if (verbose)
-                  fprintf(stderr, "SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz (mismatch count=%d)\n",
-                          sp->ssrc, .001 * sp->frequency, Channel.tune.freq * 0.001, sp->freq_mismatch_count);
-                if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-                  bool adopt_freq = true;
-                  if(adopt_freq){
-                    if (verbose)
-                      fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n", sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
-                    sp->frequency = (uint32_t)lround(Channel.tune.freq);
-                    /* Notify the client UI of the adopted backend frequency (BFREQ) */
-                    {
-                      char freq_msg[64];
-                      snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-                      pthread_mutex_lock(&sp->ws_mutex);
-                      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-                      onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
-                      pthread_mutex_unlock(&sp->ws_mutex);
-                    }
-                  }
-                  else {
-                    // If we decide not to adopt the backend frequency, we should probably resend our requested frequency to correct the backend
-                    if (verbose)
-                      fprintf(stderr, "Channel.tune.freq = %.3f Hz (resending)\n", Channel.tune.freq);
-                    char f[128];
-                    sprintf(f,"%.3f",0.001 * sp->frequency);
-                    control_set_frequency(sp,f);
-                  }
-                  
-                    /* Adopt the backend frequency into the session so we stop mismatch logs. Channel.tune.freq is in Hz. */
-                  sp->freq_mismatch_count = 0;
-                }
-              }
-            }
-          }
-          else {
-            /* Frequencies match; ensure counter is cleared */
-            if (sp->freq_mismatch_count != 0)
-              sp->freq_mismatch_count = 0;
-          }
-          pthread_mutex_lock(&output_dest_socket_mutex);
-          if(Channel.output.dest_socket.sa_family != 0)
-            pthread_cond_broadcast(&output_dest_socket_cond);
-          pthread_mutex_unlock(&output_dest_socket_mutex);
-          struct rtp_header rtp;
-          memset(&rtp,0,sizeof(rtp));
-          rtp.type = 0x7E; // radio data
-          rtp.version = RTP_VERS;
-          rtp.ssrc = sp->ssrc;
-          rtp.marker = true; // Start with marker bit on to reset playout buffer
-          rtp.seq = rtp_seq++; // ??????
-          uint8_t *bp=(uint8_t *)hton_rtp((char *)output_buffer,&rtp);
-          //int header_size=bp-&output_buffer[0];
-          //int length=(PKTSIZE-header_size)/sizeof(float);
-          encode_float(&bp,BASEBAND_POWER,Channel.sig.bb_power);
-          encode_float(&bp,LOW_EDGE,Channel.filter.min_IF);
-          encode_float(&bp,HIGH_EDGE,Channel.filter.max_IF);
-          if (!sp->once) {
-            sp->once = true;
-            if (description_override)
-              encode_string(&bp,DESCRIPTION,description_override,strlen(description_override));
-            else
-              encode_string(&bp,DESCRIPTION,Frontend.description,strlen(Frontend.description));
-          }
-          pthread_mutex_lock(&sp->ws_mutex);
-          onion_websocket_set_opcode(sp->ws,OWS_BINARY);
-          int size=(uint8_t*)bp-&output_buffer[0];
-          int r=onion_websocket_write(sp->ws,(char *)output_buffer,size);
-          if(r<=0) {
-            fprintf(stderr,"%s: write failed: %d\n",__FUNCTION__,r);
-          }
-          pthread_mutex_unlock(&sp->ws_mutex);
-          pthread_mutex_unlock(&session_mutex);
-        }
+    if (ssrc % 2 == 1) { /* spectrum */
+      struct session *sp = find_session_from_ssrc(ssrc - 1);
+      if (sp) {
+        process_spectrum_packet(sp, buffer, (int)rx_length);
+        pthread_mutex_unlock(&session_mutex);
       }
-    } else if(rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
-        fprintf(stderr,"%s: type=0x%02X\n",__FUNCTION__,buffer[0]);
+    } else { /* regular status */
+      struct session *sp = find_session_from_ssrc(ssrc);
+      if (sp) {
+        process_status_packet(sp, buffer, (int)rx_length, &last_sent_backend_frequency);
+        pthread_mutex_unlock(&session_mutex);
+      }
     }
   }
-//fprintf(stderr,"%s: EXIT\n",__FUNCTION__);
+  return NULL;
 }
+
+/* Helper: receive a status packet and extract ssrc (keeps simple recvfrom handling centralized) */
+static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc)
+{
+  socklen_t ssize = sizeof(Metadata_source_socket);
+  ssize_t rx_length = recvfrom(Status_fd, buffer, buflen, 0,
+                               (struct sockaddr *)&Metadata_source_socket, &ssize);
+  if (rx_length <= 0)
+    return rx_length;
+  if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+    *out_ssrc = get_ssrc(buffer + 1, rx_length - 1);
+  } else {
+    *out_ssrc = 0;
+  }
+  return rx_length;
+}
+
+static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size)
+{
+  pthread_mutex_lock(&sp->ws_mutex);
+  onion_websocket_set_opcode(sp->ws, OWS_BINARY);
+  int r = onion_websocket_write(sp->ws, (char *)buf, size);
+  if (r <= 0)
+    fprintf(stderr, "send_ws_binary_to_session: write failed: %d(size=%d)\n", r, size);
+  pthread_mutex_unlock(&sp->ws_mutex);
+}
+
+static void send_ws_text_to_session(struct session *sp, const char *msg)
+{
+  pthread_mutex_lock(&sp->ws_mutex);
+  onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+  onion_websocket_write(sp->ws, msg, strlen(msg));
+  pthread_mutex_unlock(&sp->ws_mutex);
+}
+
+static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length)
+{
+  struct rtp_header rtp;
+  uint8_t output_buffer[PKTSIZE];
+  float powers[PKTSIZE / sizeof(float)];
+  uint64_t time;
+  double r_freq, r_bin_bw;
+
+  /* Update status values early (keeps some fields fresh) */
+  decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+
+  memset(&rtp, 0, sizeof(rtp));
+  rtp.type = 0x7F; /* spectrum data */
+  rtp.version = RTP_VERS;
+  rtp.ssrc = sp->ssrc;
+  rtp.marker = true;
+  rtp.seq = rtp_seq++;
+
+  uint8_t *bp = (uint8_t *)hton_rtp((char *)output_buffer, &rtp);
+
+  uint32_t *ip = (uint32_t *)bp;
+  *ip++ = htonl(sp->bins);
+  *ip++ = htonl(sp->center_frequency);
+  *ip++ = htonl(sp->frequency);
+  *ip++ = htonl(sp->bin_width);
+
+  *ip++ = (uint32_t)round(fabs(Frontend.samprate));
+  *ip++ = (uint32_t)Frontend.rf_agc;
+  *(uint64_t *)ip = (uint64_t)Frontend.samples; ip += 2;
+  *(uint64_t *)ip = (uint64_t)Frontend.overranges; ip += 2;
+  *(uint64_t *)ip = (uint64_t)Frontend.samp_since_over; ip += 2;
+  *(uint64_t *)ip = (uint64_t)Channel.clocktime; ip += 2;
+  *(float *)ip++ = (float)Channel.spectrum.noise_bw;
+  *(float *)ip++ = (float)Frontend.rf_atten;
+  *(float *)ip++ = (float)Frontend.rf_gain;
+  *(float *)ip++ = (float)Frontend.rf_level_cal;
+  *(float *)ip++ = (float)power2dB(Frontend.if_power);
+  *(float *)ip++ = (float)sp->noise_density_audio;
+  *ip++ = (uint32_t)sp->zoom_index;
+  *(float *)ip++ = (float)Channel.spectrum.base;
+  *(float *)ip++ = (float)Channel.spectrum.step;
+
+  int header_size = (uint8_t *)ip - &output_buffer[0];
+  int length = (PKTSIZE - header_size) / sizeof(float);
+
+  int npower = extract_powers(powers, length, &time, &r_freq, &r_bin_bw,
+                              sp->ssrc + 1, buffer + 1, rx_length - 1, sp);
+  if (npower < 0)
+    return;
+
+  uint8_t *fp = (uint8_t *)ip;
+  for (int i = 0; i < npower; i++) {
+    *fp++ = powers[i];
+  }
+  int size = (uint8_t *)fp - &output_buffer[0];
+
+  send_ws_binary_to_session(sp, output_buffer, size);
+}
+
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length,
+                                  double *last_sent_backend_frequency)
+{
+  uint8_t output_buffer[PKTSIZE];
+  decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+
+  float n0 = 0.0f;
+  if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
+    sp->noise_density_audio = n0;
+
+  /* Handle preset mismatch / adoption */
+  if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
+    const int MAX_PRESET_MISMATCH = 3;
+    sp->preset_mismatch_count++;
+    if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
+      if (verbose)
+        fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
+                sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+      sp->preset_mismatch_count = 0;
+      char pm[64];
+      snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
+      send_ws_text_to_session(sp, pm);
+    }
+  } else {
+    sp->preset_mismatch_count = 0;
+  }
+
+  /* Backend frequency change -> notify client */
+  if (*last_sent_backend_frequency != Channel.tune.freq) {
+    current_backend_frequency = Channel.tune.freq;
+    *last_sent_backend_frequency = Channel.tune.freq;
+    char freq_msg[64];
+    snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
+    send_ws_text_to_session(sp, freq_msg);
+  }
+
+  /* Frequency mismatch handling (adopt/resend logic) */
+  if (Channel.tune.freq != sp->frequency) {
+    const int MAX_FREQ_MISMATCH = 3;
+    if (Channel.tune.freq == sp->frequency) {
+      sp->freq_mismatch_count = 0;
+    } else {
+      sp->freq_mismatch_count++;
+      if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+        bool adopt_freq = true;
+        if (adopt_freq) {
+          if (verbose)
+            fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
+                    sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+          sp->frequency = (uint32_t)lround(Channel.tune.freq);
+          char freq_msg[64];
+          snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+          send_ws_text_to_session(sp, freq_msg);
+        } else {
+          char f[128];
+          sprintf(f, "%.3f", 0.001 * sp->frequency);
+          control_set_frequency(sp, f);
+        }
+        sp->freq_mismatch_count = 0;
+      }
+    }
+  } else if (sp->freq_mismatch_count != 0) {
+    sp->freq_mismatch_count = 0;
+  }
+
+  pthread_mutex_lock(&output_dest_socket_mutex);
+  if (Channel.output.dest_socket.sa_family != 0)
+    pthread_cond_broadcast(&output_dest_socket_cond);
+  pthread_mutex_unlock(&output_dest_socket_mutex);
+
+  struct rtp_header rtp;
+  memset(&rtp, 0, sizeof(rtp));
+  rtp.type = 0x7E; /* radio data */
+  rtp.version = RTP_VERS;
+  rtp.ssrc = sp->ssrc;
+  rtp.marker = true;
+  rtp.seq = rtp_seq++;
+  uint8_t *bp = (uint8_t *)hton_rtp((char *)output_buffer, &rtp);
+  encode_float(&bp, BASEBAND_POWER, Channel.sig.bb_power);
+  encode_float(&bp, LOW_EDGE, Channel.filter.min_IF);
+  encode_float(&bp, HIGH_EDGE, Channel.filter.max_IF);
+  if (!sp->once) {
+    sp->once = true;
+    if (description_override)
+      encode_string(&bp, DESCRIPTION, description_override, strlen(description_override));
+    else
+      encode_string(&bp, DESCRIPTION, Frontend.description, strlen(Frontend.description));
+  }
+  int size = (uint8_t *)bp - output_buffer;
+  send_ws_binary_to_session(sp, output_buffer, size);
+}
+
+
