@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <math.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -89,6 +90,7 @@ struct session {
   int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
   float spectrum_base;
   float spectrum_step;
+  double shift; /* per-session post-detection audio frequency shift, Hz */
   /* uint32_t last_poll_tag; */
 };
 
@@ -901,6 +903,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->bin_width=zoom_table[level].bin_width; // width of a pixel in hz
   sp->next=NULL;
   sp->previous=NULL;
+  sp->shift = NAN;
 
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
@@ -1917,6 +1920,7 @@ multiple clients, supporting features like dynamic scaling, error correction, an
 static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
 static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
+static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
 
 void *ctrl_thread(void *arg)
 {
@@ -1983,6 +1987,38 @@ static void send_ws_text_to_session(struct session *sp, const char *msg)
   pthread_mutex_unlock(&sp->ws_mutex);
 }
 
+/* Helper: scan TLV buffer for presence of a type without fully decoding */
+static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want)
+{
+  uint8_t const *cp = buf;
+  uint8_t const *end = buf + len;
+  while(cp < end){
+    enum status_type type = *cp++;
+    if(type == EOL)
+      break;
+    if(cp >= end)
+      break;
+    unsigned int optlen = *cp++;
+    if(optlen & 0x80){
+      int length_of_length = optlen & 0x7f;
+      optlen = 0;
+      if(cp + length_of_length > end)
+        break;
+      while(length_of_length > 0){
+        optlen <<= 8;
+        optlen |= *cp++;
+        length_of_length--;
+      }
+    }
+    if(cp + optlen > end)
+      break;
+    if(type == want)
+      return true;
+    cp += optlen;
+  }
+  return false;
+}
+
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length)
 {
   struct rtp_header rtp;
@@ -2046,7 +2082,18 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
                                   double *last_sent_backend_frequency)
 {
   uint8_t output_buffer[PKTSIZE];
+  /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
+  bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+
+  if (have_shift) {
+    double new_shift = Channel.tune.shift;
+    if (isnan(sp->shift) || sp->shift != new_shift) {
+      sp->shift = new_shift;
+      if (verbose)
+        fprintf(stderr, "SSRC %u: received shift %.6f Hz\n", sp->ssrc, new_shift);
+    }
+  }
 
   float n0 = 0.0f;
   if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
