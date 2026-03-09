@@ -1220,10 +1220,6 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
   if (high_str && strlen(high_str) > 0)
     highf = strtof(high_str, NULL);
 
-  /* Debug: print the parsed filter edge values and original strings */
-//  fprintf(stderr, "control_set_filter_edges: SSRC=%u low_str='%s' high_str='%s' lowf=%f highf=%f\n",
-//          sp ? sp->ssrc : 0, low_str ? low_str : "", high_str ? high_str : "", lowf, highf);
-
   *bp++ = CMD; // Command
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
   encode_int(&bp, COMMAND_TAG, arc4random());
@@ -1329,10 +1325,7 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
     else if (strcmp(type_str, "HP5FT_WINDOW") == 0) val = 8;
     else val = 0;
   }
-
-
   int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* target spectrum stream (ssrc+1) */
-
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   encode_int(&bp, OUTPUT_SSRC, target_ssrc);
@@ -1344,7 +1337,6 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
     encode_float(&bp,SPECTRUM_SHAPE,shape);
   }
   encode_eol(&bp);
-
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
@@ -1566,11 +1558,8 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
   uint8_t const *cp = buffer;
   int l_count=1234567;
   int64_t N = (Frontend.L + Frontend.M - 1);
-
-//fprintf(stderr,"%s: length=%d\n",__FUNCTION__,length);x
   while(cp - buffer < length){
     enum status_type const type = *cp++; // increment cp to length field
-
     if(type == EOL)
       break; // End of list
 
@@ -1637,10 +1626,6 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       *bin_bw = decode_float(cp,optlen);
       break;
     case IF_POWER:
-      // newell 12/1/2024, 19:09:01
-      // I expected decode_radio_status() to handle this and NOISE_DENSITY, but
-      // the values never seemed to be live. Maybe they're part of the channel
-      // instead? This seems to work for now at least.
       sp->if_power = decode_float(cp,optlen);
       break;
     case BIN_COUNT: // Do we check that this equals the length of the BIN_DATA tlv?
@@ -1655,20 +1640,10 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
 
   if (l_count != l_ccount) {
     // not the expected number of bins...not sure why, but avoid crashing for now
-    /* if (verbose) { */
-    /*   ++error_count; */
-    /*   fprintf(stderr,"BIN_COUNT error %d on ssrc %d BIN_DATA had %d bins, but BIN_COUNT was %d, packet length %d bytes tag %08X\n",error_count,ssrc,l_count,l_ccount,length, sp->last_poll_tag); */
-    /*   fflush(stderr); */
-    /* } */
     return -1;
   }
 
   if (l_count > MAX_BINS) {
-    /* if (verbose) { */
-    /*   ++error_count; */
-    /*   fprintf(stderr,"BIN_DATA error %d on ssrc %d shows %d bins, BIN_COUNT was %d, but MAX_BINS is %d\n",error_count,ssrc,l_count,l_ccount,MAX_BINS); */
-    /*   fflush(stderr); */
-    /* } */
     return -1;
   }
   return l_ccount;
@@ -1834,7 +1809,6 @@ returns `NULL` when the thread exits, as required by the POSIX thread API.
 */
 void *spectrum_thread(void *arg) {
   struct session *sp = (struct session *)arg;
-  //fprintf(stderr,"%s: %d\n",__FUNCTION__,sp->ssrc);
   while(sp->spectrum_active) {
     pthread_mutex_lock(&sp->spectrum_mutex);
     control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
@@ -1844,21 +1818,8 @@ void *spectrum_thread(void *arg) {
       perror("spectrum_thread: usleep(spectrum_poll_us)");
     }
   }
-  //fprintf(stderr,"%s: %d EXIT\n",__FUNCTION__,sp->ssrc);
   return NULL;
 }
-
-/* Borrowed from ka9q-radio misc.c, commit
-   920b0921e0db3a2ca0cbb4a38707fb62ae02cd63
-
-   Change warning message to clarify ka9q-web needs to be run as root (!) or
-   maybe with CAP_SYS_NICE capability? to switch to a realtime priority. Whether
-   you want to do that is another question. WD doesn't appear to run it as root
-   or with CAP_SYS_NICE, and the warnings weren't emitted before, so now the
-   call to realtim() is gated behind a CLI flag.
- */
-
-// Set realtime priority (if possible)
 
 /*
 The `set_realtime` function is designed to elevate the scheduling priority of the calling thread or process,
