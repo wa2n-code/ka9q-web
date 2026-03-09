@@ -2061,7 +2061,7 @@ void *ctrl_thread(void *arg) {
             const int MAX_PRESET_MISMATCH = 3;
             sp->preset_mismatch_count++;
             if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-              bool adopt_preset = false;
+              bool adopt_preset = true;
               if(adopt_preset){
                 if (verbose)
                   fprintf(stderr,"SSRC %u: adopting polled preset %s after %d mismatches\n", sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
@@ -2116,17 +2116,23 @@ void *ctrl_thread(void *arg) {
               } else {
                 sp->freq_mismatch_count++;
                 if (verbose)
-                  fprintf(stderr,"SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz (mismatch count=%d)\n",
-                          sp->ssrc,
-                          0.001 * sp->frequency,
-                          Channel.tune.freq * 0.001,
-                          sp->freq_mismatch_count);
+                  fprintf(stderr, "SSRC %u requested freq %.3f kHz, but poll returned %.3f kHz (mismatch count=%d)\n",
+                          sp->ssrc, .001 * sp->frequency, Channel.tune.freq * 0.001, sp->freq_mismatch_count);
                 if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-                  bool adopt_freq = false;
+                  bool adopt_freq = true;
                   if(adopt_freq){
                     if (verbose)
                       fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n", sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
                     sp->frequency = (uint32_t)lround(Channel.tune.freq);
+                    /* Notify the client UI of the adopted backend frequency (BFREQ) */
+                    {
+                      char freq_msg[64];
+                      snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+                      pthread_mutex_lock(&sp->ws_mutex);
+                      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+                      onion_websocket_write(sp->ws, freq_msg, strlen(freq_msg));
+                      pthread_mutex_unlock(&sp->ws_mutex);
+                    }
                   }
                   else {
                     // If we decide not to adopt the backend frequency, we should probably resend our requested frequency to correct the backend
