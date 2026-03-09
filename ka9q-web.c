@@ -1554,6 +1554,10 @@ Overall, this function is robust against malformed or unexpected data, and is ca
 and to validate all extracted information. It is a good example of defensive programming in a low-level data parsing
 context.
 */
+/* Forward declarations for helpers used by extract_powers (definitions follow below) */
+static int handle_bin_byte_data(float *power, int npower, uint8_t const *cp, unsigned int optlen);
+static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned int optlen, struct session *sp);
+
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp){
 #if 0  // use later
   double l_lo1 = 0,l_lo2 = 0;
@@ -1615,42 +1619,19 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       l_count = optlen / sizeof(uint8_t);
       if(l_count > npower)
         return -2; // Not enough room in caller's array
-
       if (0 == N)
-         break;
-      for(int i=0; i < l_count; i++){
-	uint8_t j = decode_int8(cp,sizeof(uint8_t));
-	power[i] = j;
-        cp += sizeof(uint8_t);
-      }
+        break;
+      if (handle_bin_byte_data(power, npower, cp, optlen) < 0)
+        return -2;
       break;
     case BIN_DATA:
       l_count = optlen/sizeof(float);
       if(l_count > npower)
         return -2; // Not enough room in caller's array
       if (0 == N)
-         break;
-      sp->bins_max_db = -INFINITY;
-      sp->bins_min_db = +INFINITY;
-      // Reorder into monotonic frequency order
-      {
-	int i = l_count / 2; // DC
-	do {
-	  float p = decode_float(cp,sizeof(float)); // convert to dB here 
-	  p = power2dB(p);
-	  if(p == -INFINITY)
-	    p = -150;
-	  power[i] = p;
-	  if (p > sp->bins_max_db)
-	    sp->bins_max_db = p;
-	  if (p < sp->bins_min_db)
-	    sp->bins_min_db = p;
-	  cp += sizeof(float);
-	  i++;
-	  if(i == l_count)
-	    i = 0;
-	} while(i != l_count/2);
-      }
+        break;
+      if (handle_bin_data(power, npower, cp, optlen, sp) < 0)
+        return -2;
       break;
     case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -1691,6 +1672,50 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
     return -1;
   }
   return l_ccount;
+}
+
+/* --- Helpers for extract_powers --- */
+static int handle_bin_byte_data(float *power, int npower, uint8_t const *cp, unsigned int optlen)
+{
+  int l_count = optlen / sizeof(uint8_t);
+  if (l_count > npower)
+    return -1;
+  if (l_count == 0)
+    return 0;
+  for (int i = 0; i < l_count; i++) {
+    uint8_t j = decode_int8(cp, sizeof(uint8_t));
+    power[i] = j;
+    cp += sizeof(uint8_t);
+  }
+  return 0;
+}
+
+static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned int optlen, struct session *sp)
+{
+  int l_count = optlen / sizeof(float);
+  if (l_count > npower)
+    return -1;
+  if (l_count == 0)
+    return 0;
+  sp->bins_max_db = -INFINITY;
+  sp->bins_min_db = +INFINITY;
+  int i = l_count / 2; // DC
+  do {
+    float p = decode_float(cp, sizeof(float));
+    p = power2dB(p);
+    if (p == -INFINITY)
+      p = -150;
+    power[i] = p;
+    if (p > sp->bins_max_db)
+      sp->bins_max_db = p;
+    if (p < sp->bins_min_db)
+      sp->bins_min_db = p;
+    cp += sizeof(float);
+    i++;
+    if (i == l_count)
+      i = 0;
+  } while (i != l_count / 2);
+  return 0;
 }
 
 /*
