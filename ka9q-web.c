@@ -100,6 +100,7 @@ int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
 extern void control_set_frequency(struct session *sp,char *str);
 extern void control_set_mode(struct session *sp,char *str);
+extern void control_set_shift(struct session *sp,char *str);
 extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
 extern void control_set_spectrum_average(struct session *sp, char *val_str);
 extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
@@ -1209,6 +1210,40 @@ void control_set_frequency(struct session *sp,char *str) {
   }
 }
 
+/*
+  control_set_shift
+  -----------------
+  Send a `SHIFT_FREQUENCY` command to the backend for the given session.
+
+  - `str` is parsed as a floating-point shift in Hz.
+  - Command format mirrors other control setters: `{ CMD, OUTPUT_SSRC, COMMAND_TAG, SHIFT_FREQUENCY, EOL }`.
+  - Uses `ctl_mutex` to protect `Ctl_fd` and sleeps `CONTROL_USLEEP_US` after a successful send.
+  - Note: the session's `sp->shift` is updated by incoming status packets; this function
+    does not modify `sp->shift` so the backend remains the authoritative source.
+*/
+void control_set_shift(struct session *sp,char *str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  double s;
+
+  if(strlen(str) > 0){
+    *bp++ = CMD; // Command
+    s = strtod(str, NULL); // shift in Hz
+    encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_double(&bp,SHIFT_FREQUENCY,s);
+    encode_eol(&bp);
+    int const command_len = bp - cmdbuffer;
+    pthread_mutex_lock(&ctl_mutex);
+    if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
+      fprintf(stderr,"command send error: %s\n",strerror(errno));
+    } else {
+      usleep(CONTROL_USLEEP_US);
+    }
+    pthread_mutex_unlock(&ctl_mutex);
+  }
+}
+
 /* Send filter edge settings (low and high) to the control socket for this session.
    low_str and high_str are strings containing values in Hz (or kHz?) - follow same units as client.
 */
@@ -1520,6 +1555,10 @@ void control_poll(struct session *sp) {
   pthread_mutex_unlock(&ctl_mutex);
 }
 
+/* Forward declarations for helpers used by extract_powers (definitions follow below) */
+static int handle_bin_byte_data(float *power, int npower, uint8_t const *cp, unsigned int optlen);
+static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned int optlen, struct session *sp);
+
 /*
 The `extract_powers` function is designed to parse a binary buffer containing a sequence of tagged data fields
 (often called TLVs: Type-Length-Value) and extract spectral power information for a given session. This function
@@ -1549,10 +1588,6 @@ Overall, this function is robust against malformed or unexpected data, and is ca
 and to validate all extracted information. It is a good example of defensive programming in a low-level data parsing
 context.
 */
-/* Forward declarations for helpers used by extract_powers (definitions follow below) */
-static int handle_bin_byte_data(float *power, int npower, uint8_t const *cp, unsigned int optlen);
-static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned int optlen, struct session *sp);
-
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp){
 #if 0  // use later
   double l_lo1 = 0,l_lo2 = 0;
@@ -1885,6 +1920,12 @@ void set_realtime(void){
   }
 }
 
+/* Forward declarations for helpers used by ctrl_thread (helpers defined later) */
+static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
+static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
+static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
+
 /*
 The `ctrl_thread` function is a POSIX thread routine responsible for handling incoming status and spectrum data packets,
 processing them, and forwarding relevant information to connected clients via WebSockets. This function is part
@@ -1902,9 +1943,12 @@ determine which session the data belongs to.
 If the SSRC indicates spectrum data (odd value), the function locates the corresponding session and updates
 status values by calling `decode_radio_status`. It then prepares an RTP (Real-time Transport Protocol)
 header and serializes various session and frontend statistics into an output buffer. The function then extracts
-power values from the received packet, processes them according to the desired precision (float, int16, or uint8),
-and writes the processed spectrum data to the client’s WebSocket. The code includes logic to rescale and auto-range
-the data for 8-bit transmission, ensuring efficient use of the available dynamic range.
+power values from the received packet (via `extract_powers()` and its helpers), packages the decoded power
+values into the output buffer, and sends the binary payload to the client’s WebSocket.
+
+Note: `extract_powers()` and `handle_bin_data()` compute per-session min/max dB (stored in
+`sp->bins_min_db` / `sp->bins_max_db`) while decoding, but `process_spectrum_packet()` does not apply any
+automatic rescaling/autoranging to the outgoing 8-bit payload in this implementation.
 
 If the SSRC indicates regular status data (even value), the function updates the session’s status, extracts noise density,
 and checks if the current preset and frequency match the requested values. If not, it issues commands to correct them.
@@ -1916,12 +1960,6 @@ and WebSocket connections. The code is robust, handling errors gracefully and pr
 This design allows the application to efficiently process and forward real-time radio or spectrum data to
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
-/* Forward declarations for helpers used by ctrl_thread (helpers defined later) */
-static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
-static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
-static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
-static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
-
 void *ctrl_thread(void *arg)
 {
   static double last_sent_backend_frequency = 0.0;
@@ -1969,6 +2007,17 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
   return rx_length;
 }
 
+/*
+  send_ws_binary_to_session
+  --------------------------
+  Thread-safe helper to send a binary payload over a session's websocket to the web browser client.
+
+  - Recipient: the web browser client connected on `sp->ws`.
+  - Locks `sp->ws_mutex` to serialize websocket access for the session.
+  - Sets the websocket opcode to binary and writes `size` bytes from `buf`.
+  - Logs an error to stderr when the write fails (return value <= 0).
+  - Always unlocks `sp->ws_mutex` before returning.
+*/
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size)
 {
   pthread_mutex_lock(&sp->ws_mutex);
@@ -1979,6 +2028,17 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
   pthread_mutex_unlock(&sp->ws_mutex);
 }
 
+/*
+  send_ws_text_to_session
+  ------------------------
+  Thread-safe helper to send a text (UTF-8) message over a session's websocket to the web browser client.
+
+  - Recipient: the web browser client connected on `sp->ws`.
+  - Locks `sp->ws_mutex` to serialize websocket access for the session.
+  - Sets the websocket opcode to text and writes the NUL-terminated `msg`.
+  - Does not perform retries; failures are not explicitly reported here.
+  - Always unlocks `sp->ws_mutex` before returning.
+*/
 static void send_ws_text_to_session(struct session *sp, const char *msg)
 {
   pthread_mutex_lock(&sp->ws_mutex);
@@ -2019,6 +2079,26 @@ static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want)
   return false;
 }
 
+/*
+  process_spectrum_packet
+  ------------------------
+  Handle an incoming spectrum STATUS packet for a given session and forward a packed
+  spectrum RTP payload to the web browser client.
+
+  - Inputs: `sp` is the session (even SSRC); `buffer`/`rx_length` contain the received
+    STATUS TLV payload (the incoming packet carries the spectrum SSRC = `sp->ssrc+1`).
+  - Steps performed:
+      1) Call `decode_radio_status()` to refresh `Frontend`/`Channel` state.
+      2) Build an RTP header and serialize session/frontend metadata into `output_buffer`.
+      3) Call `extract_powers()` (using `sp->ssrc + 1`) to decode BIN_DATA/BIN_BYTE_DATA
+         into a float `powers[]` array.
+      4) Pack the decoded power values into the output buffer and send them to the web
+         browser client via `send_ws_binary_to_session()`.
+  - Notes:
+      * `extract_powers()` / `handle_bin_data()` compute `sp->bins_min_db` and
+        `sp->bins_max_db`, but this function does not perform any automatic
+        rescaling/autoranging of the outgoing payload.
+*/
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length)
 {
   struct rtp_header rtp;
@@ -2078,8 +2158,31 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
   send_ws_binary_to_session(sp, output_buffer, size);
 }
 
+/*
+  process_status_packet
+  ----------------------
+  Handle an incoming regular STATUS packet for a session and forward radio/status
+  metadata (and notifications) to the web browser client.
+
+  - Inputs: `sp` is the session (even SSRC); `buffer`/`rx_length` contain the received
+   STATUS TLV payload for that session.
+  - Actions performed:
+    1) Optionally detect explicit TLVs (e.g., SHIFT_FREQUENCY) using `tlv_has_type()` and
+      call `decode_radio_status()` to update `Frontend`/`Channel`.
+    2) Extract noise density via `extract_noise()` and update `sp->noise_density_audio`.
+    3) Perform preset and frequency mismatch detection/adoption logic and send
+      textual notifications to the client (e.g., `M:<preset>`, `BFREQ:<freq>`)
+      via `send_ws_text_to_session()` when appropriate.
+    4) Broadcast readiness for audio output socket via `output_dest_socket_cond` if set.
+    5) Build a status RTP payload (baseband power, filter edges, optional description)
+      and send it to the browser via `send_ws_binary_to_session()`.
+  - Notes:
+    * `last_sent_backend_frequency` is used to avoid redundant BFREQ notifications.
+    * The function relies on helper wrappers (send_ws_*) to perform websocket I/O
+      with proper locking.
+*/
 static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length,
-                                  double *last_sent_backend_frequency)
+                       double *last_sent_backend_frequency)
 {
   uint8_t output_buffer[PKTSIZE];
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
