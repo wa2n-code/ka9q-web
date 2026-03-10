@@ -2221,7 +2221,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
        changes the preset. */
     const int MAX_PRESET_MISMATCH = 3;
     sp->preset_mismatch_count++;
-    fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
+    if(verbose)
+      fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
             sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
       bool adopt_preset = false;
@@ -2271,7 +2272,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       sp->freq_mismatch_count = 0;
     } else {
       sp->freq_mismatch_count++;
-      fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
+      if(verbose)
+        fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
               sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
       if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
         bool adopt_freq = false;
@@ -2285,6 +2287,9 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
           send_ws_text_to_session(sp, freq_msg);
         } else {
           char f[128];
+          if(verbose)
+             fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
+                   sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
           sprintf(f, "%.3f", 0.001 * sp->frequency);
           control_set_frequency(sp, f);
         }
