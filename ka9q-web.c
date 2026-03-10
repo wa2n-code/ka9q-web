@@ -2215,19 +2215,41 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
   /* Handle preset mismatch / adoption */
   if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
+    /* Track consecutive preset mismatches and adopt the backend-reported
+       preset if it persists for MAX_PRESET_MISMATCH cycles. This prevents
+       repeated mismatch churn when another client on the same SSRC
+       changes the preset. */
     const int MAX_PRESET_MISMATCH = 3;
     sp->preset_mismatch_count++;
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
+      bool adopt_preset = false;
+      if (adopt_preset) {
+        if (verbose)
+          fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
+                  sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+        /* Adopt backend preset into session requested_preset */
+        strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+        sp->preset_mismatch_count = 0;
+        /* Notify this client so its UI can update */
+        char pm[64];
+        snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
+        pthread_mutex_lock(&sp->ws_mutex);
+        onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+        onion_websocket_write(sp->ws, pm, strlen(pm));
+        pthread_mutex_unlock(&sp->ws_mutex);
+      } else {
+        if (verbose)
+          fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
+                  sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+        control_set_mode(sp, sp->requested_preset);
+      }
+    } else {
       if (verbose)
-        fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
-                sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
-      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
-      sp->preset_mismatch_count = 0;
-      char pm[64];
-      snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
-      send_ws_text_to_session(sp, pm);
+        fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
+                sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
   } else {
+    /* Preset matches; clear any accumulated mismatch count */
     sp->preset_mismatch_count = 0;
   }
 
@@ -2248,7 +2270,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     } else {
       sp->freq_mismatch_count++;
       if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-        bool adopt_freq = true;
+        bool adopt_freq = false;
         if (adopt_freq) {
           if (verbose)
             fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
