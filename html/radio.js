@@ -27,6 +27,8 @@
 
       // Variable to store the actual backend frequency as reported by the server
       var backendFrequencyHz = 0;
+      // Server-provided post-detection audio/CW shift (Hz)
+      var shiftHz = 0;
 
       function createCWDebugOverlay() {
         try {
@@ -175,7 +177,7 @@
           if (mode === 'cwu' || mode === 'cwl') {
             const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
             if (tuned && Number.isFinite(tuned) && tuned !== 0) {
-              const offset = 500; // Hz
+              const offset = shiftHz; // Hz
               const markerHz = (mode === 'cwu') ? (tuned - offset) : (tuned + offset);
               spectrum.backendMarkerHz = markerHz;
               spectrum.backendMarkerActive = true;
@@ -818,6 +820,30 @@ function applyQuickBW() {
             } else {
               console.debug('[radio.js] BFREQ parseFloat returned NaN for', args[1]);
             }
+            return;
+          }
+
+          // SHIFT: server-sent per-session post-detection audio shift in Hz (e.g., "SHIFT:123.000")
+          if (args[0] === 'SHIFT' && args.length > 1) {
+            const s_raw = parseFloat(args[1]);
+            if (Number.isFinite(s_raw)) {
+              // Only update and call marker refresh when the value actually changes
+              const changed = (typeof shiftHz !== 'number') || (Math.abs(shiftHz - s_raw) > 0.0001);
+              shiftHz = s_raw;
+              try {
+                const si = document.getElementById('shiftInput');
+                if (si) {
+                  si.value = shiftHz.toFixed(0);
+                }
+              } catch (e) { /* ignore UI set errors */ }
+              try {
+                if (changed) updateCWMarker();
+              } catch (e) { console.debug('[radio.js] updateCWMarker failed', e); }
+              console.debug('[radio.js] SHIFT received, shiftHz=', shiftHz, 'changed=', changed);
+            } else {
+              console.debug('[radio.js] SHIFT parseFloat returned NaN for', args[1]);
+            }
+            return;
           }
           // (BFREQ messages ignored for marker placement)
           // Mode change from server (e.g., "M:usb") - apply without echoing back

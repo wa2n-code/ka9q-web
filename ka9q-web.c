@@ -2200,6 +2200,12 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       sp->shift = new_shift;
       if (verbose)
         fprintf(stderr, "SSRC %u: received shift %.6f Hz\n", sp->ssrc, new_shift);
+      /* Notify web client that backend reports a new per-session shift value */
+      {
+        char shift_msg[64];
+        snprintf(shift_msg, sizeof(shift_msg), "SHIFT:%.3f", new_shift);
+        send_ws_text_to_session(sp, shift_msg);
+      }
     }
   }
 
