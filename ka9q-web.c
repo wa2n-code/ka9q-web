@@ -587,6 +587,11 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         control_set_mode(sp,&tmp[2]);
         control_poll(sp);
         break;
+      case 'T':
+      case 't':
+        /* Expect format: t:<shift_in_Hz> */
+        control_set_shift(sp, &tmp[2]);
+        break;
       case 'R':
       case 'r':
         /* Set spectrum poll interval. Client sends milliseconds; server stores microseconds */
