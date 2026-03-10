@@ -2219,7 +2219,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
        preset if it persists for MAX_PRESET_MISMATCH cycles. This prevents
        repeated mismatch churn when another client on the same SSRC
        changes the preset. */
-    const int MAX_PRESET_MISMATCH = 3;
+    const int MAX_PRESET_MISMATCH = 5;
     sp->preset_mismatch_count++;
     if(verbose)
       fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
@@ -2267,7 +2267,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
   /* Frequency mismatch handling (adopt/resend logic) */
   if (Channel.tune.freq != sp->frequency) {
-    const int MAX_FREQ_MISMATCH = 3;
+    const int MAX_FREQ_MISMATCH = 5;
     if (Channel.tune.freq == sp->frequency) {
       sp->freq_mismatch_count = 0;
     } else {
