@@ -178,7 +178,7 @@
             const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
             if (tuned && Number.isFinite(tuned) && tuned !== 0) {
               const offset = shiftHz; // Hz
-              const markerHz = (mode === 'cwu') ? (tuned - offset) : (tuned + offset);
+              const markerHz = tuned - offset; // For both CWU and CWL, the marker is at tuned frequency minus the shift
               spectrum.backendMarkerHz = markerHz;
               spectrum.backendMarkerActive = true;
               return;
