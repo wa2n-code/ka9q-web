@@ -557,7 +557,9 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
           fflush(stderr);
         }*/
-        sp->frequency = strtod(&tmp[2],0) * 1000;
+          /* Convert kHz string to Hz and round to nearest Hz to avoid
+            floating-point truncation producing off-by-one Hz errors. */
+          sp->frequency = (uint32_t)lround(strtod(&tmp[2],0) * 1000.0);
         int32_t span = sp->bin_width * sp->bins;
         int32_t min_f = sp->center_frequency - (span / 2);
         int32_t max_f = sp->center_frequency + (span / 2);
@@ -1214,7 +1216,8 @@ void control_set_frequency(struct session *sp,char *str) {
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
-    sp->frequency = f;
+    /* Round to nearest Hz when storing in integer session field */
+    sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
@@ -2216,16 +2219,12 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       sp->shift = new_shift;
       if (verbose)
         fprintf(stderr, "SSRC %u: received shift %.6f Hz\n", sp->ssrc, new_shift);
-      /* Notify web client that backend reports a new per-session shift value
-         only if adoptOnParameterMismatch is enabled. When disabled, keep the
-         server-side value but do not push updates to the client UI. */
-      if (adoptOnParameterMismatch) {
+      /* Always notify web client that backend reports a new per-session
+         shift value. Do not gate SHIFT notifications on adoptOnParameterMismatch. */
+      {
         char shift_msg[64];
         snprintf(shift_msg, sizeof(shift_msg), "SHIFT:%.3f", new_shift);
         send_ws_text_to_session(sp, shift_msg);
-      } else {
-        if (verbose)
-          fprintf(stderr, "SSRC %u: SHIFT update suppressed (adopt disabled)\n", sp->ssrc);
       }
     }
   }
@@ -2278,29 +2277,42 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     sp->preset_mismatch_count = 0;
   }
 
-  /* Backend frequency change -> notify client */
-  if (*last_sent_backend_frequency != Channel.tune.freq) {
-    current_backend_frequency = Channel.tune.freq;
-    char freq_msg[64];
-    snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
-    /* Only notify client of backend frequency changes when adoption is enabled.
-       Update the last_sent_backend_frequency only when a notification is sent. */
-    if (adoptOnParameterMismatch) {
-      send_ws_text_to_session(sp, freq_msg);
-      *last_sent_backend_frequency = Channel.tune.freq;
+  /* Backend frequency change -> notify client (tolerant comparison)
+     Use a small tolerance to prevent tiny floating-point differences from
+     causing repeated notifications or false mismatch detection. */
+  {
+    const double FREQ_EPS_HZ = 0.5; /* 0.5 Hz tolerance */
+    bool backend_changed = isnan(*last_sent_backend_frequency) ||
+                           (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
+    if (backend_changed) {
+      current_backend_frequency = Channel.tune.freq;
+      char freq_msg[64];
+      snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
+      /* Only notify client of backend frequency changes when adoption is enabled.
+         Update the last_sent_backend_frequency only when a notification is sent. */
+      if (adoptOnParameterMismatch) {
+        send_ws_text_to_session(sp, freq_msg);
+        *last_sent_backend_frequency = Channel.tune.freq;
+      }
     }
   }
 
-  /* Frequency mismatch handling (adopt/resend logic) */
-  if (Channel.tune.freq != sp->frequency) {
+  /* Frequency mismatch handling (adopt/resend logic) with tolerant comparison */
+  {
     const int MAX_FREQ_MISMATCH = 5;
-    if (Channel.tune.freq == sp->frequency) {
-      sp->freq_mismatch_count = 0;
+    const double FREQ_EPS_HZ = 0.5; /* same tolerance used above */
+    double backend_freq = Channel.tune.freq;
+    double session_freq = (double)sp->frequency;
+    double diff = fabs(backend_freq - session_freq);
+
+    if (diff <= FREQ_EPS_HZ) {
+      /* Considered matched */
+      if (sp->freq_mismatch_count != 0) sp->freq_mismatch_count = 0;
     } else {
       sp->freq_mismatch_count++;
       if(verbose)
-        fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
-              sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+        fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
+                sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
       if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
         bool adopt_freq = adoptOnParameterMismatch;
         if (adopt_freq) {
@@ -2316,16 +2328,14 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         } else {
           char f[128];
           if(verbose)
-             fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
-                   sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
+            fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
+                    sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
           sprintf(f, "%.3f", 0.001 * sp->frequency);
           control_set_frequency(sp, f);
         }
         sp->freq_mismatch_count = 0;
       }
     }
-  } else if (sp->freq_mismatch_count != 0) {
-    sp->freq_mismatch_count = 0;
   }
 
   pthread_mutex_lock(&output_dest_socket_mutex);
