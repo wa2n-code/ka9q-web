@@ -2225,7 +2225,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
             sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      bool adopt_preset = false;
+      bool adopt_preset = true;
       if (adopt_preset) {
         if (verbose)
           fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
@@ -2244,7 +2244,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         if (verbose)
           fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
                   sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-        control_set_mode(sp, sp->requested_preset);
+        //control_set_mode(sp, sp->requested_preset);
       }
     } else {
       if (verbose)
@@ -2276,7 +2276,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
               sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
       if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-        bool adopt_freq = false;
+        bool adopt_freq = true;
         if (adopt_freq) {
           if (verbose)
             fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
@@ -2291,7 +2291,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
              fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
                    sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
           sprintf(f, "%.3f", 0.001 * sp->frequency);
-          control_set_frequency(sp, f);
+          //control_set_frequency(sp, f);
         }
         sp->freq_mismatch_count = 0;
       }

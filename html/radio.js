@@ -12,6 +12,8 @@
       let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
       // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
       const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
+      // Milliseconds to stagger paired control sends (mode then frequency)
+      const COMMAND_SEND_SPACING_MS = 50;
       // pending filter edges to send once websocket opens
       let pendingFilterEdges = null;
       // expected ack tracking for last sent edges
@@ -1736,7 +1738,8 @@ function applyQuickBW() {
       // block programmatic updates briefly so incoming status updates don't
       // collide with the new requested frequency
       if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
-      sendControl('freq', "F:" + (freq / 1000.0).toFixed(3), 50);
+      // Stagger frequency send slightly after any preceding paired send (mode)
+      setTimeout(() => { sendControl('freq', "F:" + (freq / 1000.0).toFixed(3), 50); }, COMMAND_SEND_SPACING_MS);
       autoAutoscale(0, true);  // wait for autoscale
       saveSettings();
     }
@@ -3702,7 +3705,10 @@ window.addEventListener('DOMContentLoaded', function() {
                   }
                   // Briefly block incoming programmatic updates, then force-send freq
                   blockProgrammaticUpdates(600);
-                  try { sendControl('freq', "F:" + fKHz, 50, true); } catch (e) { console.warn('Forced freq send failed', e); }
+                  // Force-send the freq slightly after the mode send to avoid backend drop/race
+                  setTimeout(() => {
+                    try { sendControl('freq', "F:" + fKHz, 50, true); } catch (e) { console.warn('Forced freq send failed', e); }
+                  }, COMMAND_SEND_SPACING_MS);
                   saveSettings();
                 } catch (e) {
                   console.warn('Recall frequency apply failed', e);
