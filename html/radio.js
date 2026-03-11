@@ -2689,6 +2689,7 @@ function saveSettings() {
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
+  try { localStorage.setItem("adoptOnParameterMismatch", (document.getElementById("ckAdoptOnMismatch") && document.getElementById("ckAdoptOnMismatch").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -2905,6 +2906,9 @@ function loadSettings() {
 
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+  const adoptVal = getLS("adoptOnParameterMismatch", v => (v === "true"), false);
+  try { const adEl = document.getElementById('ckAdoptOnMismatch'); if (adEl) adEl.checked = adoptVal; } catch (e) {}
+  try { sendControl('adopt', 'P:' + (adoptVal ? '1' : '0'), 100); } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();
@@ -3306,6 +3310,13 @@ function initializeDialogEventListeners() {
     onlyAutoscaleByButton = this.checked;
     saveSettings();
   });
+
+  try {
+    document.getElementById('ckAdoptOnMismatch').addEventListener('change', function () {
+      try { sendControl('adopt', 'P:' + (this.checked ? '1' : '0'), 100); } catch (e) {}
+      saveSettings();
+    });
+  } catch (e) {}
 
   // Make the dialog box draggable
   makeDialogDraggable(optionsDialog);

@@ -130,6 +130,9 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
+/* If true, server will adopt backend-reported parameters (preset/freq) when
+  persistent mismatches are detected. Default: false (do not adopt). */
+bool adoptOnParameterMismatch = false;
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -591,6 +594,19 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
       case 't':
         /* Expect format: t:<shift_in_Hz> */
         control_set_shift(sp, &tmp[2]);
+        break;
+      case 'P':
+      case 'p':
+        {
+          /* Expect format: P:<0|1>  -- 0=do not adopt, 1=adopt backend changes */
+          char *val = strtok(NULL, ":");
+          if (val != NULL) {
+            int v = atoi(val);
+            adoptOnParameterMismatch = (v != 0);
+            if (verbose)
+              fprintf(stderr, "%s: adoptOnParameterMismatch set to %d\n", __FUNCTION__, adoptOnParameterMismatch);
+          }
+        }
         break;
       case 'R':
       case 'r':
@@ -2225,7 +2241,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
             sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      bool adopt_preset = true;
+      bool adopt_preset = adoptOnParameterMismatch;
       if (adopt_preset) {
         if (verbose)
           fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
@@ -2276,7 +2292,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
               sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
       if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-        bool adopt_freq = true;
+        bool adopt_freq = adoptOnParameterMismatch;
         if (adopt_freq) {
           if (verbose)
             fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
