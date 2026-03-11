@@ -2216,11 +2216,16 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       sp->shift = new_shift;
       if (verbose)
         fprintf(stderr, "SSRC %u: received shift %.6f Hz\n", sp->ssrc, new_shift);
-      /* Notify web client that backend reports a new per-session shift value */
-      {
+      /* Notify web client that backend reports a new per-session shift value
+         only if adoptOnParameterMismatch is enabled. When disabled, keep the
+         server-side value but do not push updates to the client UI. */
+      if (adoptOnParameterMismatch) {
         char shift_msg[64];
         snprintf(shift_msg, sizeof(shift_msg), "SHIFT:%.3f", new_shift);
         send_ws_text_to_session(sp, shift_msg);
+      } else {
+        if (verbose)
+          fprintf(stderr, "SSRC %u: SHIFT update suppressed (adopt disabled)\n", sp->ssrc);
       }
     }
   }
@@ -2260,7 +2265,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         if (verbose)
           fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
                   sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-        //control_set_mode(sp, sp->requested_preset);
+        control_set_mode(sp, sp->requested_preset);
+        sp->preset_mismatch_count = 0;
       }
     } else {
       if (verbose)
@@ -2275,10 +2281,14 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   /* Backend frequency change -> notify client */
   if (*last_sent_backend_frequency != Channel.tune.freq) {
     current_backend_frequency = Channel.tune.freq;
-    *last_sent_backend_frequency = Channel.tune.freq;
     char freq_msg[64];
     snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
-    send_ws_text_to_session(sp, freq_msg);
+    /* Only notify client of backend frequency changes when adoption is enabled.
+       Update the last_sent_backend_frequency only when a notification is sent. */
+    if (adoptOnParameterMismatch) {
+      send_ws_text_to_session(sp, freq_msg);
+      *last_sent_backend_frequency = Channel.tune.freq;
+    }
   }
 
   /* Frequency mismatch handling (adopt/resend logic) */
@@ -2301,13 +2311,15 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
           char freq_msg[64];
           snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
           send_ws_text_to_session(sp, freq_msg);
+          /* Keep last_sent_backend_frequency in sync when we actually notify */
+          *last_sent_backend_frequency = Channel.tune.freq;
         } else {
           char f[128];
           if(verbose)
              fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
                    sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
           sprintf(f, "%.3f", 0.001 * sp->frequency);
-          //control_set_frequency(sp, f);
+          control_set_frequency(sp, f);
         }
         sp->freq_mismatch_count = 0;
       }
