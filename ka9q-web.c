@@ -2387,7 +2387,13 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
                 sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
   } else {
-    /* Preset matches; clear any accumulated mismatch count */
+    /* Preset matches; if we previously recorded mismatches, log that they
+       have now been satisfied before clearing the counter. */
+    if (sp->preset_mismatch_count != 0) {
+      if (verbose)
+        fprintf(stderr, "SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
+                sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+    }
     sp->preset_mismatch_count = 0;
   }
 
@@ -2421,7 +2427,13 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
     if (diff <= FREQ_EPS_HZ) {
       /* Considered matched */
-      if (sp->freq_mismatch_count != 0) sp->freq_mismatch_count = 0;
+      if (sp->freq_mismatch_count != 0) {
+        int prev_count = sp->freq_mismatch_count;
+        if (verbose)
+          fprintf(stderr, "SSRC %u: frequency mismatch satisfied: session %.3f kHz vs backend %.3f kHz (cleared after %d mismatches)\n",
+                  sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, prev_count);
+        sp->freq_mismatch_count = 0;
+      }
     } else {
       /* Special-case: in CWU or CWL mode the backend reports the carrier
          moved by the CW shift; if the frequency difference equals the
