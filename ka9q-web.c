@@ -100,6 +100,13 @@ struct session {
     int left_cw_pending;
     unsigned long left_cw_time_ms;
     char left_cw_prev_preset[8];
+    /* If the client recently toggled between CWU and CWL (flip), mark a
+       short-lived pending flag so the status packet handler can adopt the
+       backend frequency when the backend shifts the carrier by the expected
+       doubled-shift amount. */
+    int cw_flip_pending;
+    unsigned long cw_flip_time_ms;
+    char cw_flip_prev_preset[8];
   /* uint32_t last_poll_tag; */
 };
 
@@ -622,6 +629,18 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
             strlcpy(sp->left_cw_prev_preset, prev_requested, sizeof(sp->left_cw_prev_preset));
             if (verbose)
               fprintf(stderr, "SSRC %u: marked recent CW->non-CW preset change (prev=%s)\n", sp->ssrc, prev_requested);
+          }
+          /* If switching between CWU and CWL (flip), mark a separate pending
+             flag so we can accept the doubled-shift frequency change from the
+             backend immediately. */
+          else if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
+                   && (strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)
+                   && strncasecmp(prev_requested, new_preset, 3) != 0) {
+            sp->cw_flip_pending = 1;
+            sp->cw_flip_time_ms = now_ms();
+            strlcpy(sp->cw_flip_prev_preset, prev_requested, sizeof(sp->cw_flip_prev_preset));
+            if (verbose)
+              fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
           }
         }
         control_set_mode(sp,&tmp[2]);
@@ -2288,6 +2307,37 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               sp->left_cw_pending = 0;
             }
           }
+        }
+      }
+
+      /* Special-case: if this session recently toggled between CWU and CWL
+         (flip), the backend will move the carrier by the sum/difference of
+         the two shift values (effectively double the shift). Accept that
+         backend frequency immediately if it matches the expected flip delta. */
+      if (sp->cw_flip_pending) {
+        const double SHIFT_FLIP_EPS_HZ = 0.5;
+        unsigned long now = now_ms();
+        if (!isnan(old_shift) && !isnan(new_shift)) {
+          double flip_delta = fabs(old_shift - new_shift);
+          double freq_diff = fabs(Channel.tune.freq - (double)sp->frequency);
+          /* reasonable time window: 5 seconds */
+          if (now - sp->cw_flip_time_ms <= 5000UL && fabs(freq_diff - flip_delta) <= SHIFT_FLIP_EPS_HZ) {
+            if (verbose)
+              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to CWU/CWL flip (flip_delta=%.3f Hz)\n",
+                      sp->ssrc, Channel.tune.freq * 0.001, flip_delta);
+            sp->frequency = (uint32_t)lround(Channel.tune.freq);
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+            send_ws_text_to_session(sp, freq_msg);
+            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->cw_flip_pending = 0;
+            sp->freq_mismatch_count = 0;
+          } else if (now - sp->cw_flip_time_ms > 5000UL) {
+            /* timeout window expired */
+            sp->cw_flip_pending = 0;
+          }
+        } else {
+          sp->cw_flip_pending = 0;
         }
       }
     }

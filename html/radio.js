@@ -34,6 +34,9 @@
       // Previous shift value and time of last shift change
       var prevShiftHz = NaN;
       var lastShiftChangeMs = 0;
+      // Remember the last non-CW frequency so CWU/CWL switches can be
+      // calculated relative to the original un-shifted frequency.
+      var originalNonCWFreqHz = NaN;
       // Track a recent mode change origin so we can adjust the immediate
       // paired frequency send when leaving CWU/CWL (remove the CW shift)
       var modeChangeFrom = null;
@@ -1854,15 +1857,52 @@ function applyQuickBW() {
         // Pass `forceSend` as 4th argument to allow bypassing the programmatic
         // UI guard inside sendControl when explicitly requested (e.g., recall).
         sendControl('mode', "M:" + selected_mode, 100, !!forceSend);
-        // If we are leaving a CW mode (cwu/cwl) and switching to a non-CW
-        // mode, mark the pending paired mode->freq send so it can be
-        // adjusted (remove the CW shift) when the next frequency is sent.
         try {
           const sel = (selected_mode || '').toLowerCase();
-          if ((prevMode === 'cwu' || prevMode === 'cwl') && (sel !== 'cwu' && sel !== 'cwl')) {
+          const wasCW = (prevMode === 'cwu' || prevMode === 'cwl');
+          const willBeCW = (sel === 'cwu' || sel === 'cwl');
+          // Entering CW from non-CW: remember the original un-shifted frequency
+          if (!wasCW && willBeCW) {
+            try {
+              const freqEl = document.getElementById('freq');
+              let base = NaN;
+              if (freqEl) {
+                const v = parseFloat(freqEl.value);
+                if (Number.isFinite(v)) base = v * 1000.0;
+              }
+              if (!Number.isFinite(base)) {
+                base = (backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz;
+              }
+              originalNonCWFreqHz = base;
+              if (CW_DEBUG_OVERLAY) console.debug('[radio.js] remembered original non-CW freq', originalNonCWFreqHz);
+            } catch (e) { /* ignore */ }
+          }
+          // Leaving CW to non-CW: clear remembered base frequency
+          if (wasCW && !willBeCW) {
+            originalNonCWFreqHz = NaN;
+            // Mark pending CW->non-CW so paired sends adjust shift removal
             modeChangeFrom = prevMode;
             modeChangePending = true;
             setTimeout(function(){ modeChangePending = false; modeChangeFrom = null; }, MODE_CHANGE_PENDING_MS);
+          }
+          // Switching between CWU <-> CWL: compute and send the correct
+          // frequency relative to the original non-CW frequency.
+          if (wasCW && willBeCW && (prevMode !== sel)) {
+            const baseHz = Number.isFinite(originalNonCWFreqHz) ? originalNonCWFreqHz : ((backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz);
+            const targetHz = baseHz + (sel === 'cwu' ? shiftHz : -shiftHz);
+            // Send paired frequency immediately after mode change, bypassing the programmatic guard
+            setTimeout(() => { try { sendControl('freq', "F:" + (targetHz / 1000.0).toFixed(3), 50, true); } catch (e) { console.debug('paired CW mode->freq send failed', e); } }, COMMAND_SEND_SPACING_MS);
+            // Update UI immediately so user sees the target
+            try {
+              const freqEl = document.getElementById('freq');
+              if (freqEl) {
+                suppressProgrammaticUI = true;
+                freqEl.value = (targetHz / 1000.0).toFixed(3);
+                setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+              }
+              spectrum.setFrequency(Math.round(targetHz));
+              updateCWMarker();
+            } catch (e) { console.debug('update UI for CW->CW failed', e); }
           }
         } catch (e) { /* ignore */ }
       } else {
