@@ -107,21 +107,43 @@ struct session {
     int cw_flip_pending;
     unsigned long cw_flip_time_ms;
     char cw_flip_prev_preset[8];
+    /* Ack-wait support (per-session) */
+    pthread_mutex_t ack_mutex;
+    pthread_cond_t ack_cond;
+    uint64_t last_status_tag;      /* last COMMAND_TAG seen in status */
+    uint64_t awaiting_ack_tag;     /* non-zero if we are waiting for this tag */
+    int awaiting_ack_type;         /* one of AWAIT_* */
+    double awaiting_expected_double; /* expected numeric value (e.g., freq in Hz) */
+    char awaiting_expected_preset[32];
+    /* Serialize control sends for this session so we don't issue follow-ups
+       while waiting for an ack (prevents overrunning radiod's single-slot queue) */
+    pthread_mutex_t control_mutex;
   /* uint32_t last_poll_tag; */
 };
+      /* Await types for command ack waiting */
+      #define AWAIT_NONE   0
+      #define AWAIT_FREQ   1
+      #define AWAIT_PRESET 2
 
 #define START_SESSION_ID 1000
 
 int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
-extern void control_set_frequency(struct session *sp,char *str);
-extern void control_set_mode(struct session *sp,char *str);
-extern void control_set_shift(struct session *sp,char *str);
-extern void control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
-extern void control_set_spectrum_average(struct session *sp, char *val_str);
-extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
-extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
+extern uint64_t control_set_frequency(struct session *sp,char *str);
+extern uint64_t control_set_mode(struct session *sp,char *str);
+extern uint64_t control_set_shift(struct session *sp,char *str);
+extern uint64_t control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
+extern uint64_t control_set_spectrum_average(struct session *sp, char *val_str);
+extern uint64_t control_set_spectrum_overlap(struct session *sp, char *val_str);
+extern uint64_t control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 int init_demod(struct channel *channel);
+uint64_t control_set_frequency(struct session *sp,char *str);
+uint64_t control_set_mode(struct session *sp,char *str);
+uint64_t control_set_shift(struct session *sp,char *str);
+uint64_t control_set_filter_edges(struct session *sp, char *low_str, char *high_str);
+uint64_t control_set_spectrum_average(struct session *sp, char *val_str);
+uint64_t control_set_spectrum_overlap(struct session *sp, char *val_str);
+uint64_t control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp);
@@ -168,6 +190,53 @@ useconds_t spectrum_poll_us = 100000; // default 100 ms
 
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len);
+
+/* Time to wait for command ack (ms) */
+#define ACK_WAIT_TIMEOUT_MS 750
+
+static int await_command_ack(struct session *sp, uint64_t tag, int await_type, double expected_double, const char *expected_preset, unsigned int timeout_ms) {
+  int success = 0;
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec += timeout_ms / 1000;
+  ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+  if (ts.tv_nsec >= 1000000000) {
+    ts.tv_sec++;
+    ts.tv_nsec -= 1000000000;
+  }
+
+  pthread_mutex_lock(&sp->ack_mutex);
+  sp->awaiting_ack_tag = tag;
+  sp->awaiting_ack_type = await_type;
+  sp->awaiting_expected_double = expected_double;
+  if (expected_preset)
+    strlcpy(sp->awaiting_expected_preset, expected_preset, sizeof(sp->awaiting_expected_preset));
+
+  while (sp->awaiting_ack_tag != 0) {
+    int rc = pthread_cond_timedwait(&sp->ack_cond, &sp->ack_mutex, &ts);
+    if (rc == ETIMEDOUT)
+      break;
+  }
+
+  if (sp->awaiting_ack_tag == 0) {
+    success = 1;
+  } else {
+    /* Timeout: fallback to check backend reported state */
+    if (await_type == AWAIT_FREQ) {
+      const double FREQ_EPS = 0.5;
+      if (fabs(Channel.tune.freq - expected_double) <= FREQ_EPS)
+        success = 1;
+    } else if (await_type == AWAIT_PRESET) {
+      if (strncmp(Channel.preset, sp->awaiting_expected_preset, sizeof(sp->awaiting_expected_preset)) == 0)
+        success = 1;
+    }
+    /* Clear awaiting state on timeout/fallback check */
+    sp->awaiting_ack_tag = 0;
+    sp->awaiting_ack_type = AWAIT_NONE;
+  }
+  pthread_mutex_unlock(&sp->ack_mutex);
+  return success;
+}
 
 onion_connection_status audio_source(void *data, onion_request * req,
                                           onion_response * res);
@@ -483,14 +552,6 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
   }
   tmp[len] = 0;
 
-  // Debug: log incoming websocket text for troubleshooting message ordering
-  if(verbose) {
-    if (len > 0 && tmp[0] != '\0') {
-      fprintf(stderr, "%s: received websocket text: '%s'\n", __FUNCTION__, tmp);
-    }
-  }
-
-
   //ONION_INFO("Read from websocket: %d: %s", len, tmp);
 
 
@@ -609,7 +670,25 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           }
         }
         check_frequency(sp);
-        control_set_frequency(sp,&tmp[2]);
+        {
+          double expect_hz = strtod(&tmp[2], NULL) * 1000.0;
+          pthread_mutex_lock(&sp->control_mutex);
+          uint64_t sent_tag = control_set_frequency(sp, &tmp[2]);
+          /* Release session mutex so ctrl_thread can process status and signal ack */
+          pthread_mutex_unlock(&session_mutex);
+          if (sent_tag) {
+            int ok = await_command_ack(sp, sent_tag, AWAIT_FREQ, expect_hz, NULL, ACK_WAIT_TIMEOUT_MS);
+            if (!ok) {
+              if (verbose)
+                fprintf(stderr, "%s: timeout waiting for freq ack tag 0x%08llx for freq %.3f kHz\n", __FUNCTION__, (unsigned long long)sent_tag, expect_hz/1000.0);
+              /* Poll backend to recover state if we timed out waiting for the tag */
+              control_poll(sp);
+            }
+          }
+          /* Re-acquire session mutex before continuing */
+          pthread_mutex_lock(&session_mutex);
+          pthread_mutex_unlock(&sp->control_mutex);
+        }
         break;
       case 'M':
       case 'm':
@@ -643,8 +722,24 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
               fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
           }
         }
-        control_set_mode(sp,&tmp[2]);
-        control_poll(sp);
+        {
+          pthread_mutex_lock(&sp->control_mutex);
+          uint64_t sent_tag = control_set_mode(sp,&tmp[2]);
+          /* Release session mutex so ctrl_thread can process status and signal ack */
+          pthread_mutex_unlock(&session_mutex);
+          if (sent_tag) {
+            int ok = await_command_ack(sp, sent_tag, AWAIT_PRESET, 0.0, &tmp[2], ACK_WAIT_TIMEOUT_MS);
+            if (!ok) {
+              if (verbose)
+                fprintf(stderr, "%s: timeout waiting for preset ack tag 0x%08llx for preset %s\n", __FUNCTION__, (unsigned long long)sent_tag, &tmp[2]);
+              /* On timeout, poll backend to attempt to learn current state */
+              control_poll(sp);
+            }
+          }
+          /* Re-acquire session mutex before continuing */
+          pthread_mutex_lock(&session_mutex);
+          pthread_mutex_unlock(&sp->control_mutex);
+        }
         break;
       case 'T':
       case 't':
@@ -989,6 +1084,9 @@ onion_connection_status home(void *data, onion_request * req,
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
+  pthread_mutex_init(&sp->ack_mutex,NULL);
+  pthread_cond_init(&sp->ack_cond,NULL);
+  pthread_mutex_init(&sp->control_mutex,NULL);
   add_session(sp);
   init_control(sp);
   //fprintf(stderr,"%s: onion_websocket_set_callback: websocket_cb\n",__FUNCTION__);
@@ -1255,7 +1353,7 @@ Finally, the mutex is unlocked, allowing other threads to access the control soc
 Overall, this function safely constructs and sends a frequency-setting command for a session, handling
 string parsing, buffer management, and thread synchronization.
 */
-void control_set_frequency(struct session *sp,char *str) {
+uint64_t control_set_frequency(struct session *sp,char *str) {
     // Debug: print when sending frequency command to backend
     /*    if(strlen(str) > 0){
       double debug_f = fabs(strtod(str,0) * 1000.0);
@@ -1273,19 +1371,23 @@ void control_set_frequency(struct session *sp,char *str) {
     /* Round to nearest Hz when storing in integer session field */
     sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    uint64_t sent_tag = (uint64_t)arc4random();
+    encode_int(&bp,COMMAND_TAG,(int)sent_tag); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sent_tag = 0;
     } else {
       /* allow backend a short time to process this command before sending another */
-      usleep(CONTROL_USLEEP_US/2);
+      usleep(CONTROL_USLEEP_US);
     }
     pthread_mutex_unlock(&ctl_mutex);
+    return sent_tag;
   }
+  return 0;
 }
 
 /*
@@ -1299,7 +1401,7 @@ void control_set_frequency(struct session *sp,char *str) {
   - Note: the session's `sp->shift` is updated by incoming status packets; this function
     does not modify `sp->shift` so the backend remains the authoritative source.
 */
-void control_set_shift(struct session *sp,char *str) {
+uint64_t control_set_shift(struct session *sp,char *str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   double s;
@@ -1308,28 +1410,33 @@ void control_set_shift(struct session *sp,char *str) {
     *bp++ = CMD; // Command
     s = strtod(str, NULL); // shift in Hz
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    uint64_t sent_tag = (uint64_t)arc4random();
+    encode_int(&bp,COMMAND_TAG,(int)sent_tag); // Append a command tag
     encode_double(&bp,SHIFT_FREQUENCY,s);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sent_tag = 0;
     } else {
       usleep(CONTROL_USLEEP_US);
     }
     pthread_mutex_unlock(&ctl_mutex);
+    return sent_tag;
   }
+  return 0;
 }
 
 /* Send filter edge settings (low and high) to the control socket for this session.
    low_str and high_str are strings containing values in Hz (or kHz?) - follow same units as client.
 */
-void control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
+uint64_t control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   float lowf = 0.0f;
   float highf = 0.0f;
+  uint64_t sent_tag = 0;
 
   if (low_str && strlen(low_str) > 0)
     lowf = strtof(low_str, NULL);
@@ -1338,7 +1445,8 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 
   *bp++ = CMD; // Command
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
-  encode_int(&bp, COMMAND_TAG, arc4random());
+  sent_tag = (uint64_t)arc4random();
+  encode_int(&bp, COMMAND_TAG, (int)sent_tag);
   /* Encode LOW_EDGE then HIGH_EDGE as floats */
   encode_float(&bp, LOW_EDGE, lowf);
   encode_float(&bp, HIGH_EDGE, highf);
@@ -1347,20 +1455,23 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
   if (verbose) fprintf(stderr, "%s: sending filter edges low=%f high=%f (len=%d) to control fd=%d\n", __FUNCTION__, lowf, highf, command_len, Ctl_fd);
-    if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
+    sent_tag = 0;
   } else {
     if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
+  return sent_tag;
 }
 
 /* Send spectrum averaging value (integer) to control socket for this session */
-void control_set_spectrum_average(struct session *sp, char *val_str) {
+uint64_t control_set_spectrum_average(struct session *sp, char *val_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   int val = 0;
+  uint64_t sent_tag = 0;
 
   if (val_str && strlen(val_str) > 0)
     val = atoi(val_str);
@@ -1375,7 +1486,8 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   /* Use fixed 32-bit encodings to keep command packet length deterministic */
   encode_int32(&bp, OUTPUT_SSRC, (uint32_t)target_ssrc);
-  encode_int32(&bp, COMMAND_TAG, (uint32_t)arc4random());
+  sent_tag = (uint64_t)arc4random();
+  encode_int32(&bp, COMMAND_TAG, (uint32_t)sent_tag);
   /* Encode spectrum average as integer SPECTRUM_AVG */
   encode_int(&bp, SPECTRUM_AVG, val);
   encode_eol(&bp);
@@ -1384,19 +1496,22 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   pthread_mutex_lock(&ctl_mutex);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "command send error: %s\n", strerror(errno));
+    sent_tag = 0;
   } else {
     /* fprintf(stderr, "%s: sent SPECTRUM_AVG=%d (len=%d) to control fd=%d\n", __FUNCTION__, val, command_len, Ctl_fd); */
     /* fflush(stderr); */
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
+  return sent_tag;
 }
 
 /* Send spectrum FFT overlap (float 0 <= x < 1) to control socket for this session */
-void control_set_spectrum_overlap(struct session *sp, char *val_str) {
+uint64_t control_set_spectrum_overlap(struct session *sp, char *val_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   float val = 0.0f;
+  uint64_t sent_tag = 0;
 
   if (val_str && strlen(val_str) > 0)
     val = strtof(val_str, NULL);
@@ -1406,7 +1521,8 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   encode_int(&bp, OUTPUT_SSRC, target_ssrc);
-  encode_int(&bp, COMMAND_TAG, arc4random());
+  sent_tag = (uint64_t)arc4random();
+  encode_int(&bp, COMMAND_TAG, (int)sent_tag);
   /* Encode spectrum overlap as float SPECTRUM_OVERLAP */
   encode_float(&bp, SPECTRUM_OVERLAP, val);
   encode_eol(&bp);
@@ -1415,19 +1531,22 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   if (verbose) fprintf(stderr, "%s: sending SPECTRUM_OVERLAP=%f (len=%d) to control fd=%d\n", __FUNCTION__, (double)val, command_len, Ctl_fd);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
+    sent_tag = 0;
   } else {
     if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
+  return sent_tag;
 }
 
 /* Send window type (UINT) to control socket for this session and save spectrum shape locally
    type_str expected to be names like "KAISER_WINDOW", "GAUSSIAN_WINDOW", etc. */
-void control_set_window_type(struct session *sp, char *type_str, char *shape_str) {
+uint64_t control_set_window_type(struct session *sp, char *type_str, char *shape_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   int val = 0; /* default to KAISER_WINDOW */
+  uint64_t sent_tag = 0;
 
   if (type_str && strlen(type_str) > 0) {
     if (strcmp(type_str, "KAISER_WINDOW") == 0) val = 0;
@@ -1445,7 +1564,8 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   encode_int(&bp, OUTPUT_SSRC, target_ssrc);
-  encode_int(&bp, COMMAND_TAG, arc4random());
+  sent_tag = (uint64_t)arc4random();
+  encode_int(&bp, COMMAND_TAG, (int)sent_tag);
   /* Encode window type as integer using tag WINDOW_TYPE (status.h) */
   encode_int(&bp, WINDOW_TYPE, val);
   if (sp && shape_str){
@@ -1457,10 +1577,12 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
   pthread_mutex_lock(&ctl_mutex);
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "command send error: %s\n", strerror(errno));
+    sent_tag = 0;
   } else {
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
+  return sent_tag;
 }
 
 /*
@@ -1481,14 +1603,16 @@ purposes. If the `send` operation fails to transmit the entire command, an error
 Finally, the mutex is unlocked, allowing other threads to access the control socket.
 This approach ensures that mode changes are communicated reliably and safely in a concurrent environment.
 */
-void control_set_mode(struct session *sp,char *str) {
+uint64_t control_set_mode(struct session *sp,char *str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
+  uint64_t sent_tag = 0;
 
   if(strlen(str) > 0) {
     *bp++ = CMD; // Command
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    sent_tag = (uint64_t)arc4random();
+    encode_int(&bp,COMMAND_TAG,(int)sent_tag); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
@@ -1496,14 +1620,15 @@ void control_set_mode(struct session *sp,char *str) {
     strlcpy(sp->requested_preset,str,sizeof(sp->requested_preset));
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sent_tag = 0;
     } else {
       usleep(CONTROL_USLEEP_US);
     }
     pthread_mutex_unlock(&ctl_mutex);
+    return sent_tag;
   }
+  return 0;
 }
-
-
 /*
 The `stop_spectrum_stream` function is designed to send a command to stop a spectrum demodulator stream for a
 given session in a networked application, likely related to radio or signal processing. The function takes a
@@ -1808,26 +1933,25 @@ static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned
   } while (i != l_count / 2);
   return 0;
 }
+ 
+/* The `extract_noise` function is designed to parse a binary buffer containing tagged data fields and extract the
+   noise density value for a given session. The function takes four parameters: a pointer to a float (`n0`) where
+   the extracted noise value will be stored, a pointer to the start of the buffer (`buffer`), the length of the buffer
+   (`length`), and a pointer to a session structure (`sp`). The function iterates through the buffer, reading one
+   field at a time in a loop.
 
-/*
-The `extract_noise` function is designed to parse a binary buffer containing tagged data fields and extract the
-noise density value for a given session. The function takes four parameters: a pointer to a float (`n0`) where
-the extracted noise value will be stored, a pointer to the start of the buffer (`buffer`), the length of the buffer
-(`length`), and a pointer to a session structure (`sp`). The function iterates through the buffer, reading one
-field at a time in a loop.
+   Each field in the buffer is expected to follow a Type-Length-Value (TLV) format. The function first reads the type
+   (an enum value) and then the length of the field. If the length byte indicates a value of 128 or more (the high bit is set),
+   the actual length is encoded in the following bytes, allowing for fields longer than 127 bytes. The function decodes this extended length as needed.
 
-Each field in the buffer is expected to follow a Type-Length-Value (TLV) format. The function first reads the type
-(an enum value) and then the length of the field. If the length byte indicates a value of 128 or more (the high bit is set),
-the actual length is encoded in the following bytes, allowing for fields longer than 127 bytes. The function decodes this extended length as needed.
+   For each field, the function checks that the field does not extend beyond the end of the buffer to prevent buffer overruns.
+   It then uses a switch statement to handle different field types. If the field type is `NOISE_DENSITY`, it decodes the value
+   as a float and stores it in the location pointed to by `n0`. If the type is `EOL` (end of list), the function breaks
+   out of the loop. For any other type, it simply skips over the field.
 
-For each field, the function checks that the field does not extend beyond the end of the buffer to prevent buffer overruns.
-It then uses a switch statement to handle different field types. If the field type is `NOISE_DENSITY`, it decodes the value
-as a float and stores it in the location pointed to by `n0`. If the type is `EOL` (end of list), the function breaks
-out of the loop. For any other type, it simply skips over the field.
-
-After processing all fields or encountering an end-of-list marker, the function returns 0. This function is robust
-against malformed or unexpected data, as it checks buffer boundaries and handles variable-length fields. It is
-a typical example of defensive programming for parsing binary protocols in C or C++.
+   After processing all fields or encountering an end-of-list marker, the function returns 0. This function is robust
+   against malformed or unexpected data, as it checks buffer boundaries and handles variable-length fields. It is
+   a typical example of defensive programming for parsing binary protocols in C or C++.
 */
 int extract_noise(float *n0,uint8_t const * const buffer,int length,struct session *sp){
   uint8_t const *cp = buffer;
@@ -1862,7 +1986,7 @@ int extract_noise(float *n0,uint8_t const * const buffer,int length,struct sessi
     }
     cp += optlen;
   }
-  done:
+ done:
 
   return 0;
 }
@@ -2267,6 +2391,73 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
 
+  /* Scan TLVs for COMMAND_TAG and notify any waiting websocket handler. */
+  {
+    uint64_t found_tag = 0;
+    uint8_t const *cp = buffer + 1;
+    uint8_t const *end = buffer + rx_length;
+    while (cp < end) {
+      enum status_type type = *cp++;
+      if (type == EOL)
+        break;
+      if (cp >= end)
+        break;
+      unsigned int optlen = *cp++;
+      if (optlen & 0x80) {
+        int length_of_length = optlen & 0x7f;
+        optlen = 0;
+        while (length_of_length > 0 && cp < end) {
+          optlen <<= 8;
+          optlen |= *cp++;
+          length_of_length--;
+        }
+      }
+      if (cp + optlen > end)
+        break;
+      if (type == COMMAND_TAG) {
+        found_tag = (uint64_t)decode_int(cp, optlen);
+        break;
+      }
+      cp += optlen;
+    }
+
+    if (found_tag) {
+      pthread_mutex_lock(&sp->ack_mutex);
+      sp->last_status_tag = found_tag;
+      if (sp->awaiting_ack_tag) {
+        /* Only log when this tag actually matters to a waiter. */
+        if (sp->awaiting_ack_tag == found_tag) {
+          if (verbose)
+            fprintf(stderr, "SSRC %u: found COMMAND_TAG 0x%08llx (matched awaiting 0x%08llx)\n", sp->ssrc, (unsigned long long)found_tag, (unsigned long long)sp->awaiting_ack_tag);
+          sp->awaiting_ack_tag = 0;
+          sp->awaiting_ack_type = AWAIT_NONE;
+          pthread_cond_broadcast(&sp->ack_cond);
+        } else {
+          /* Also check state-based fallback conditions */
+          if (sp->awaiting_ack_type == AWAIT_FREQ) {
+            const double FREQ_EPS = 0.5;
+            if (fabs(Channel.tune.freq - sp->awaiting_expected_double) <= FREQ_EPS) {
+              if (verbose)
+                fprintf(stderr, "SSRC %u: found COMMAND_TAG 0x%08llx (accepting by freq fallback, awaiting 0x%08llx)\n", sp->ssrc, (unsigned long long)found_tag, (unsigned long long)sp->awaiting_ack_tag);
+              sp->awaiting_ack_tag = 0;
+              sp->awaiting_ack_type = AWAIT_NONE;
+              pthread_cond_broadcast(&sp->ack_cond);
+            }
+          } else if (sp->awaiting_ack_type == AWAIT_PRESET) {
+            if (strncmp(Channel.preset, sp->awaiting_expected_preset, sizeof(sp->awaiting_expected_preset)) == 0) {
+              if (verbose)
+                fprintf(stderr, "SSRC %u: found COMMAND_TAG 0x%08llx (accepting by preset fallback, awaiting 0x%08llx)\n", sp->ssrc, (unsigned long long)found_tag, (unsigned long long)sp->awaiting_ack_tag);
+              sp->awaiting_ack_tag = 0;
+              sp->awaiting_ack_type = AWAIT_NONE;
+              pthread_cond_broadcast(&sp->ack_cond);
+            }
+          }
+        }
+      }
+      pthread_mutex_unlock(&sp->ack_mutex);
+    }
+  }
+
   if (have_shift) {
     double new_shift = Channel.tune.shift;
     double old_shift = sp->shift;
@@ -2509,5 +2700,9 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   int size = (uint8_t *)bp - output_buffer;
   send_ws_binary_to_session(sp, output_buffer, size);
 }
+
+
+
+
 
 
