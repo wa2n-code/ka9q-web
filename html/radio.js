@@ -177,7 +177,17 @@
           const modeEl = document.getElementById('mode');
           const mode = modeEl ? (modeEl.value || '').toLowerCase() : '';
           if (mode === 'cwu' || mode === 'cwl') {
-            const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
+            // Prefer the local, client-side spectrum.frequency when we're in a
+            // stabilization window (shortly after a user action) or when the
+            // user is actively typing a frequency. Otherwise prefer the
+            // backend-confirmed `frequencyHz` so the marker follows the server.
+            const useLocal = (typeof suppressProgrammaticUpdatesUntil === 'number' && Date.now() < suppressProgrammaticUpdatesUntil) || !!userTypedFreq;
+            let tuned = 0;
+            if (useLocal) {
+              tuned = (spectrum && Number.isFinite(spectrum.frequency) && spectrum.frequency !== 0) ? spectrum.frequency : (frequencyHz || 0);
+            } else {
+              tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum && spectrum.frequency) || 0;
+            }
             if (tuned && Number.isFinite(tuned) && tuned !== 0) {
               const offset = shiftHz; // Hz
               const markerHz = tuned - offset; // For both CWU and CWL, the marker is at tuned frequency minus the shift
