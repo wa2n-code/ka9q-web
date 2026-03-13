@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <strings.h>
 #include <math.h>
 
 #include "misc.h"
@@ -91,6 +92,21 @@ struct session {
   float spectrum_base;
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
+    /* If the client recently commanded a mode change leaving CWU/CWL, this
+      flag records that event so we can adopt the backend frequency when the
+      backend clears the CW shift. `left_cw_time_ms` is the monotonic time in
+      milliseconds when the client requested the change; `left_cw_prev_preset`
+      stores the previous preset name (e.g., "cwu"/"cwl"). */
+    int left_cw_pending;
+    unsigned long left_cw_time_ms;
+    char left_cw_prev_preset[8];
+    /* If the client recently toggled between CWU and CWL (flip), mark a
+       short-lived pending flag so the status packet handler can adopt the
+       backend frequency when the backend shifts the carrier by the expected
+       doubled-shift amount. */
+    int cw_flip_pending;
+    unsigned long cw_flip_time_ms;
+    char cw_flip_prev_preset[8];
   /* uint32_t last_poll_tag; */
 };
 
@@ -130,6 +146,17 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
+
+/* Helper: monotonic time in milliseconds */
+static unsigned long now_ms(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+    return (unsigned long)time(NULL) * 1000UL;
+  return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
+}
+/* If true, server will adopt backend-reported parameters (preset/freq) when
+  persistent mismatches are detected. Default: false (do not adopt). */
+bool adoptOnParameterMismatch = false;
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -554,7 +581,9 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
           fflush(stderr);
         }*/
-        sp->frequency = strtod(&tmp[2],0) * 1000;
+          /* Convert kHz string to Hz and round to nearest Hz to avoid
+            floating-point truncation producing off-by-one Hz errors. */
+          sp->frequency = (uint32_t)lround(strtod(&tmp[2],0) * 1000.0);
         int32_t span = sp->bin_width * sp->bins;
         int32_t min_f = sp->center_frequency - (span / 2);
         int32_t max_f = sp->center_frequency + (span / 2);
@@ -584,6 +613,36 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
         break;
       case 'M':
       case 'm':
+        {
+          /* If this session previously requested a CW preset (cwu/cwl)
+             and the client is now requesting a non-CW preset, mark a
+             short-lived pending flag so the status packet handler can
+             adopt the backend un-shifted frequency when the backend
+             clears the CW shift. */
+          char prev_requested[32];
+          strlcpy(prev_requested, sp->requested_preset, sizeof(prev_requested));
+          char *new_preset = &tmp[2];
+          if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
+              && !(strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)) {
+            sp->left_cw_pending = 1;
+            sp->left_cw_time_ms = now_ms();
+            strlcpy(sp->left_cw_prev_preset, prev_requested, sizeof(sp->left_cw_prev_preset));
+            if (verbose)
+              fprintf(stderr, "SSRC %u: marked recent CW->non-CW preset change (prev=%s)\n", sp->ssrc, prev_requested);
+          }
+          /* If switching between CWU and CWL (flip), mark a separate pending
+             flag so we can accept the doubled-shift frequency change from the
+             backend immediately. */
+          else if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
+                   && (strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)
+                   && strncasecmp(prev_requested, new_preset, 3) != 0) {
+            sp->cw_flip_pending = 1;
+            sp->cw_flip_time_ms = now_ms();
+            strlcpy(sp->cw_flip_prev_preset, prev_requested, sizeof(sp->cw_flip_prev_preset));
+            if (verbose)
+              fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
+          }
+        }
         control_set_mode(sp,&tmp[2]);
         control_poll(sp);
         break;
@@ -591,6 +650,19 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
       case 't':
         /* Expect format: t:<shift_in_Hz> */
         control_set_shift(sp, &tmp[2]);
+        break;
+      case 'P':
+      case 'p':
+        {
+          /* Expect format: P:<0|1>  -- 0=do not adopt, 1=adopt backend changes */
+          char *val = strtok(NULL, ":");
+          if (val != NULL) {
+            int v = atoi(val);
+            adoptOnParameterMismatch = (v != 0);
+            if (verbose)
+              fprintf(stderr, "%s: adoptOnParameterMismatch set to %d\n", __FUNCTION__, adoptOnParameterMismatch);
+          }
+        }
         break;
       case 'R':
       case 'r':
@@ -1198,7 +1270,8 @@ void control_set_frequency(struct session *sp,char *str) {
   if(strlen(str) > 0){
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
-    sp->frequency = f;
+    /* Round to nearest Hz when storing in integer session field */
+    sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
@@ -2196,15 +2269,76 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
   if (have_shift) {
     double new_shift = Channel.tune.shift;
+    double old_shift = sp->shift;
     if (isnan(sp->shift) || sp->shift != new_shift) {
       sp->shift = new_shift;
       if (verbose)
         fprintf(stderr, "SSRC %u: received shift %.6f Hz\n", sp->ssrc, new_shift);
-      /* Notify web client that backend reports a new per-session shift value */
+      /* Always notify web client that backend reports a new per-session
+         shift value. Do not gate SHIFT notifications on adoptOnParameterMismatch. */
       {
         char shift_msg[64];
         snprintf(shift_msg, sizeof(shift_msg), "SHIFT:%.3f", new_shift);
         send_ws_text_to_session(sp, shift_msg);
+      }
+
+      /* Special-case: if this session recently requested a mode change
+         leaving CWU/CWL and the backend has just cleared the CW shift,
+         immediately adopt the backend un-shifted tuned frequency so the
+         session does not remain tuned to the (now invalid) shifted value.
+         This bypasses adoptOnParameterMismatch for the specific CW->non-CW
+         transition. */
+      if (sp->left_cw_pending) {
+        const double SHIFT_CLEAR_EPS_HZ = 0.5;
+        unsigned long now = now_ms();
+        if (!isnan(old_shift) && fabs(old_shift) > SHIFT_CLEAR_EPS_HZ && fabs(new_shift) <= SHIFT_CLEAR_EPS_HZ) {
+          /* Ensure the backend preset is no longer CW */
+          if (!(strncasecmp(Channel.preset, "cwu", 3) == 0 || strncasecmp(Channel.preset, "cwl", 3) == 0)) {
+            /* reasonable time window: 5 seconds */
+            if (now - sp->left_cw_time_ms <= 5000UL) {
+              if (verbose)
+                fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to recent CW->non-CW mode change (shift=%.3f Hz)\n",
+                        sp->ssrc, Channel.tune.freq * 0.001, new_shift);
+              sp->frequency = (uint32_t)lround(Channel.tune.freq);
+              char freq_msg[64];
+              snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+              send_ws_text_to_session(sp, freq_msg);
+              *last_sent_backend_frequency = Channel.tune.freq;
+              sp->left_cw_pending = 0;
+            }
+          }
+        }
+      }
+
+      /* Special-case: if this session recently toggled between CWU and CWL
+         (flip), the backend will move the carrier by the sum/difference of
+         the two shift values (effectively double the shift). Accept that
+         backend frequency immediately if it matches the expected flip delta. */
+      if (sp->cw_flip_pending) {
+        const double SHIFT_FLIP_EPS_HZ = 0.5;
+        unsigned long now = now_ms();
+        if (!isnan(old_shift) && !isnan(new_shift)) {
+          double flip_delta = fabs(old_shift - new_shift);
+          double freq_diff = fabs(Channel.tune.freq - (double)sp->frequency);
+          /* reasonable time window: 5 seconds */
+          if (now - sp->cw_flip_time_ms <= 5000UL && fabs(freq_diff - flip_delta) <= SHIFT_FLIP_EPS_HZ) {
+            if (verbose)
+              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to CWU/CWL flip (flip_delta=%.3f Hz)\n",
+                      sp->ssrc, Channel.tune.freq * 0.001, flip_delta);
+            sp->frequency = (uint32_t)lround(Channel.tune.freq);
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+            send_ws_text_to_session(sp, freq_msg);
+            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->cw_flip_pending = 0;
+            sp->freq_mismatch_count = 0;
+          } else if (now - sp->cw_flip_time_ms > 5000UL) {
+            /* timeout window expired */
+            sp->cw_flip_pending = 0;
+          }
+        } else {
+          sp->cw_flip_pending = 0;
+        }
       }
     }
   }
@@ -2225,7 +2359,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
             sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      bool adopt_preset = true;
+      bool adopt_preset = adoptOnParameterMismatch;
       if (adopt_preset) {
         if (verbose)
           fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
@@ -2244,7 +2378,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         if (verbose)
           fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
                   sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-        //control_set_mode(sp, sp->requested_preset);
+        control_set_mode(sp, sp->requested_preset);
+        sp->preset_mismatch_count = 0;
       }
     } else {
       if (verbose)
@@ -2252,52 +2387,100 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
                 sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
   } else {
-    /* Preset matches; clear any accumulated mismatch count */
+    /* Preset matches; if we previously recorded mismatches, log that they
+       have now been satisfied before clearing the counter. */
+    if (sp->preset_mismatch_count != 0) {
+      if (verbose)
+        fprintf(stderr, "SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
+                sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+    }
     sp->preset_mismatch_count = 0;
   }
 
-  /* Backend frequency change -> notify client */
-  if (*last_sent_backend_frequency != Channel.tune.freq) {
-    current_backend_frequency = Channel.tune.freq;
-    *last_sent_backend_frequency = Channel.tune.freq;
-    char freq_msg[64];
-    snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
-    send_ws_text_to_session(sp, freq_msg);
-  }
-
-  /* Frequency mismatch handling (adopt/resend logic) */
-  if (Channel.tune.freq != sp->frequency) {
-    const int MAX_FREQ_MISMATCH = 5;
-    if (Channel.tune.freq == sp->frequency) {
-      sp->freq_mismatch_count = 0;
-    } else {
-      sp->freq_mismatch_count++;
-      if(verbose)
-        fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (mismatch count %d/%d)\n",
-              sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
-      if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-        bool adopt_freq = true;
-        if (adopt_freq) {
-          if (verbose)
-            fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
-                    sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
-          sp->frequency = (uint32_t)lround(Channel.tune.freq);
-          char freq_msg[64];
-          snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-          send_ws_text_to_session(sp, freq_msg);
-        } else {
-          char f[128];
-          if(verbose)
-             fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
-                   sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
-          sprintf(f, "%.3f", 0.001 * sp->frequency);
-          //control_set_frequency(sp, f);
-        }
-        sp->freq_mismatch_count = 0;
+  /* Backend frequency change -> notify client (tolerant comparison)
+     Use a small tolerance to prevent tiny floating-point differences from
+     causing repeated notifications or false mismatch detection. */
+  {
+    const double FREQ_EPS_HZ = 0.5; /* 0.5 Hz tolerance */
+    bool backend_changed = isnan(*last_sent_backend_frequency) ||
+                           (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
+    if (backend_changed) {
+      current_backend_frequency = Channel.tune.freq;
+      char freq_msg[64];
+      snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
+      /* Only notify client of backend frequency changes when adoption is enabled.
+         Update the last_sent_backend_frequency only when a notification is sent. */
+      if (adoptOnParameterMismatch) {
+        send_ws_text_to_session(sp, freq_msg);
+        *last_sent_backend_frequency = Channel.tune.freq;
       }
     }
-  } else if (sp->freq_mismatch_count != 0) {
-    sp->freq_mismatch_count = 0;
+  }
+
+  /* Frequency mismatch handling (adopt/resend logic) with tolerant comparison */
+  {
+    const int MAX_FREQ_MISMATCH = 5;
+    const double FREQ_EPS_HZ = 0.5; /* same tolerance used above */
+    double backend_freq = Channel.tune.freq;
+    double session_freq = (double)sp->frequency;
+    double diff = fabs(backend_freq - session_freq);
+
+    if (diff <= FREQ_EPS_HZ) {
+      /* Considered matched */
+      if (sp->freq_mismatch_count != 0) {
+        int prev_count = sp->freq_mismatch_count;
+        if (verbose)
+          fprintf(stderr, "SSRC %u: frequency mismatch satisfied: session %.3f kHz vs backend %.3f kHz (cleared after %d mismatches)\n",
+                  sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, prev_count);
+        sp->freq_mismatch_count = 0;
+      }
+    } else {
+      /* Special-case: in CWU or CWL mode the backend reports the carrier
+         moved by the CW shift; if the frequency difference equals the
+         per-session `shift`, adopt immediately regardless of
+         `adoptOnParameterMismatch`. This avoids spurious mismatch churn
+         when a CW preset adjusts the carrier by the audio shift amount. */
+      if ((strncmp(Channel.preset, "cwu", 3) == 0 || strncmp(Channel.preset, "cwl", 3) == 0)
+          && !isnan(sp->shift)
+          && fabs(diff - fabs(sp->shift)) <= FREQ_EPS_HZ) {
+        if (verbose)
+          fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to CWU/CWL shift match (shift=%.3f Hz)\n",
+                  sp->ssrc, Channel.tune.freq * 0.001, sp->shift);
+        sp->frequency = (uint32_t)lround(Channel.tune.freq);
+        char freq_msg[64];
+        snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+        send_ws_text_to_session(sp, freq_msg);
+        *last_sent_backend_frequency = Channel.tune.freq;
+        sp->freq_mismatch_count = 0;
+      } else {
+        sp->freq_mismatch_count++;
+        if(verbose)
+          fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
+                  sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+        if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+          bool adopt_freq = adoptOnParameterMismatch;
+          if (adopt_freq) {
+            if (verbose)
+              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
+                      sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+            sp->frequency = (uint32_t)lround(Channel.tune.freq);
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+            send_ws_text_to_session(sp, freq_msg);
+            /* Keep last_sent_backend_frequency in sync when we actually notify */
+            *last_sent_backend_frequency = Channel.tune.freq;
+          } else {
+            char f[128];
+            if(verbose)
+              fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
+                      sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
+            sprintf(f, "%.3f", 0.001 * sp->frequency);
+            control_set_frequency(sp, f);
+          }
+          sp->freq_mismatch_count = 0;
+        }
+      }
+    }
   }
 
   pthread_mutex_lock(&output_dest_socket_mutex);

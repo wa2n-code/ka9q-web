@@ -31,6 +31,17 @@
       var backendFrequencyHz = 0;
       // Server-provided post-detection audio/CW shift (Hz)
       var shiftHz = 0;
+      // Previous shift value and time of last shift change
+      var prevShiftHz = NaN;
+      var lastShiftChangeMs = 0;
+      // Remember the last non-CW frequency so CWU/CWL switches can be
+      // calculated relative to the original un-shifted frequency.
+      var originalNonCWFreqHz = NaN;
+      // Track a recent mode change origin so we can adjust the immediate
+      // paired frequency send when leaving CWU/CWL (remove the CW shift)
+      var modeChangeFrom = null;
+      var modeChangePending = false;
+      const MODE_CHANGE_PENDING_MS = 5000; // ms to consider a paired mode->freq send
 
       function createCWDebugOverlay() {
         try {
@@ -132,6 +143,34 @@
               return;
             }
           } catch (e) { console.debug('[radio.js] sendControl guard error', e); }
+          // If we're sending a frequency immediately after changing mode from
+          // CWU/CWL to a non-CW mode, remove the CW `shiftHz` so the backend
+          // receives the un-shifted tuned frequency.
+          try {
+            if ((type === 'freq' || (typeof msg === 'string' && msg.startsWith('F:'))) && modeChangePending && modeChangeFrom) {
+              const curModeEl = document.getElementById('mode');
+              const curMode = curModeEl ? (curModeEl.value || '').toLowerCase() : '';
+              // Only adjust when we're leaving CW modes (prev was CW, now not CW)
+              if (curMode !== 'cwu' && curMode !== 'cwl' && (modeChangeFrom === 'cwu' || modeChangeFrom === 'cwl')) {
+                // parse kHz value from message
+                const khz = parseFloat(String(msg).replace(/^F:\s*/i, '').trim());
+                if (!Number.isNaN(khz) && Number.isFinite(khz)) {
+                  let freqHz = khz * 1000.0;
+                  if (modeChangeFrom === 'cwu') {
+                    freqHz = freqHz - shiftHz; // displayed was shifted up; send un-shifted
+                  } else if (modeChangeFrom === 'cwl') {
+                    freqHz = freqHz + shiftHz; // displayed was shifted down; send un-shifted
+                  }
+                  // Replace message with corrected frequency (kHz with 3 decimals)
+                  msg = 'F:' + (freqHz / 1000.0).toFixed(3);
+                  console.debug('[radio.js] adjusted freq to remove CW shift:', modeChangeFrom, 'shiftHz=', shiftHz, '->', msg);
+                  // consume the pending flag so only the paired send is adjusted
+                  modeChangePending = false;
+                  modeChangeFrom = null;
+                }
+              }
+            }
+          } catch (e) { console.debug('[radio.js] sendControl CW-adjust error', e); }
           const now = Date.now();
           const last = _controlState.lastSend.get(type) || 0;
           const since = now - last;
@@ -820,8 +859,38 @@ function applyQuickBW() {
               try {
                 const freqEl = document.getElementById('freq');
                 if (freqEl) {
-                  if (Date.now() < suppressProgrammaticUpdatesUntil) {
-                    console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
+                  const now = Date.now();
+                  if (now < suppressProgrammaticUpdatesUntil) {
+                    // Allow override of the stabilization suppression when a recent
+                    // CW->non-CW change was requested by this client, or when the
+                    // backend just cleared a CW shift (we saw a recent SHIFT change
+                    // from non-zero to near-zero). This helps the freq input follow
+                    // the backend when the UI initiated the CW->non-CW transition.
+                    let allow = false;
+                    try {
+                      if (modeChangePending) allow = true;
+                      else if (lastShiftChangeMs) {
+                        if ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS) {
+                          try {
+                            const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 0.5;
+                            const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 0.5;
+                            const nowNonZero = Math.abs(shiftHz) > 0.5;
+                            const nowZero = Math.abs(shiftHz) <= 0.5;
+                            // Allow when shift was just cleared OR just set (entering or leaving CW)
+                            if ((prevNonZero && nowZero) || (prevZero && nowNonZero)) allow = true;
+                          } catch (e) { /* ignore */ }
+                        }
+                      }
+                    } catch (e) { /* ignore */ }
+                    if (!allow) {
+                      console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
+                    } else {
+                      suppressProgrammaticUI = true;
+                      freqEl.value = (hz / 1000.0).toFixed(3);
+                      setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                      modeChangePending = false;
+                      modeChangeFrom = null;
+                    }
                   } else {
                     suppressProgrammaticUI = true;
                     freqEl.value = (hz / 1000.0).toFixed(3);
@@ -839,9 +908,12 @@ function applyQuickBW() {
           if (args[0] === 'SHIFT' && args.length > 1) {
             const s_raw = parseFloat(args[1]);
             if (Number.isFinite(s_raw)) {
-              // Only update and call marker refresh when the value actually changes
+              // Track previous shift and when it changed so BFREQ handling can
+              // decide whether to override any stabilization suppression.
               const changed = (typeof shiftHz !== 'number') || (Math.abs(shiftHz - s_raw) > 0.0001);
+              prevShiftHz = (typeof shiftHz === 'number') ? shiftHz : NaN;
               shiftHz = s_raw;
+              lastShiftChangeMs = Date.now();
               try {
                 const si = document.getElementById('shiftInput');
                 if (si) {
@@ -1787,12 +1859,62 @@ function applyQuickBW() {
         try { updateQuickBWButtonState(); } catch (e) {}
       }
 
-      document.getElementById('mode').value = selected_mode;
+      const modeEl = document.getElementById('mode');
+      const prevMode = modeEl ? (modeEl.value || '').toLowerCase() : '';
+      if (modeEl) modeEl.value = selected_mode;
       if (forceSend || !suppressProgrammaticUI) {
         blockProgrammaticUpdates(600);
         // Pass `forceSend` as 4th argument to allow bypassing the programmatic
         // UI guard inside sendControl when explicitly requested (e.g., recall).
         sendControl('mode', "M:" + selected_mode, 100, !!forceSend);
+        try {
+          const sel = (selected_mode || '').toLowerCase();
+          const wasCW = (prevMode === 'cwu' || prevMode === 'cwl');
+          const willBeCW = (sel === 'cwu' || sel === 'cwl');
+          // Entering CW from non-CW: remember the original un-shifted frequency
+          if (!wasCW && willBeCW) {
+            try {
+              const freqEl = document.getElementById('freq');
+              let base = NaN;
+              if (freqEl) {
+                const v = parseFloat(freqEl.value);
+                if (Number.isFinite(v)) base = v * 1000.0;
+              }
+              if (!Number.isFinite(base)) {
+                base = (backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz;
+              }
+              originalNonCWFreqHz = base;
+              if (CW_DEBUG_OVERLAY) console.debug('[radio.js] remembered original non-CW freq', originalNonCWFreqHz);
+            } catch (e) { /* ignore */ }
+          }
+          // Leaving CW to non-CW: clear remembered base frequency
+          if (wasCW && !willBeCW) {
+            originalNonCWFreqHz = NaN;
+            // Mark pending CW->non-CW so paired sends adjust shift removal
+            modeChangeFrom = prevMode;
+            modeChangePending = true;
+            setTimeout(function(){ modeChangePending = false; modeChangeFrom = null; }, MODE_CHANGE_PENDING_MS);
+          }
+          // Switching between CWU <-> CWL: compute and send the correct
+          // frequency relative to the original non-CW frequency.
+          if (wasCW && willBeCW && (prevMode !== sel)) {
+            const baseHz = Number.isFinite(originalNonCWFreqHz) ? originalNonCWFreqHz : ((backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz);
+            const targetHz = baseHz + (sel === 'cwu' ? shiftHz : -shiftHz);
+            // Send paired frequency immediately after mode change, bypassing the programmatic guard
+            setTimeout(() => { try { sendControl('freq', "F:" + (targetHz / 1000.0).toFixed(3), 50, true); } catch (e) { console.debug('paired CW mode->freq send failed', e); } }, COMMAND_SEND_SPACING_MS);
+            // Update UI immediately so user sees the target
+            try {
+              const freqEl = document.getElementById('freq');
+              if (freqEl) {
+                suppressProgrammaticUI = true;
+                freqEl.value = (targetHz / 1000.0).toFixed(3);
+                setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+              }
+              spectrum.setFrequency(Math.round(targetHz));
+              updateCWMarker();
+            } catch (e) { console.debug('update UI for CW->CW failed', e); }
+          }
+        } catch (e) { /* ignore */ }
       } else {
         console.debug('[radio.js] setMode suppressed send; forceSend=', forceSend, 'suppressProgrammaticUI=', suppressProgrammaticUI);
       }
@@ -2699,6 +2821,7 @@ function saveSettings() {
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
+  try { localStorage.setItem("adoptOnParameterMismatch", (document.getElementById("ckAdoptOnMismatch") && document.getElementById("ckAdoptOnMismatch").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -2915,6 +3038,9 @@ function loadSettings() {
 
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+  const adoptVal = getLS("adoptOnParameterMismatch", v => (v === "true"), false);
+  try { const adEl = document.getElementById('ckAdoptOnMismatch'); if (adEl) adEl.checked = adoptVal; } catch (e) {}
+  try { sendControl('adopt', 'P:' + (adoptVal ? '1' : '0'), 100); } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();
@@ -3316,6 +3442,13 @@ function initializeDialogEventListeners() {
     onlyAutoscaleByButton = this.checked;
     saveSettings();
   });
+
+  try {
+    document.getElementById('ckAdoptOnMismatch').addEventListener('change', function () {
+      try { sendControl('adopt', 'P:' + (this.checked ? '1' : '0'), 100); } catch (e) {}
+      saveSettings();
+    });
+  } catch (e) {}
 
   // Make the dialog box draggable
   makeDialogDraggable(optionsDialog);
