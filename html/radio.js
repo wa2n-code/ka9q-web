@@ -368,6 +368,9 @@ let quickBWPrevEdges = null; // { low: number, high: number }
 let suppressEdgeAutoSend = false;
 // Suppress control sends when UI is updated programmatically from server status/BFREQ
 let suppressProgrammaticUI = false;
+// When true, allow backend-driven updates to change user-editable inputs (freq, mode, presets, etc.)
+// When false, server status updates MUST NOT change user input controls.
+let adoptOnParameterMismatch = false;
 // When non-zero and in the future, incoming programmatic updates (freq/mode)
 // should be ignored until this time to allow the backend to stabilize after
 // a user-initiated change.
@@ -916,42 +919,46 @@ function applyQuickBW() {
               try {
                 const freqEl = document.getElementById('freq');
                 if (freqEl) {
-                  const now = Date.now();
-                  if (now < suppressProgrammaticUpdatesUntil) {
-                    // Allow override of the stabilization suppression when a recent
-                    // CW->non-CW change was requested by this client, or when the
-                    // backend just cleared a CW shift (we saw a recent SHIFT change
-                    // from non-zero to near-zero). This helps the freq input follow
-                    // the backend when the UI initiated the CW->non-CW transition.
-                    let allow = false;
-                    try {
-                      if (modeChangePending) allow = true;
-                      else if (lastShiftChangeMs) {
-                        if ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS) {
-                          try {
-                            const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 0.5;
-                            const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 0.5;
-                            const nowNonZero = Math.abs(shiftHz) > 0.5;
-                            const nowZero = Math.abs(shiftHz) <= 0.5;
-                            // Allow when shift was just cleared OR just set (entering or leaving CW)
-                            if ((prevNonZero && nowZero) || (prevZero && nowNonZero)) allow = true;
-                          } catch (e) { /* ignore */ }
+                  if (!adoptOnParameterMismatch) {
+                    console.debug('[radio.js] adopt disabled; skipping BFREQ-driven freq UI update');
+                  } else {
+                    const now = Date.now();
+                    if (now < suppressProgrammaticUpdatesUntil) {
+                      // Allow override of the stabilization suppression when a recent
+                      // CW->non-CW change was requested by this client, or when the
+                      // backend just cleared a CW shift (we saw a recent SHIFT change
+                      // from non-zero to near-zero). This helps the freq input follow
+                      // the backend when the UI initiated the CW->non-CW transition.
+                      let allow = false;
+                      try {
+                        if (modeChangePending) allow = true;
+                        else if (lastShiftChangeMs) {
+                          if ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS) {
+                            try {
+                              const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 0.5;
+                              const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 0.5;
+                              const nowNonZero = Math.abs(shiftHz) > 0.5;
+                              const nowZero = Math.abs(shiftHz) <= 0.5;
+                              // Allow when shift was just cleared OR just set (entering or leaving CW)
+                              if ((prevNonZero && nowZero) || (prevZero && nowNonZero)) allow = true;
+                            } catch (e) { /* ignore */ }
+                          }
                         }
+                      } catch (e) { /* ignore */ }
+                      if (!allow) {
+                        console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
+                      } else {
+                        suppressProgrammaticUI = true;
+                        freqEl.value = (hz / 1000.0).toFixed(3);
+                        setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                        modeChangePending = false;
+                        modeChangeFrom = null;
                       }
-                    } catch (e) { /* ignore */ }
-                    if (!allow) {
-                      console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
                     } else {
                       suppressProgrammaticUI = true;
                       freqEl.value = (hz / 1000.0).toFixed(3);
                       setTimeout(() => { suppressProgrammaticUI = false; }, 200);
-                      modeChangePending = false;
-                      modeChangeFrom = null;
                     }
-                  } else {
-                    suppressProgrammaticUI = true;
-                    freqEl.value = (hz / 1000.0).toFixed(3);
-                    setTimeout(() => { suppressProgrammaticUI = false; }, 200);
                   }
                 }
               } catch (e) { console.debug('[radio.js] BFREQ handler failed to set freq UI', e); }
@@ -973,7 +980,7 @@ function applyQuickBW() {
               lastShiftChangeMs = Date.now();
               try {
                 const si = document.getElementById('shiftInput');
-                if (si) {
+                if (si && adoptOnParameterMismatch) {
                   si.value = shiftHz.toFixed(0);
                 }
               } catch (e) { /* ignore UI set errors */ }
@@ -994,15 +1001,19 @@ function applyQuickBW() {
               console.info('[radio.js] server mode message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                // Prevent sending a mode command while we apply the server-driven change
-                const prevSuppress = suppressProgrammaticUI;
-                suppressProgrammaticUI = true;
-                try {
-                  modeEl.value = modeVal;
-                  try { setMode(modeVal, false); } catch (e) { console.warn('Failed to apply server mode', e); }
-                  console.info('[radio.js] applied server mode to UI:', modeVal);
-                } finally {
-                  suppressProgrammaticUI = prevSuppress;
+                if (!adoptOnParameterMismatch) {
+                  console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
+                } else {
+                  // Prevent sending a mode command while we apply the server-driven change
+                  const prevSuppress = suppressProgrammaticUI;
+                  suppressProgrammaticUI = true;
+                  try {
+                    modeEl.value = modeVal;
+                    try { setMode(modeVal, false); } catch (e) { console.warn('Failed to apply server mode', e); }
+                    console.info('[radio.js] applied server mode to UI:', modeVal);
+                  } finally {
+                    suppressProgrammaticUI = prevSuppress;
+                  }
                 }
               } else {
                 console.warn('[radio.js] server mode received but mode element missing');
@@ -1016,10 +1027,14 @@ function applyQuickBW() {
               console.info('[radio.js] server preset message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                const prevSuppress = suppressProgrammaticUI;
-                suppressProgrammaticUI = true;
-                try { modeEl.value = modeVal; try { setMode(modeVal, false); } catch (e) {} } finally { suppressProgrammaticUI = prevSuppress; }
-                console.info('[radio.js] applied server preset to UI:', modeVal);
+                if (!adoptOnParameterMismatch) {
+                  console.debug('[radio.js] adopt disabled; skipping server preset UI update', modeVal);
+                } else {
+                  const prevSuppress = suppressProgrammaticUI;
+                  suppressProgrammaticUI = true;
+                  try { modeEl.value = modeVal; try { setMode(modeVal, false); } catch (e) {} } finally { suppressProgrammaticUI = prevSuppress; }
+                  console.info('[radio.js] applied server preset to UI:', modeVal);
+                }
               }
             } catch (e) { console.debug('[radio.js] server preset handler failed', e); }
           }
@@ -1130,8 +1145,12 @@ function applyQuickBW() {
 
             if(update) {
               calcFrequencies();
-              spectrum.setLowHz(lowHz);
-              spectrum.setHighHz(highHz);
+              if (adoptOnParameterMismatch) {
+                spectrum.setLowHz(lowHz);
+                spectrum.setHighHz(highHz);
+              } else {
+                console.debug('[radio.js] adopt disabled; skipping server-driven filter edge UI update');
+              }
               // record the server-provided center so the UI can align incoming waterfall rows
               try {
                 spectrum._lastServerCenterHz = centerHz;
@@ -1141,13 +1160,17 @@ function applyQuickBW() {
               if (!spectrum._leftDragging) {
                 spectrum.setCenterHz(centerHz);
               }
-              spectrum.setFrequency(frequencyHz);
+              if (adoptOnParameterMismatch) {
+                spectrum.setFrequency(frequencyHz);
+              } else {
+                console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
+              }
               updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
               try {
                 const zoomEl = document.getElementById("zoom_level");
-                if (zoomEl) {
+                  if (zoomEl) {
                   const maxVal = (typeof zoomTableSize === 'number' && !isNaN(zoomTableSize)) ? (zoomTableSize - 1) : Number(zoomEl.max) || 0;
                   zoomEl.max = maxVal;
                   // If the frontend sample rate is the lower value (<= 64.8 MHz) disallow zoom level 0
@@ -1157,9 +1180,17 @@ function applyQuickBW() {
                   let clamped = z_level;
                   if (clamped < minVal) clamped = minVal;
                   if (clamped > maxVal) clamped = maxVal;
-                  zoomEl.value = clamped;
+                  if (adoptOnParameterMismatch) {
+                    zoomEl.value = clamped;
+                  } else {
+                    console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
+                  }
                 } else {
-                  document.getElementById("zoom_level").value = z_level;
+                  if (adoptOnParameterMismatch) {
+                    document.getElementById("zoom_level").value = z_level;
+                  } else {
+                    console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
+                  }
                 }
               } catch (e) { console.warn('Failed to update zoom control bounds', e); }
               //console.log("Zoom level=",z_level);
@@ -1168,7 +1199,9 @@ function applyQuickBW() {
                 if (freqEl) {
                   console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
                   backendFrequencyHz = frequencyHz;
-                  if (Date.now() < suppressProgrammaticUpdatesUntil) {
+                  if (!adoptOnParameterMismatch) {
+                    console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
+                  } else if (Date.now() < suppressProgrammaticUpdatesUntil) {
                     console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
                   } else {
                     suppressProgrammaticUI = true;
@@ -3096,6 +3129,7 @@ function loadSettings() {
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
   const adoptVal = getLS("adoptOnParameterMismatch", v => (v === "true"), false);
+  adoptOnParameterMismatch = adoptVal;
   try { const adEl = document.getElementById('ckAdoptOnMismatch'); if (adEl) adEl.checked = adoptVal; } catch (e) {}
   try { sendControl('adopt', 'P:' + (adoptVal ? '1' : '0'), 100); } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
@@ -3502,6 +3536,7 @@ function initializeDialogEventListeners() {
 
   try {
     document.getElementById('ckAdoptOnMismatch').addEventListener('change', function () {
+      adoptOnParameterMismatch = this.checked;
       try { sendControl('adopt', 'P:' + (this.checked ? '1' : '0'), 100); } catch (e) {}
       saveSettings();
     });
