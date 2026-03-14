@@ -380,7 +380,7 @@ function blockProgrammaticUpdates(ms) {
   try {
     const until = Date.now() + (typeof ms === 'number' ? ms : 500);
     if (until > suppressProgrammaticUpdatesUntil) suppressProgrammaticUpdatesUntil = until;
-    console.debug('[radio.js] blocking programmatic updates until', new Date(suppressProgrammaticUpdatesUntil).toISOString());
+    //console.debug('[radio.js] blocking programmatic updates until', new Date(suppressProgrammaticUpdatesUntil).toISOString());
   } catch (e) { console.debug('[radio.js] blockProgrammaticUpdates error', e); }
 }
 function loadQuickBWPreset() {
