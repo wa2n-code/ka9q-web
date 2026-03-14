@@ -60,7 +60,7 @@ pthread_t audio_task;
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
-#define CONTROL_USLEEP_US 20000
+#define CONTROL_USLEEP_US 30000 // minimum of 20 ms observed for backend to process a command and update status, so 30 ms is a safe default
 
 struct session {
   bool spectrum_active;
@@ -146,6 +146,11 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
+/* If true, emit extra send debugging output (gated with `verbose`). */
+int debug_send = 1;
+int debug_send_poll = 0;
+/* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
+static unsigned long poll_start_ms = 0;
 
 /* Helper: monotonic time in milliseconds */
 static unsigned long now_ms(void) {
@@ -1256,13 +1261,6 @@ Overall, this function safely constructs and sends a frequency-setting command f
 string parsing, buffer management, and thread synchronization.
 */
 void control_set_frequency(struct session *sp,char *str) {
-    // Debug: print when sending frequency command to backend
-    /*    if(strlen(str) > 0){
-      double debug_f = fabs(strtod(str,0) * 1000.0);
-      fprintf(stderr, "[DEBUG] Sending frequency command to backend: %.3f Hz\n", debug_f);
-      fflush(stderr);
-    }
-    */
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   double f;
@@ -1281,8 +1279,11 @@ void control_set_frequency(struct session *sp,char *str) {
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
     } else {
+      unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+      if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending RADIO_FREQUENCY=%.0f Hz for ssrc=%u\n", __FUNCTION__, elapsed_ms, f, (unsigned)sp->ssrc);
       /* allow backend a short time to process this command before sending another */
       usleep(CONTROL_USLEEP_US/2);
+      //if (verbose && debug_send) fprintf(stderr, "%s: +%lums: send OK\n", __FUNCTION__, elapsed_ms);
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
@@ -1346,11 +1347,14 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
-  if (verbose) fprintf(stderr, "%s: sending filter edges low=%f high=%f (len=%d) to control fd=%d\n", __FUNCTION__, lowf, highf, command_len, Ctl_fd);
+  if (verbose && debug_send) {
+    unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+    fprintf(stderr, "%s: +%lums: sending filter edges low=%f high=%f\n", __FUNCTION__, elapsed_ms, lowf, highf);
+  }
     if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
   } else {
-    if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
+    //if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
@@ -1412,11 +1416,14 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
-  if (verbose) fprintf(stderr, "%s: sending SPECTRUM_OVERLAP=%f (len=%d) to control fd=%d\n", __FUNCTION__, (double)val, command_len, Ctl_fd);
+  if (verbose && debug_send) {
+    unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+    fprintf(stderr, "%s: +%lums: sending SPECTRUM_OVERLAP=%f\n", __FUNCTION__, elapsed_ms, (double)val);
+  }
   if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
   } else {
-    if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
+    //if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
@@ -1497,7 +1504,10 @@ void control_set_mode(struct session *sp,char *str) {
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
     } else {
+      unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+      if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending PRESET='%s' for ssrc=%u\n", __FUNCTION__, elapsed_ms, str, (unsigned)sp->ssrc);
       usleep(CONTROL_USLEEP_US);
+      //if (verbose && debug_send) fprintf(stderr, "%s: +%lums: send OK\n", __FUNCTION__, elapsed_ms);
     }
     pthread_mutex_unlock(&ctl_mutex);
   }
@@ -1614,6 +1624,7 @@ Finally, the mutex is unlocked, allowing other threads to use the control socket
 commands are sent safely and reliably in a concurrent, networked environment.
 */
 void control_poll(struct session *sp) {
+  static int poll_count = 0;
   uint8_t cmdbuffer[128];
   uint8_t *bp = cmdbuffer;
   *bp++ = 1; // Command
@@ -1628,7 +1639,17 @@ void control_poll(struct session *sp) {
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     perror("command send: Poll");
   } else {
+    if (++poll_count >= 100) {
+      poll_count = 0;
+      poll_start_ms = now_ms();
+    } else if (poll_count == 1 && poll_start_ms == 0) {
+      /* first poll ever: start the timer */
+      poll_start_ms = now_ms();
+    }
+    unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+    if (verbose && debug_send && debug_send_poll) fprintf(stderr, "%s: +%lums: sending poll #%d for ssrc=%u\n", __FUNCTION__, elapsed_ms, poll_count, (unsigned)sp->ssrc);
     usleep(CONTROL_USLEEP_US);
+    if (verbose && debug_send && debug_send_poll) fprintf(stderr, "%s: +%lums: send OK (poll #%d)\n", __FUNCTION__, elapsed_ms, poll_count);
   }
   pthread_mutex_unlock(&ctl_mutex);
 }
@@ -2355,15 +2376,19 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
        changes the preset. */
     const int MAX_PRESET_MISMATCH = 5;
     sp->preset_mismatch_count++;
-    if(verbose)
-      fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
-            sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
+    if (verbose && debug_send) {
+      unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+      fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
+              __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
+    }
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
       bool adopt_preset = adoptOnParameterMismatch;
       if (adopt_preset) {
-        if (verbose)
-          fprintf(stderr, "SSRC %u: adopting polled preset %s after %d mismatches\n",
-                  sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s after %d mismatches\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+        }
         /* Adopt backend preset into session requested_preset */
         strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
         sp->preset_mismatch_count = 0;
@@ -2375,24 +2400,30 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         onion_websocket_write(sp->ws, pm, strlen(pm));
         pthread_mutex_unlock(&sp->ws_mutex);
       } else {
-        if (verbose)
-          fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
-                  sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+        }
         control_set_mode(sp, sp->requested_preset);
         sp->preset_mismatch_count = 0;
       }
     } else {
-      if (verbose)
-        fprintf(stderr, "SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
-                sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
+      if (verbose && debug_send) {
+        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+        fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
+      }
     }
   } else {
     /* Preset matches; if we previously recorded mismatches, log that they
        have now been satisfied before clearing the counter. */
     if (sp->preset_mismatch_count != 0) {
-      if (verbose)
-        fprintf(stderr, "SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
-                sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+      if (verbose && debug_send) {
+        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+        fprintf(stderr, "%s: +%lums: SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
+      }
     }
     sp->preset_mismatch_count = 0;
   }
@@ -2429,9 +2460,11 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       /* Considered matched */
       if (sp->freq_mismatch_count != 0) {
         int prev_count = sp->freq_mismatch_count;
-        if (verbose)
-          fprintf(stderr, "SSRC %u: frequency mismatch satisfied: session %.3f kHz vs backend %.3f kHz (cleared after %d mismatches)\n",
-                  sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, prev_count);
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch satisfied: session %.3f kHz vs backend %.3f kHz (cleared after %d mismatches)\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, prev_count);
+        }
         sp->freq_mismatch_count = 0;
       }
     } else {
@@ -2443,9 +2476,11 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       if ((strncmp(Channel.preset, "cwu", 3) == 0 || strncmp(Channel.preset, "cwl", 3) == 0)
           && !isnan(sp->shift)
           && fabs(diff - fabs(sp->shift)) <= FREQ_EPS_HZ) {
-        if (verbose)
-          fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to CWU/CWL shift match (shift=%.3f Hz)\n",
-                  sp->ssrc, Channel.tune.freq * 0.001, sp->shift);
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz due to CWU/CWL shift match (shift=%.3f Hz)\n",
+            __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001, sp->shift);
+        }
         sp->frequency = (uint32_t)lround(Channel.tune.freq);
         char freq_msg[64];
         snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
@@ -2454,15 +2489,19 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         sp->freq_mismatch_count = 0;
       } else {
         sp->freq_mismatch_count++;
-        if(verbose)
-          fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
-                  sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+        if(verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
+            __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+        }
         if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
           bool adopt_freq = adoptOnParameterMismatch;
-          if (adopt_freq) {
-            if (verbose)
-              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
-                      sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+            if (adopt_freq) {
+            if (verbose && debug_send) {
+              unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+              fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
+                      __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+            }
             sp->frequency = (uint32_t)lround(Channel.tune.freq);
             char freq_msg[64];
             snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
@@ -2471,9 +2510,11 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             *last_sent_backend_frequency = Channel.tune.freq;
           } else {
             char f[128];
-            if(verbose)
-              fprintf(stderr, "SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
-                      sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
+                  if(verbose && debug_send) {
+              unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+              fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
+                  }
             sprintf(f, "%.3f", 0.001 * sp->frequency);
             control_set_frequency(sp, f);
           }

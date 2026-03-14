@@ -80,58 +80,91 @@
         } catch (e) {}
       }
       // Generic throttled/coalesced control sender to avoid overloading WS/backend
-      // Use `sendControl(type, msg, minIntervalMs)` to send control messages.
+      // Use `sendControl(type, msg)` to send control messages; spacing is global-only.
       (function(){
         const DEFAULT_CONTROL_MIN_MS = 150; // default per-type min interval
+        // Global minimum spacing between ANY control send (ms). Editable at runtime.
+        let minGlobalIntervalMs = 50;
+        // Timestamp (ms) of last control send (any type)
+        let lastGlobalSend = 0;
+        // control send debug helper removed (temporary traces cleaned up)
+        window.setControlGlobalInterval = function(ms) { minGlobalIntervalMs = Math.max(0, Number(ms) || 0); console.info('minGlobalIntervalMs=', minGlobalIntervalMs); };
         const _controlState = {
           lastSend: new Map(),   // type -> timestamp
           // lastMsg: type -> last message string sent
           lastMsg: new Map(),
-          // pending: type -> { msg, when }
-          pending:  new Map(),   // type -> { msg, when }
+          // pending: type -> Array of { msg, when } (FIFO queue)
+          pending:  new Map(),   // type -> [ { msg, when }, ... ]
           timers:   new Map()    // type -> timer id
         };
 
         function _flushControl(type) {
-          const pendingObj = _controlState.pending.get(type);
-          if (!pendingObj) return;
-          _controlState.pending.delete(type);
+          const queue = _controlState.pending.get(type);
+          if (!queue || queue.length === 0) return;
           const t = _controlState.timers.get(type);
           if (t) { clearTimeout(t); _controlState.timers.delete(type); }
-          const msg = pendingObj.msg;
-          const queuedWhen = pendingObj.when || 0;
-          // If we already sent a newer message for this type after this was queued, skip
-          const last = _controlState.lastSend.get(type) || 0;
-          if (last >= queuedWhen) {
-            return; // newer send already occurred; avoid duplicate
+
+          // Enforce global spacing before sending any queued item
+          const now = Date.now();
+          const sinceGlobal = now - (lastGlobalSend || 0);
+          if (sinceGlobal < minGlobalIntervalMs) {
+            const wait = Math.max(1, minGlobalIntervalMs - sinceGlobal);
+            if (!_controlState.timers.has(type)) {
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+            }
+            return;
           }
+
+          // Pop the oldest queued item (FIFO)
+          const item = queue.shift();
+          if (queue.length === 0) _controlState.pending.delete(type);
+          else _controlState.pending.set(type, queue);
+          const msg = item.msg;
+
           // If the pending message matches the most recently-sent message, skip
           try {
             const lastMsg = _controlState.lastMsg.get(type);
-            if (lastMsg && lastMsg === msg) return;
+            if (lastMsg && lastMsg === msg) {
+              // schedule next queued send if any
+              if (_controlState.pending.has(type) && !_controlState.timers.has(type)) {
+                _controlState.timers.set(type, setTimeout(() => _flushControl(type), minGlobalIntervalMs));
+              }
+              return;
+            }
           } catch (e) {}
+
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
               ws.send(msg);
               // record last message string
               try { _controlState.lastMsg.set(type, msg); } catch (e) {}
+              const sentAt = Date.now();
+              _controlState.lastSend.set(type, sentAt);
+              lastGlobalSend = sentAt;
             } catch (e) {
               console.warn('sendControl flush failed for', type, e);
-              // re-schedule a retry
-              _controlState.pending.set(type, { msg: msg, when: Date.now() });
+              // requeue at front and retry later
+              const q = _controlState.pending.get(type) || [];
+              q.unshift({ msg: msg, when: Date.now() });
+              _controlState.pending.set(type, q);
               if (!_controlState.timers.has(type)) {
                 _controlState.timers.set(type, setTimeout(() => _flushControl(type), DEFAULT_CONTROL_MIN_MS));
               }
               return;
             }
+
+            // If more items remain, schedule next send after global interval
+            if (_controlState.pending.has(type) && !_controlState.timers.has(type)) {
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), minGlobalIntervalMs));
+            }
           } else {
             // keep pending until ws opens
           }
-          _controlState.lastSend.set(type, Date.now());
         }
 
-        window.sendControl = function sendControl(type, msg, minIntervalMs) {
-          minIntervalMs = (typeof minIntervalMs === 'number') ? minIntervalMs : DEFAULT_CONTROL_MIN_MS;
+        window.sendControl = function sendControl(type, msg/*, minIntervalMs - ignored, use global */) {
+          // Per-type minInterval is deprecated; use global spacing instead
+          const minIntervalMs = minGlobalIntervalMs;
           // Optional 4th argument: bypass programmatic-UI guard (boolean).
           const bypassProgrammaticGuard = (arguments.length >= 4 && arguments[3] === true);
           // If UI is being updated programmatically from server status, do not
@@ -172,40 +205,64 @@
             }
           } catch (e) { console.debug('[radio.js] sendControl CW-adjust error', e); }
           const now = Date.now();
-          const last = _controlState.lastSend.get(type) || 0;
-          const since = now - last;
-          if (since >= minIntervalMs) {
+          const sinceGlobal = now - (lastGlobalSend || 0);
+          if (sinceGlobal >= minIntervalMs) {
             // immediate send
             if (ws && ws.readyState === WebSocket.OPEN) {
               try {
-                ws.send(msg);
-                try { _controlState.lastMsg.set(type, msg); } catch (e) {}
-                _controlState.lastSend.set(type, now);
-                // clear any pending/coalesced entry and timer for this type to avoid a later duplicate flush
-                try {
-                  _controlState.pending.delete(type);
-                  const t = _controlState.timers.get(type);
-                  if (t) { clearTimeout(t); _controlState.timers.delete(type); }
-                } catch (e) {}
-                return;
-              } catch (e) {
-                console.warn('sendControl immediate ws.send failed', e);
-                // fallthrough to coalesce
-              }
+                  ws.send(msg);
+                  try { _controlState.lastMsg.set(type, msg); } catch (e) {}
+                  _controlState.lastSend.set(type, now);
+                  lastGlobalSend = now;
+                  // If there are queued items for this type, handle scheduling.
+                  try {
+                    const q = _controlState.pending.get(type);
+                    if (q && q.length > 0) {
+                      if (type === 'freq') {
+                        // For user-initiated immediate frequency sends, drop older queued freq
+                        // to avoid older pending sends overriding the just-sent frequency.
+                        _controlState.pending.delete(type);
+                        const tt = _controlState.timers.get(type);
+                        if (tt) { clearTimeout(tt); _controlState.timers.delete(type); }
+                      } else if (!_controlState.timers.has(type)) {
+                        _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
+                      }
+                    }
+                  } catch (e) {}
+                  return;
+                } catch (e) {
+                  console.warn('sendControl immediate ws.send failed', e);
+                  // fallthrough to coalesce
+                }
             }
             // ws not open or fallback: queue as pending with timestamp
-            _controlState.pending.set(type, { msg: msg, when: now });
-            if (!_controlState.timers.has(type)) {
-              _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
-            }
+            try {
+              let q = _controlState.pending.get(type) || [];
+              if (type === 'freq') {
+                // For frequency changes, only keep the most recent queued value
+                q = [{ msg: msg, when: now }];
+              } else {
+                q.push({ msg: msg, when: now });
+              }
+              _controlState.pending.set(type, q);
+              
+              if (!_controlState.timers.has(type)) {
+                const wait = Math.max(1, minIntervalMs - sinceGlobal);
+                _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+              }
+            } catch (e) { console.debug('[radio.js] enqueue failed', e); }
             return;
           }
-          // coalesce pending message and schedule flush
-          _controlState.pending.set(type, { msg: msg, when: now });
-          if (!_controlState.timers.has(type)) {
-            const wait = Math.max(1, minIntervalMs - since);
-            _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
-          }
+          // enqueue pending message and schedule flush
+          try {
+            const q = _controlState.pending.get(type) || [];
+            q.push({ msg: msg, when: now });
+            _controlState.pending.set(type, q);
+            if (!_controlState.timers.has(type)) {
+              const wait = Math.max(1, minIntervalMs - sinceGlobal);
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+            }
+          } catch (e) { console.debug('[radio.js] enqueue failed', e); }
         };
       })();
 
@@ -451,10 +508,10 @@ function applyQuickBW() {
         // Stagger initial control messages slightly to avoid overwhelming backend
         // Send initial mode and frequency on open, but do NOT bypass programmatic
         // UI suppression so we don't overwrite a server-driven state.
-        setTimeout(() => { try { sendControl('mode','M:' + target_preset, 50); } catch (e) {} }, 30);
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString(), 80); } catch (e) {} }, 90);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), 80); } catch (e) {} }, 150);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), 80); } catch (e) {} }, 210);
+        setTimeout(() => { try { sendControl('mode','M:' + target_preset); } catch (e) {} }, 30);
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 90);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 150);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 210);
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
@@ -466,7 +523,7 @@ function applyQuickBW() {
           try {
             if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
             // normalize pending edges
-            sendControl('edges', 'e:' + Math.round(pendingFilterEdges.low).toString() + ':' + Math.round(pendingFilterEdges.high).toString(), 200);
+            sendControl('edges', 'e:' + Math.round(pendingFilterEdges.low).toString() + ':' + Math.round(pendingFilterEdges.high).toString());
             cwDebug.lastSent = { low: Math.round(pendingFilterEdges.low), high: Math.round(pendingFilterEdges.high), time: Date.now() };
             cwDebug.wsState = ws.readyState;
             updateCWDebugOverlay();
@@ -477,18 +534,18 @@ function applyQuickBW() {
         try {
           if (pendingSpectrumAverage && ws && ws.readyState === WebSocket.OPEN) {
             // console.log('Flushing queued spectrum average to backend:', pendingSpectrumAverage.val);
-            sendControl('spectrum_avg', 'g:' + pendingSpectrumAverage.val.toString(), 333);
+            sendControl('spectrum_avg', 'g:' + pendingSpectrumAverage.val.toString());
             pendingSpectrumAverage = null;
           } else if (ws && ws.readyState === WebSocket.OPEN) {
             // Always send current spectrum_average so backend is in sync
             // console.log('Sending current spectrum_average to backend on WS open:', spectrum_average);
-            sendControl('spectrum_avg', 'g:' + spectrum_average.toString(), 333);
+            sendControl('spectrum_avg', 'g:' + spectrum_average.toString());
           }
         } catch (e) { console.error('Failed to flush/send spectrum average', e); }
         // Flush queued window prefs if any
         try {
           if (pendingWindowPrefs && ws && ws.readyState === WebSocket.OPEN) {
-            sendControl('window', 'w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''), 200);
+            sendControl('window', 'w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''));
             pendingWindowPrefs = null;
           }
         } catch (e) { console.error('Failed to flush/send window prefs', e); }
@@ -503,7 +560,7 @@ function applyQuickBW() {
               let ovVal = null;
               try { ovVal = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null; } catch (e) { ovVal = null; }
               if (ovVal !== null && ovVal !== '' && ws && ws.readyState === WebSocket.OPEN) {
-                try { sendControl('spectrum_overlap', 'v:' + ovVal, 200); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
+                try { sendControl('spectrum_overlap', 'v:' + ovVal); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
               }
             } catch (e) {}
           }, 100);
@@ -522,7 +579,7 @@ function applyQuickBW() {
         spectrumPoll = v;
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            sendControl('spectrum_poll', 'r:' + v.toString(), 200);
+            sendControl('spectrum_poll', 'r:' + v.toString());
             console.log('Sent spectrum poll request:', v);
           } catch (e) {
             console.error('Failed to send spectrum poll:', e);
@@ -543,7 +600,7 @@ function applyQuickBW() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
             // Format: w:<WINDOW_TYPE>:<PARAM>
-            sendControl('window', 'w:' + t + ':' + p, 200);
+            sendControl('window', 'w:' + t + ':' + p);
             // persist selection when sent
             try { saveWindowPrefs(); } catch (e) {}
           } catch (e) { console.error('Failed to send window parameter', e); }
@@ -566,7 +623,7 @@ function applyQuickBW() {
         // Format matches console interface: 'v:<float>'
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            sendControl('spectrum_overlap', 'v:' + v.toString(), 200);
+            sendControl('spectrum_overlap', 'v:' + v.toString());
             try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
             //console.log('Sent spectrum overlap', v);
           } catch (e) { console.error('Failed to send spectrum overlap', e); }
@@ -588,7 +645,7 @@ function applyQuickBW() {
         // Format: t:<shift_in_Hz>
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            sendControl('shift', 't:' + v.toString(), 200);
+            sendControl('shift', 't:' + v.toString());
             console.log('Sent shift request:', v);
           } catch (e) { console.error('Failed to send shift request', e); }
         } else {
@@ -664,7 +721,7 @@ function applyQuickBW() {
             const p = pEl ? (pEl.value || '').trim() : '';
             if (t) {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                try { sendControl('window', 'w:' + t + ':' + p, 200); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
+                try { sendControl('window', 'w:' + t + ':' + p); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
               } else {
                 pendingWindowPrefs = { t: t, p: p };
               }
@@ -784,7 +841,7 @@ function applyQuickBW() {
             const highInt = Math.round(high);
             const payload = 'e:' + lowInt.toString() + ':' + highInt.toString();
             // Throttled send to avoid overrunning backend
-            sendControl('edges', payload, 100);
+            sendControl('edges', payload);
             // update debug overlay state (record attempt)
             try { cwDebug.lastSent = { low: lowInt, high: highInt, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
             //console.log('Sent filter edges:', low, high);
@@ -804,8 +861,8 @@ function applyQuickBW() {
                     if (expectedFilterAck && expectedFilterAck.retries === 0) {
                     expectedFilterAck.retries = 1;
                     //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                      sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 200);
+                      if (ws && ws.readyState === WebSocket.OPEN) {
+                      sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString());
                       cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                       updateCWDebugOverlay();
                     }
@@ -1250,7 +1307,7 @@ function applyQuickBW() {
                       expectedFilterAck.retries++;
                       //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
                         if (ws && ws.readyState === WebSocket.OPEN) {
-                        sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 300);
+                        sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString());
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                         updateCWDebugOverlay();
                       }
@@ -1495,7 +1552,7 @@ function applyQuickBW() {
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
       // user-initiated freq change: block incoming programmatic updates briefly
       if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
-      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
+      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
@@ -1514,7 +1571,7 @@ function applyQuickBW() {
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
       if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
-      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
+      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
         spectrum.setFrequency(value);
