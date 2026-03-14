@@ -909,18 +909,18 @@ function applyQuickBW() {
               if (f_raw > 1000000) {
                 // large number — assume already in Hz
                 hz = Math.round(f_raw);
-                console.debug('[radio.js] BFREQ text received (server) interpreted as Hz:', args[1], 'hz=', hz);
+                // console.debug('[radio.js] BFREQ text received (server) interpreted as Hz:', args[1], 'hz=', hz);
               } else {
                 // assume kHz
                 hz = Math.round(f_raw * 1000);
-                console.debug('[radio.js] BFREQ text received (server) interpreted as kHz:', args[1], 'hz=', hz);
+                // console.debug('[radio.js] BFREQ text received (server) interpreted as kHz:', args[1], 'hz=', hz);
               }
               backendFrequencyHz = hz;
               try {
                 const freqEl = document.getElementById('freq');
                 if (freqEl) {
                   if (!adoptOnParameterMismatch) {
-                    console.debug('[radio.js] adopt disabled; skipping BFREQ-driven freq UI update');
+                    // console.debug('[radio.js] adopt disabled; skipping BFREQ-driven freq UI update');
                   } else {
                     const now = Date.now();
                     if (now < suppressProgrammaticUpdatesUntil) {
@@ -946,7 +946,7 @@ function applyQuickBW() {
                         }
                       } catch (e) { /* ignore */ }
                       if (!allow) {
-                        console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
+                        // console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
                       } else {
                         suppressProgrammaticUI = true;
                         freqEl.value = (hz / 1000.0).toFixed(3);
@@ -961,9 +961,9 @@ function applyQuickBW() {
                     }
                   }
                 }
-              } catch (e) { console.debug('[radio.js] BFREQ handler failed to set freq UI', e); }
+              } catch (e) { /* console.debug('[radio.js] BFREQ handler failed to set freq UI', e); */ }
             } else {
-              console.debug('[radio.js] BFREQ parseFloat returned NaN for', args[1]);
+              // console.debug('[radio.js] BFREQ parseFloat returned NaN for', args[1]);
             }
             return;
           }
@@ -1002,7 +1002,7 @@ function applyQuickBW() {
               const modeEl = document.getElementById('mode');
               if (modeEl) {
                 if (!adoptOnParameterMismatch) {
-                  console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
+                  // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
                 } else {
                   // Prevent sending a mode command while we apply the server-driven change
                   const prevSuppress = suppressProgrammaticUI;
@@ -1027,9 +1027,9 @@ function applyQuickBW() {
               console.info('[radio.js] server preset message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                if (!adoptOnParameterMismatch) {
-                  console.debug('[radio.js] adopt disabled; skipping server preset UI update', modeVal);
-                } else {
+                  if (!adoptOnParameterMismatch) {
+                    // console.debug('[radio.js] adopt disabled; skipping server preset UI update', modeVal);
+                  } else {
                   const prevSuppress = suppressProgrammaticUI;
                   suppressProgrammaticUI = true;
                   try { modeEl.value = modeVal; try { setMode(modeVal, false); } catch (e) {} } finally { suppressProgrammaticUI = prevSuppress; }
@@ -1149,7 +1149,7 @@ function applyQuickBW() {
                 spectrum.setLowHz(lowHz);
                 spectrum.setHighHz(highHz);
               } else {
-                console.debug('[radio.js] adopt disabled; skipping server-driven filter edge UI update');
+                // console.debug('[radio.js] adopt disabled; skipping server-driven filter edge UI update');
               }
               // record the server-provided center so the UI can align incoming waterfall rows
               try {
@@ -1163,7 +1163,7 @@ function applyQuickBW() {
               if (adoptOnParameterMismatch) {
                 spectrum.setFrequency(frequencyHz);
               } else {
-                console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
+                // console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
               }
               updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
@@ -1183,13 +1183,13 @@ function applyQuickBW() {
                   if (adoptOnParameterMismatch) {
                     zoomEl.value = clamped;
                   } else {
-                    console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
+                    // console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
                   }
                 } else {
                   if (adoptOnParameterMismatch) {
                     document.getElementById("zoom_level").value = z_level;
                   } else {
-                    console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
+                    // console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
                   }
                 }
               } catch (e) { console.warn('Failed to update zoom control bounds', e); }
@@ -1197,12 +1197,12 @@ function applyQuickBW() {
               try {
                 const freqEl = document.getElementById("freq");
                 if (freqEl) {
-                  console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
+                  // console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
                   backendFrequencyHz = frequencyHz;
                   if (!adoptOnParameterMismatch) {
-                    console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
+                    // console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
                   } else if (Date.now() < suppressProgrammaticUpdatesUntil) {
-                    console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
+                    // console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
                   } else {
                     suppressProgrammaticUI = true;
                     freqEl.value = (frequencyHz / 1000.0).toFixed(3);
