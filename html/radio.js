@@ -508,6 +508,7 @@ function applyQuickBW() {
         // get the SSRC
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
+          try { ws.send('P:' + (adoptOnParameterMismatch ? '1' : '0')); } catch (e) { console.warn('Failed to send initial adopt state P:', e); }
         }
         // default to 20 Mtr band
         //document.getElementById('20').click()

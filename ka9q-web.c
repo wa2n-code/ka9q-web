@@ -89,6 +89,7 @@ struct session {
   float bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
   int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
+  bool adoptOnParameterMismatch; /* per-session adopt-on-mismatch flag */
   float spectrum_base;
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
@@ -159,9 +160,8 @@ static unsigned long now_ms(void) {
     return (unsigned long)time(NULL) * 1000UL;
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
-/* If true, server will adopt backend-reported parameters (preset/freq) when
-  persistent mismatches are detected. Default: false (do not adopt). */
-bool adoptOnParameterMismatch = false;
+/* Per-session 'adopt on mismatch' flag moved into `struct session` as
+   `sp->adoptOnParameterMismatch`. Default false for new sessions. */
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -663,9 +663,9 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
           char *val = strtok(NULL, ":");
           if (val != NULL) {
             int v = atoi(val);
-            adoptOnParameterMismatch = (v != 0);
+            sp->adoptOnParameterMismatch = (v != 0);
             if (verbose)
-              fprintf(stderr, "%s: adoptOnParameterMismatch set to %d\n", __FUNCTION__, adoptOnParameterMismatch);
+              fprintf(stderr, "%s: SSRC %u adoptOnParameterMismatch set to %d\n", __FUNCTION__, (unsigned)sp->ssrc, sp->adoptOnParameterMismatch);
           }
         }
         break;
@@ -966,6 +966,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->ws=ws;
   sp->spectrum_active=true;
   sp->audio_active=false;
+  sp->adoptOnParameterMismatch = false;
 
 
   sp->frequency=10000000;
@@ -2382,7 +2383,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      bool adopt_preset = adoptOnParameterMismatch;
+      bool adopt_preset = sp->adoptOnParameterMismatch;
       if (adopt_preset) {
         if (verbose && debug_send) {
           unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
@@ -2435,16 +2436,16 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     const double FREQ_EPS_HZ = 0.5; /* 0.5 Hz tolerance */
     bool backend_changed = isnan(*last_sent_backend_frequency) ||
                            (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
-    if (backend_changed) {
+      if (backend_changed) {
       current_backend_frequency = Channel.tune.freq;
       char freq_msg[64];
       snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
       /* Only notify client of backend frequency changes when adoption is enabled.
          Update the last_sent_backend_frequency only when a notification is sent. */
-      if (adoptOnParameterMismatch) {
-        send_ws_text_to_session(sp, freq_msg);
-        *last_sent_backend_frequency = Channel.tune.freq;
-      }
+        if (sp->adoptOnParameterMismatch) {
+          send_ws_text_to_session(sp, freq_msg);
+          *last_sent_backend_frequency = Channel.tune.freq;
+        }
     }
   }
 
@@ -2495,7 +2496,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
         }
         if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-          bool adopt_freq = adoptOnParameterMismatch;
+          bool adopt_freq = sp->adoptOnParameterMismatch;
             if (adopt_freq) {
             if (verbose && debug_send) {
               unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
