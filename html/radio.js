@@ -218,9 +218,10 @@
                   try {
                     const q = _controlState.pending.get(type);
                     if (q && q.length > 0) {
-                      if (type === 'freq') {
-                        // For user-initiated immediate frequency sends, drop older queued freq
-                        // to avoid older pending sends overriding the just-sent frequency.
+                      // For frequency and filter-edge changes, keep only the most
+                      // recent queued value so older pending sends don't override
+                      // the just-sent setting. Other types remain FIFO.
+                      if (type === 'freq' || type === 'edges') {
                         _controlState.pending.delete(type);
                         const tt = _controlState.timers.get(type);
                         if (tt) { clearTimeout(tt); _controlState.timers.delete(type); }
@@ -238,8 +239,8 @@
             // ws not open or fallback: queue as pending with timestamp
             try {
               let q = _controlState.pending.get(type) || [];
-              if (type === 'freq') {
-                // For frequency changes, only keep the most recent queued value
+              if (type === 'freq' || type === 'edges') {
+                // For frequency and filter-edge changes, only keep the most recent queued value
                 q = [{ msg: msg, when: now }];
               } else {
                 q.push({ msg: msg, when: now });
@@ -255,8 +256,12 @@
           }
           // enqueue pending message and schedule flush
           try {
-            const q = _controlState.pending.get(type) || [];
-            q.push({ msg: msg, when: now });
+            let q = _controlState.pending.get(type) || [];
+            if (type === 'freq' || type === 'edges') {
+              q = [{ msg: msg, when: now }];
+            } else {
+              q.push({ msg: msg, when: now });
+            }
             _controlState.pending.set(type, q);
             if (!_controlState.timers.has(type)) {
               const wait = Math.max(1, minIntervalMs - sinceGlobal);
