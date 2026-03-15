@@ -980,7 +980,8 @@ function applyQuickBW() {
               lastShiftChangeMs = Date.now();
               try {
                 const si = document.getElementById('shiftInput');
-                if (si && adoptOnParameterMismatch) {
+                if (si) {
+                //if (si && adoptOnParameterMismatch) {
                   si.value = shiftHz.toFixed(0);
                 }
               } catch (e) { /* ignore UI set errors */ }
