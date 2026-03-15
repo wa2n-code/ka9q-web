@@ -1182,6 +1182,7 @@ function applyQuickBW() {
                   if (zoomEl) {
                   const maxVal = (typeof zoomTableSize === 'number' && !isNaN(zoomTableSize)) ? (zoomTableSize - 1) : Number(zoomEl.max) || 0;
                   zoomEl.max = maxVal;
+                  try { updateZoomMarkers(); } catch (e) {}
                   // If the frontend sample rate is the lower value (<= 64.8 MHz) disallow zoom level 0
                   const minVal = (typeof input_samprate === 'number' && input_samprate > 0 && input_samprate <= 64800000) ? 1 : 0;
                   zoomEl.min = minVal;
@@ -3691,6 +3692,7 @@ async function fetchZoomTableSize() {
         const zoomLevelControl = document.getElementById("zoom_level");
         if (zoomLevelControl) {
             zoomLevelControl.max = zoomTableSize - 1; // Set max to table size - 1
+          try { updateZoomMarkers(); } catch (e) {}
         }
 
         return size; // Return the size for further use if needed
@@ -3733,6 +3735,60 @@ window.zoomTable = [
   { bin_width: 2, bin_count: 1620 },
   { bin_width: 1, bin_count: 1620 }
 ];
+
+// Update the datalist used by the zoom range control so tick marks match the
+// effective zoom index range. Shows at most a few ticks (<=7), roughly half
+// of the available levels, and always includes the min and max entries.
+function updateZoomMarkers() {
+  try {
+    const dlist = document.getElementById('zmarkers');
+    const zoomEl = document.getElementById('zoom_level');
+    if (!dlist || !zoomEl) return;
+
+    const min = Number(zoomEl.min) || 0;
+    const max = Number(zoomEl.max) || (Array.isArray(window.zoomTable) ? (window.zoomTable.length - 1) : 0);
+    const count = Math.max(0, (max - min + 1));
+    if (count <= 0) {
+      dlist.innerHTML = '';
+      return;
+    }
+
+    // Desired number of ticks: about half of available entries, capped to 7.
+    const nTicks = Math.min(7, Math.max(2, Math.ceil(count / 2)));
+
+    // Build evenly spaced tick indices including both ends
+    const seen = new Set();
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < nTicks; ++i) {
+      const v = Math.round(min + (i / (nTicks - 1)) * (max - min));
+      if (seen.has(v)) continue;
+      seen.add(v);
+      const opt = document.createElement('option');
+      opt.value = String(v);
+      frag.appendChild(opt);
+    }
+
+    // Always ensure min and max are present
+    if (!seen.has(min)) {
+      const o = document.createElement('option'); o.value = String(min); frag.insertBefore(o, frag.firstChild);
+    }
+    if (!seen.has(max)) {
+      const o = document.createElement('option'); o.value = String(max); frag.appendChild(o);
+    }
+
+    // Replace datalist contents
+    dlist.innerHTML = '';
+    dlist.appendChild(frag);
+  } catch (e) {
+    console.debug('updateZoomMarkers error', e);
+  }
+}
+// Ensure markers are populated once DOM exists (best-effort)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() { try { updateZoomMarkers(); } catch (e) {} }, { once: true });
+} else {
+  try { updateZoomMarkers(); } catch (e) {}
+}
 
 // Utility: Find closest zoom level index for a given value
 window.findClosestZoomIndex = function(requestedZoom) {
