@@ -1145,11 +1145,14 @@ function applyQuickBW() {
 
             if(update) {
               calcFrequencies();
-              if (adoptOnParameterMismatch) {
+              // Always update the spectrum band limits so the axes (frequency
+              // labels and band-edge markers) are rendered even when the UI is
+              // configured to not adopt other server-driven parameter changes.
+              try {
                 spectrum.setLowHz(lowHz);
                 spectrum.setHighHz(highHz);
-              } else {
-                // console.debug('[radio.js] adopt disabled; skipping server-driven filter edge UI update');
+              } catch (e) {
+                console.debug('[radio.js] failed to update spectrum band edges', e);
               }
               // record the server-provided center so the UI can align incoming waterfall rows
               try {
