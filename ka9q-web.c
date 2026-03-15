@@ -60,7 +60,7 @@ pthread_t audio_task;
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
-#define CONTROL_USLEEP_US 30000 // minimum of 20 ms observed for backend to process a command and update status, so 30 ms is a safe default
+#define CONTROL_USLEEP_US 10000 // minimum of 20 ms observed for backend to process a command and update status, so 30 ms is a safe default
 
 struct session {
   bool spectrum_active;
