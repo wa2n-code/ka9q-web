@@ -1189,17 +1189,18 @@ function applyQuickBW() {
                   let clamped = z_level;
                   if (clamped < minVal) clamped = minVal;
                   if (clamped > maxVal) clamped = maxVal;
-                  if (adoptOnParameterMismatch) {
-                    zoomEl.value = clamped;
-                  } else {
-                    // console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
-                  }
+                    // Always update the zoom control value so the slider and
+                    // the lower-status zoom display remain in sync with the
+                    // server-provided zoom level even when `adoptOnParameterMismatch`
+                    // is disabled.
+                    try {
+                      zoomEl.value = clamped;
+                    } catch (e) { /* ignore UI set errors */ }
                 } else {
-                  if (adoptOnParameterMismatch) {
-                    document.getElementById("zoom_level").value = z_level;
-                  } else {
-                    // console.debug('[radio.js] adopt disabled; skipping zoom level UI write');
-                  }
+                    try {
+                      const zEl = document.getElementById("zoom_level");
+                      if (zEl) zEl.value = z_level;
+                    } catch (e) { /* ignore UI set errors */ }
                 }
               } catch (e) { console.warn('Failed to update zoom control bounds', e); }
               //console.log("Zoom level=",z_level);
