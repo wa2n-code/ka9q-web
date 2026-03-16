@@ -15,8 +15,7 @@
       // Milliseconds to stagger paired control sends (mode then frequency)
       const COMMAND_SEND_SPACING_MS = 50;
       // Milliseconds to delay sending the client's displayed frequency after
-      // a mode change. Make editable for tuning backend timing (default 500ms).
-      const MODE_FREQ_SEND_DELAY_MS = 500;
+      // a mode change. Previously adjustable; removed in favor of single mode send.
       // pending filter edges to send once websocket opens
       let pendingFilterEdges = null;
       // expected ack tracking for last sent edges
@@ -2120,28 +2119,11 @@ function applyQuickBW() {
         // After sending mode, also send the client's displayed frequency so
         // the backend can apply mode-specific behavior immediately. Skip when
         // we've already scheduled a CW<->CW paired send above.
-        try {
-          if (!(wasCW && willBeCW && prevMode !== sel)) {
-            setTimeout(() => {
-              try {
-                const freqElSend = document.getElementById('freq');
-                let khzVal = null;
-                if (freqElSend) {
-                  const parsed = parseFloat(freqElSend.value);
-                  if (Number.isFinite(parsed)) khzVal = parsed;
-                }
-                if (khzVal === null) khzVal = (frequencyHz / 1000.0);
-                if (Number.isFinite(khzVal)) {
-                  sendControl('freq', 'F:' + khzVal.toFixed(3), 50, true);
-                }
-              } catch (e) { console.debug('post-mode freq send failed', e); }
-            }, MODE_FREQ_SEND_DELAY_MS);
-          }
-        } catch (e) { /* ignore post-mode send errors */ }
+        // Post-mode delayed frequency resend removed — only send mode here.
       } else {
         console.debug('[radio.js] setMode suppressed send; forceSend=', forceSend, 'suppressProgrammaticUI=', suppressProgrammaticUI);
       }
-
+      
       // Determine the new sample rate and number of channels based on the mode
       let newSampleRate = 12000;
       let newChannels = 1;
@@ -4153,10 +4135,6 @@ window.addEventListener('DOMContentLoaded', function() {
                   }
                   // Briefly block incoming programmatic updates, then force-send freq
                   blockProgrammaticUpdates(600);
-                  // Force-send the freq slightly after the mode send to avoid backend drop/race
-                  setTimeout(() => {
-                    try { sendControl('freq', "F:" + fKHz, 50, true); } catch (e) { console.warn('Forced freq send failed', e); }
-                  }, MODE_FREQ_SEND_DELAY_MS);
                   saveSettings();
                 } catch (e) {
                   console.warn('Recall frequency apply failed', e);
