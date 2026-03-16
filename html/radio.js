@@ -3635,11 +3635,30 @@ function initializeDialogEventListeners() {
     // Get the position of the launch button
     const buttonRect = optionsButton.getBoundingClientRect();
 
-    // Position the dialog just below the launch button
+    // Position the dialog with a smart vertical placement so it stays visible
     optionsDialog.style.position = 'absolute'; // Use absolute positioning
     optionsDialog.style.left = `${buttonRect.left + window.scrollX}px`; // Adjust for horizontal scrolling
-    optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 10}px`; // Adjust for vertical scrolling and add 10px spacing below button
     optionsDialog.style.transform = 'none'; // Reset any transform applied by CSS
+
+    // Measure the dialog height without flashing it on-screen
+    optionsDialog.style.visibility = 'hidden';
+    optionsDialog.classList.add('open');
+    const dialogHeight = optionsDialog.offsetHeight || 0;
+    optionsDialog.classList.remove('open');
+    optionsDialog.style.visibility = '';
+
+    // Default desired placement is just below the button with 10px spacing
+    const desiredTop = buttonRect.bottom + window.scrollY + 10;
+    // Maximum top that keeps the dialog inside the viewport with a 10px margin
+    const maxTop = window.scrollY + window.innerHeight - dialogHeight - 10;
+    // Choose the smaller of the two so it doesn't overflow the bottom
+    let top = Math.min(desiredTop, maxTop);
+    // If there's still not enough room, try placing above the button
+    if (top < window.scrollY + 10) {
+      const aboveTop = buttonRect.top + window.scrollY - dialogHeight - 10;
+      top = Math.max(window.scrollY + 10, aboveTop);
+    }
+    optionsDialog.style.top = `${top}px`;
 
     // Show the dialog
     optionsDialog.classList.add('open');
