@@ -649,7 +649,13 @@ function applyQuickBW() {
       }
 
       // Send post-detection audio shift (Hz) to backend
-      function sendShift() {
+      // Only send when explicitly requested by the user (bypassProgrammaticGuard=true).
+      function sendShift(bypassProgrammaticGuard = false) {
+        // Prevent parroting server-driven updates back to the server
+        if (!bypassProgrammaticGuard && suppressProgrammaticUI) {
+          console.debug('[radio.js] sendShift suppressed by programmatic UI flag');
+          return;
+        }
         const el = document.getElementById('shiftInput');
         if (!el) return;
         const v = parseFloat(el.value);
@@ -1483,8 +1489,8 @@ function applyQuickBW() {
             try { document.getElementById('cursor').checked = spectrum.cursor_active; } catch (e) {}
             try { document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause"); } catch (e) {}
             try { document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on"); } catch (e) {}
-            try { const sb = document.getElementById('sendShiftButton'); if (sb) sb.addEventListener('click', sendShift, false); } catch (e) {}
-            try { const si = document.getElementById('shiftInput'); if (si) si.addEventListener('keypress', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); sendShift(); } }); } catch (e) {}
+            try { const sb = document.getElementById('sendShiftButton'); if (sb) sb.addEventListener('click', () => sendShift(true), false); } catch (e) {}
+            try { const si = document.getElementById('shiftInput'); if (si) si.addEventListener('keypress', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); sendShift(true); } }); } catch (e) {}
 
             // set zoom, preset, spectrum percentage?
             try { spectrum.setAveraging(spectrum.averaging); } catch (e) {}
