@@ -14,6 +14,9 @@
       const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
       // Milliseconds to stagger paired control sends (mode then frequency)
       const COMMAND_SEND_SPACING_MS = 50;
+      // Milliseconds to delay sending the client's displayed frequency after
+      // a mode change. Make editable for tuning backend timing (default 500ms).
+      const MODE_FREQ_SEND_DELAY_MS = 500;
       // pending filter edges to send once websocket opens
       let pendingFilterEdges = null;
       // expected ack tracking for last sent edges
@@ -969,6 +972,7 @@ function applyQuickBW() {
                         suppressProgrammaticUI = true;
                         freqEl.value = (hz / 1000.0).toFixed(3);
                         setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                        console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
                         modeChangePending = false;
                         modeChangeFrom = null;
                       }
@@ -976,6 +980,7 @@ function applyQuickBW() {
                       suppressProgrammaticUI = true;
                       freqEl.value = (hz / 1000.0).toFixed(3);
                       setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                      console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
                     }
                   }
                 }
@@ -1006,7 +1011,7 @@ function applyQuickBW() {
               try {
                 if (changed) updateCWMarker();
               } catch (e) { console.debug('[radio.js] updateCWMarker failed', e); }
-              console.debug('[radio.js] SHIFT received, shiftHz=', shiftHz, 'changed=', changed);
+              
             } else {
               console.debug('[radio.js] SHIFT parseFloat returned NaN for', args[1]);
             }
@@ -2064,10 +2069,10 @@ function applyQuickBW() {
         // Pass `forceSend` as 4th argument to allow bypassing the programmatic
         // UI guard inside sendControl when explicitly requested (e.g., recall).
         sendControl('mode', "M:" + selected_mode, 100, !!forceSend);
+        const sel = (selected_mode || '').toLowerCase();
+        const wasCW = (prevMode === 'cwu' || prevMode === 'cwl');
+        const willBeCW = (sel === 'cwu' || sel === 'cwl');
         try {
-          const sel = (selected_mode || '').toLowerCase();
-          const wasCW = (prevMode === 'cwu' || prevMode === 'cwl');
-          const willBeCW = (sel === 'cwu' || sel === 'cwl');
           // Entering CW from non-CW: remember the original un-shifted frequency
           if (!wasCW && willBeCW) {
             try {
@@ -2112,6 +2117,27 @@ function applyQuickBW() {
             } catch (e) { console.debug('update UI for CW->CW failed', e); }
           }
         } catch (e) { /* ignore */ }
+        // After sending mode, also send the client's displayed frequency so
+        // the backend can apply mode-specific behavior immediately. Skip when
+        // we've already scheduled a CW<->CW paired send above.
+        try {
+          if (!(wasCW && willBeCW && prevMode !== sel)) {
+            setTimeout(() => {
+              try {
+                const freqElSend = document.getElementById('freq');
+                let khzVal = null;
+                if (freqElSend) {
+                  const parsed = parseFloat(freqElSend.value);
+                  if (Number.isFinite(parsed)) khzVal = parsed;
+                }
+                if (khzVal === null) khzVal = (frequencyHz / 1000.0);
+                if (Number.isFinite(khzVal)) {
+                  sendControl('freq', 'F:' + khzVal.toFixed(3), 50, true);
+                }
+              } catch (e) { console.debug('post-mode freq send failed', e); }
+            }, MODE_FREQ_SEND_DELAY_MS);
+          }
+        } catch (e) { /* ignore post-mode send errors */ }
       } else {
         console.debug('[radio.js] setMode suppressed send; forceSend=', forceSend, 'suppressProgrammaticUI=', suppressProgrammaticUI);
       }
@@ -4111,7 +4137,7 @@ window.addEventListener('DOMContentLoaded', function() {
                   // Force-send the freq slightly after the mode send to avoid backend drop/race
                   setTimeout(() => {
                     try { sendControl('freq', "F:" + fKHz, 50, true); } catch (e) { console.warn('Forced freq send failed', e); }
-                  }, COMMAND_SEND_SPACING_MS);
+                  }, MODE_FREQ_SEND_DELAY_MS);
                   saveSettings();
                 } catch (e) {
                   console.warn('Recall frequency apply failed', e);
