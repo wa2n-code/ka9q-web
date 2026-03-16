@@ -376,6 +376,12 @@ let suppressProgrammaticUI = false;
 // When true, allow backend-driven updates to change user-editable inputs (freq, mode, presets, etc.)
 // When false, server status updates MUST NOT change user input controls.
 let adoptOnParameterMismatch = false;
+// Keep Frequency Centered (KFC): when true, left-click frequency selection will
+// also send a zoom-center command so the tuned frequency is placed in the
+// center of the spectrum.
+// Expose Keep Frequency Centered on `window` so other modules (spectrum.js)
+// can read it. Default false.
+window.keepFreqCentered = false;
 // When non-zero and in the future, incoming programmatic updates (freq/mode)
 // should be ignored until this time to allow the backend to stabilize after
 // a user-initiated change.
@@ -1597,11 +1603,40 @@ function applyQuickBW() {
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
       // user-initiated freq change: block incoming programmatic updates briefly
       if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
+      // Suppress remote-driven redraws for a short window so our immediate
+      // local redraw isn't overwritten by incoming data — only when KFC is enabled.
+      try { if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) { if (typeof spectrum !== 'undefined') spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } } catch (e) {}
       sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
+      // Update local frequency first so overlays draw at the new tuned position
+      spectrum.setFrequency(value);
+      try {
+        if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+          const newCenterHz = value;
+          try {
+            spectrum.setCenterHz(newCenterHz);
+          } catch (e) {}
+          const centerMsg = "Z:c:" + (value / 1000.0).toFixed(3);
+          setTimeout(() => {
+            try {
+              if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+              else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+            } catch (e) {}
+          }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+        }
+      } catch (e) {}
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(value);
         updateCWMarker();
+        // Immediate redraw so overlays and waterfall render together; force bypass suppression
+        // only when KFC is enabled. If KFC is off, accept remote updates as they arrive.
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+              if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false, true);
+              else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false, true);
+            }
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -1616,11 +1651,40 @@ function applyQuickBW() {
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
       if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
+      // Suppress remote-driven redraws for a short window so our immediate
+      // local redraw isn't overwritten by incoming data — only when KFC is enabled.
+      try { if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) { if (typeof spectrum !== 'undefined') spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } } catch (e) {}
       sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
+      // Update local frequency first so overlays draw at the new tuned position
+      spectrum.setFrequency(value);
+      try {
+        if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+          const newCenterHz = value;
+          try {
+            spectrum.setCenterHz(newCenterHz);
+          } catch (e) {}
+          const centerMsg = "Z:c:" + (value / 1000.0).toFixed(3);
+          setTimeout(() => {
+            try {
+              if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+              else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+            } catch (e) {}
+          }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+        }
+      } catch (e) {}
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(value);
         updateCWMarker();
+        // Immediate redraw so overlays and waterfall render together; force bypass suppression
+        // only when KFC is enabled. If KFC is off, accept remote updates as they arrive.
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+              if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false, true);
+              else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false, true);
+            }
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -1887,10 +1951,35 @@ function applyQuickBW() {
         //console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
         if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
         sendControl('freq', "F:" + (f / 1000.0).toFixed(3), 50);
+        // Update the local tuned frequency first so overlays render correctly
+        spectrum.setFrequency(f);
+        // If this was a user left-click and KFC is enabled, send a zoom-center
+        // command so the tuned frequency is centered in the spectrum.
+        try {
+          if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered && evt && ('button' in evt) && evt.button === 0) {
+            const newCenterHz = f;
+            try {
+              spectrum.setCenterHz(newCenterHz);
+            } catch (e) {}
+            const centerMsg = "Z:c:" + (f / 1000.0).toFixed(3);
+            setTimeout(() => {
+              try {
+                if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+                else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+              } catch (e) {}
+            }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+          }
+        } catch (e) { /* ignore */ }
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(f);
         updateCWMarker();
+        // Immediate redraw so overlays and pre-shifted waterfall render together
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+            else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false);
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(f);
         // If this change was initiated by the user (typed in the `freq` box or
         // they pressed the Set button), do NOT auto-switch mode even if
@@ -2924,6 +3013,7 @@ function saveSettings() {
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
   try { localStorage.setItem("adoptOnParameterMismatch", (document.getElementById("ckAdoptOnMismatch") && document.getElementById("ckAdoptOnMismatch").checked) ? "true" : "false"); } catch (e) {}
+  try { localStorage.setItem("keepFreqCentered", (document.getElementById("ckKeepFreqCentered") && document.getElementById("ckKeepFreqCentered").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -3144,6 +3234,11 @@ function loadSettings() {
   adoptOnParameterMismatch = adoptVal;
   try { const adEl = document.getElementById('ckAdoptOnMismatch'); if (adEl) adEl.checked = adoptVal; } catch (e) {}
   try { sendControl('adopt', 'P:' + (adoptVal ? '1' : '0'), 100); } catch (e) {}
+  // Keep Frequency Centered (KFC) persisted setting
+  const kfcVal = getLS("keepFreqCentered", v => (v === "true"), false);
+  window.keepFreqCentered = kfcVal;
+  try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.checked = kfcVal; } catch (e) {}
+  try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.addEventListener('change', function() { window.keepFreqCentered = this.checked; saveSettings(); }); } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();

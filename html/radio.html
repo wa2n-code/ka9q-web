@@ -192,6 +192,8 @@
                         <button id="cw_instant_button" title="Apply alternate bandwidth" style="margin-left:6px; padding:2px 6px; font-size:90%" disabled>QuickBW</button>
                     </td>
                     <td align="center">
+                        <label for="ckKeepFreqCentered" style="margin-right:2px;">AZC</label>
+                        <input type="checkbox" id="ckKeepFreqCentered" title="Auto Zoom Center on frequency change" style="margin-right:2px; vertical-align: middle;" />
                         <button id="zoomminus" onclick="zoomout()" title="Zoom out spectrum">Out</button>
                         <button id="zoomcenter" onclick="zoomcenter()" title="Move current frequency to spectrum center">Zoom Center</button>
                         <button id="zoomplus" onclick="zoomin()" title="Zoom in spectrum">In</button>
@@ -390,6 +392,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
+            <li>v2.81: Added Auto Zoom Center</li>
             <li>v2.80: Throttled websocket commands. Adopt back end changes checkbox allows KA9Q's control pgm to control the gui. Faster response to GUI changes</li>
             <li>v2.79: Added CB band selector & channels, more band edges, more zoom levels, spectrum averaging input, waterfall bias setting, Alternate frequency set buttons, Spectrum Window Type - by Phil KA9Q & Wayne WA2N</li>
             <li>v2.78: Add red "pip" indicator for base frequency when in CWU or CWL mode, add QuickBW function</li>
