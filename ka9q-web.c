@@ -2337,10 +2337,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
   /* Handle preset mismatch / adoption */
   if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
-    /* Track consecutive preset mismatches and adopt the backend-reported
-       preset if it persists for MAX_PRESET_MISMATCH cycles. This prevents
-       repeated mismatch churn when another client on the same SSRC
-       changes the preset. */
+    /* Track consecutive preset mismatches and reassert our requested preset
+       after repeated mismatches by resending the mode command to the backend. */
     const int MAX_PRESET_MISMATCH = 5;
     sp->preset_mismatch_count++;
     if (verbose && debug_send) {
@@ -2349,22 +2347,15 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      /* After repeated mismatches assume server state is authoritative and
-         adopt the backend-reported preset into the session and notify the client. */
+      /* After repeated mismatches, reassert our requested preset to the backend
+         by resending the mode command rather than adopting the server value. */
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s after %d mismatches\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
+        fprintf(stderr, "%s: +%lums: SSRC %u: resending requested preset %s after %d mismatches\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, MAX_PRESET_MISMATCH);
       }
-      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+      control_set_mode(sp, sp->requested_preset);
       sp->preset_mismatch_count = 0;
-      /* Notify this client so its UI can update */
-      char pm[64];
-      snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
-      pthread_mutex_lock(&sp->ws_mutex);
-      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-      onion_websocket_write(sp->ws, pm, strlen(pm));
-      pthread_mutex_unlock(&sp->ws_mutex);
     } else {
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
@@ -2449,19 +2440,18 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
         }
         if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-          /* After repeated mismatches assume server state is authoritative
-             and adopt the backend frequency into the session, notifying the client. */
+          /* After repeated mismatches reassert our requested frequency by
+             resending it to the backend rather than adopting the polled value. */
           if (verbose && debug_send) {
             unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-            fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
-                    __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
+            fprintf(stderr, "%s: +%lums: SSRC %u: resending requested freq %.3f kHz after %d mismatches\n",
+                    __FUNCTION__, elapsed_ms, sp->ssrc, sp->frequency * 0.001, MAX_FREQ_MISMATCH);
           }
-          sp->frequency = (uint32_t)lround(Channel.tune.freq);
-          char freq_msg[64];
-          snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-          send_ws_text_to_session(sp, freq_msg);
-          /* Keep last_sent_backend_frequency in sync when we actually notify */
-          *last_sent_backend_frequency = Channel.tune.freq;
+          {
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+            control_set_frequency(sp, freq_msg);
+          }
           sp->freq_mismatch_count = 0;
         }
       }
