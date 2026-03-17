@@ -4170,6 +4170,32 @@ window.addEventListener('DOMContentLoaded', function() {
                   }
                   // Briefly block incoming programmatic updates, then force-send freq
                   blockProgrammaticUpdates(600);
+                  try {
+                    // Force-send the recalled frequency to the backend, bypassing
+                    // the programmatic UI guard so recalls always reach the server.
+                    if (typeof sendControl === 'function') {
+                      sendControl('freq', 'F:' + (Math.round(fVal) / 1000.0).toFixed(3), undefined, true);
+                    } else if (ws && ws.readyState === WebSocket.OPEN) {
+                      ws.send('F:' + (Math.round(fVal) / 1000.0).toFixed(3));
+                    }
+                    // If keepFreqCentered is enabled, also center the zoom on the recalled frequency
+                    try {
+                      if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+                        try {
+                          spectrum.setCenterHz(Math.round(fVal));
+                        } catch (e) {}
+                        // Suppress remote-driven redraws briefly so local redraw isn't overwritten
+                        try { spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } catch (e) {}
+                        const centerMsg = 'Z:c:' + (Math.round(fVal) / 1000.0).toFixed(3);
+                        setTimeout(() => {
+                          try {
+                            if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150, true);
+                            else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+                          } catch (e) {}
+                        }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+                      }
+                    } catch (e) {}
+                  } catch (e) { console.warn('Failed to send recalled frequency to backend', e); }
                   saveSettings();
                 } catch (e) {
                   console.warn('Recall frequency apply failed', e);
