@@ -2383,7 +2383,10 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      bool adopt_preset = sp->adoptOnParameterMismatch;
+      /* Adopt preset if user allows adoption on mismatch OR if this session
+         has a non-zero per-session CW shift reported by the backend. */
+      bool adopt_preset = sp->adoptOnParameterMismatch ||
+                          (!isnan(sp->shift) && sp->shift != 0.0);
       if (adopt_preset) {
         if (verbose && debug_send) {
           unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;

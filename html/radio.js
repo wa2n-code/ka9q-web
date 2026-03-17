@@ -292,11 +292,15 @@
               tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum && spectrum.frequency) || 0;
             }
             if (tuned && Number.isFinite(tuned) && tuned !== 0) {
-              const offset = shiftHz; // Hz
-              const markerHz = tuned - offset; // For both CWU and CWL, the marker is at tuned frequency minus the shift
-              spectrum.backendMarkerHz = markerHz;
-              spectrum.backendMarkerActive = true;
-              return;
+              // Only show the backend CW marker when adoption is enabled
+              // (either user enabled or the backend reports a non-zero shift).
+              if (adoptEnabled()) {
+                const offset = shiftHz; // Hz
+                const markerHz = tuned - offset; // For both CWU and CWL, the marker is at tuned frequency minus the shift
+                spectrum.backendMarkerHz = markerHz;
+                spectrum.backendMarkerActive = true;
+                return;
+              }
             }
           }
           spectrum.backendMarkerActive = false;
@@ -378,6 +382,14 @@ let suppressProgrammaticUI = false;
 // When true, allow backend-driven updates to change user-editable inputs (freq, mode, presets, etc.)
 // When false, server status updates MUST NOT change user input controls.
 let adoptOnParameterMismatch = false;
+
+// Helper: treat adoption as enabled when either the user has enabled
+// `adoptOnParameterMismatch` OR the backend reports a non-zero post-detection
+// audio/CW shift for this session. Use a small tolerance (1 Hz) to treat
+// near-zero shifts as zero.
+function adoptEnabled() {
+  return adoptOnParameterMismatch || (Number.isFinite(shiftHz) && Math.abs(shiftHz) > 1.0);
+}
 // Keep Frequency Centered (KFC): when true, left-click frequency selection will
 // also send a zoom-center command so the tuned frequency is placed in the
 // center of the spectrum.
@@ -939,48 +951,71 @@ function applyQuickBW() {
               try {
                 const freqEl = document.getElementById('freq');
                 if (freqEl) {
-                  if (!adoptOnParameterMismatch) {
-                    // console.debug('[radio.js] adopt disabled; skipping BFREQ-driven freq UI update');
-                  } else {
-                    const now = Date.now();
+                  const now = Date.now();
+                  // Decide whether to update the frequency UI. We allow updates when:
+                  // - `adoptEnabled()` is true (normal adoption behavior), or
+                  // - a recent mode change / shift toggle indicates we should follow the backend
+                  //   (allow brief override window even when adoption is not enabled).
+                  let shouldUpdate = false;
+                  if (adoptEnabled()) {
                     if (now < suppressProgrammaticUpdatesUntil) {
-                      // Allow override of the stabilization suppression when a recent
-                      // CW->non-CW change was requested by this client, or when the
-                      // backend just cleared a CW shift (we saw a recent SHIFT change
-                      // from non-zero to near-zero). This helps the freq input follow
-                      // the backend when the UI initiated the CW->non-CW transition.
                       let allow = false;
                       try {
                         if (modeChangePending) allow = true;
                         else if (lastShiftChangeMs) {
                           if ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS) {
                             try {
-                              const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 0.5;
-                              const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 0.5;
-                              const nowNonZero = Math.abs(shiftHz) > 0.5;
-                              const nowZero = Math.abs(shiftHz) <= 0.5;
+                              const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 1.0;
+                              const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 1.0;
+                              const nowNonZero = Math.abs(shiftHz) > 1.0;
+                              const nowZero = Math.abs(shiftHz) <= 1.0;
                               // Allow when shift was just cleared OR just set (entering or leaving CW)
                               if ((prevNonZero && nowZero) || (prevZero && nowNonZero)) allow = true;
                             } catch (e) { /* ignore */ }
                           }
                         }
                       } catch (e) { /* ignore */ }
-                      if (!allow) {
-                        // console.debug('[radio.js] BFREQ UI write skipped until stabilization window expires');
-                      } else {
-                        suppressProgrammaticUI = true;
-                        freqEl.value = (hz / 1000.0).toFixed(3);
-                        setTimeout(() => { suppressProgrammaticUI = false; }, 200);
-                        console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
-                        modeChangePending = false;
-                        modeChangeFrom = null;
-                      }
+                      if (allow) shouldUpdate = true;
                     } else {
-                      suppressProgrammaticUI = true;
-                      freqEl.value = (hz / 1000.0).toFixed(3);
-                      setTimeout(() => { suppressProgrammaticUI = false; }, 200);
-                      console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
+                      shouldUpdate = true;
                     }
+                  } else {
+                    // Adoption disabled: still allow a short window to accept a
+                    // backend-driven frequency when a CW shift was just cleared
+                    // (so the tuned frequency moved by the shift amount back to
+                    // the un-shifted carrier).
+                    if (modeChangePending) shouldUpdate = true;
+                    else if (lastShiftChangeMs && ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS)) {
+                      const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 1.0;
+                      const nowZero = Math.abs(shiftHz) <= 1.0;
+                      if (prevNonZero && nowZero) shouldUpdate = true;
+                    }
+                  }
+
+                  if (shouldUpdate) {
+                    suppressProgrammaticUI = true;
+                    freqEl.value = (hz / 1000.0).toFixed(3);
+                    setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                    // Keep local state in sync so visuals follow the reported backend frequency
+                    try {
+                      frequencyHz = hz;
+                    } catch (e) {}
+                    try {
+                      if (typeof spectrum !== 'undefined' && spectrum) {
+                        spectrum.setFrequency(hz);
+                        updateCWMarker();
+                        try {
+                          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+                            if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                            else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false);
+                          }
+                        } catch (e) {}
+                        try { spectrum.checkFrequencyAndClearOverlays(hz); } catch (e) {}
+                      }
+                    } catch (e) {}
+                    console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
+                    modeChangePending = false;
+                    modeChangeFrom = null;
                   }
                 }
               } catch (e) { /* console.debug('[radio.js] BFREQ handler failed to set freq UI', e); */ }
@@ -1024,7 +1059,7 @@ function applyQuickBW() {
               console.info('[radio.js] server mode message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                if (!adoptOnParameterMismatch) {
+                if (!adoptEnabled()) {
                   // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
                 } else {
                   // Prevent sending a mode command while we apply the server-driven change
@@ -1050,7 +1085,7 @@ function applyQuickBW() {
               console.info('[radio.js] server preset message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                  if (!adoptOnParameterMismatch) {
+                  if (!adoptEnabled()) {
                     // console.debug('[radio.js] adopt disabled; skipping server preset UI update', modeVal);
                   } else {
                   const prevSuppress = suppressProgrammaticUI;
@@ -1186,7 +1221,7 @@ function applyQuickBW() {
               if (!spectrum._leftDragging) {
                 spectrum.setCenterHz(centerHz);
               }
-              if (adoptOnParameterMismatch) {
+              if (adoptEnabled()) {
                 spectrum.setFrequency(frequencyHz);
               } else {
                 // console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
@@ -1227,7 +1262,7 @@ function applyQuickBW() {
                 if (freqEl) {
                   // console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
                   backendFrequencyHz = frequencyHz;
-                  if (!adoptOnParameterMismatch) {
+                  if (!adoptEnabled()) {
                     // console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
                   } else if (Date.now() < suppressProgrammaticUpdatesUntil) {
                     // console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
