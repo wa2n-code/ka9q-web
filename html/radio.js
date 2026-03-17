@@ -1021,7 +1021,8 @@ function applyQuickBW() {
             ssrc=parseInt(args[1]);
           }
           // BFREQ: server-sent backend frequency in kHz (e.g., "BFREQ:10000.000")
-          if (args[0] === 'BFREQ' && args.length > 1) {
+          // BFREQ_FORCE: server-forced backend frequency update (UI should always apply)
+          if ((args[0] === 'BFREQ' || args[0] === 'BFREQ_FORCE') && args.length > 1) {
             const f_raw = parseFloat(args[1]);
             if (Number.isFinite(f_raw)) {
               // Detect whether server sent kHz (e.g., 14183.000) or Hz (e.g., 14183000)
@@ -1080,6 +1081,8 @@ function applyQuickBW() {
                     }
                   }
 
+                  // If server sent a forced update, accept it regardless of adoptEnabled
+                  if (args[0] === 'BFREQ_FORCE') shouldUpdate = true;
                   if (shouldUpdate) {
                     suppressProgrammaticUI = true;
                     freqEl.value = (hz / 1000.0).toFixed(3);
@@ -1141,15 +1144,15 @@ function applyQuickBW() {
           }
           // (BFREQ messages ignored for marker placement)
           // Mode change from server (e.g., "M:usb") - apply without echoing back
-          if (args[0] === 'M' && args.length > 1) {
+          // M_FORCE: server-forced mode update (UI should always apply)
+          if ((args[0] === 'M' || args[0] === 'M_FORCE') && args.length > 1) {
             try {
               const modeVal = (args[1] || '').toLowerCase();
               console.info('[radio.js] server mode message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                if (!adoptEnabled()) {
-                  // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
-                } else {
+                // If this is a forced server update, apply regardless of adoptEnabled
+                if (args[0] === 'M_FORCE' || adoptEnabled()) {
                   // Prevent sending a mode command while we apply the server-driven change
                   const prevSuppress = suppressProgrammaticUI;
                   suppressProgrammaticUI = true;
@@ -1160,6 +1163,8 @@ function applyQuickBW() {
                   } finally {
                     suppressProgrammaticUI = prevSuppress;
                   }
+                } else {
+                  // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
                 }
               } else {
                 console.warn('[radio.js] server mode received but mode element missing');

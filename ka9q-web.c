@@ -92,6 +92,7 @@ struct session {
   float spectrum_base;
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
+  unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
     /* If the client recently commanded a mode change leaving CWU/CWL, this
       flag records that event so we can adopt the backend frequency when the
       backend clears the CW shift. `left_cw_time_ms` is the monotonic time in
@@ -317,6 +318,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           }
         }
         check_frequency(sp);
+        sp->last_client_command_ms = now_ms();
         control_set_frequency(sp,&tmp[2]);
         break;
       case 'M':
@@ -343,6 +345,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
               fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
           }
         }
+        sp->last_client_command_ms = now_ms();
         control_set_mode(sp,&tmp[2]);
         control_poll(sp);
         break;
@@ -2109,7 +2112,9 @@ static void send_ws_text_to_session(struct session *sp, const char *msg)
 {
   pthread_mutex_lock(&sp->ws_mutex);
   onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-  onion_websocket_write(sp->ws, msg, strlen(msg));
+  int r = onion_websocket_write(sp->ws, msg, strlen(msg));
+  if (r <= 0)
+    fprintf(stderr, "send_ws_text_to_session: write failed: %d msg=%s\n", r, msg);
   pthread_mutex_unlock(&sp->ws_mutex);
 }
 
@@ -2337,30 +2342,47 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 
   /* Handle preset mismatch / adoption */
   if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
-    /* Track consecutive preset mismatches and reassert our requested preset
-       after repeated mismatches by resending the mode command to the backend. */
+    /* Decide whether to adopt a backend-changed preset (because no recent
+       local client command exists) or to retry our requested preset. */
     const int MAX_PRESET_MISMATCH = 5;
-    sp->preset_mismatch_count++;
-    if (verbose && debug_send) {
-      unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-      fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
-              __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
-    }
-    if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      /* After repeated mismatches, reassert our requested preset to the backend
-         by resending the mode command rather than adopting the server value. */
+    const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
+    unsigned long now = now_ms();
+    bool client_recent = (sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS);
+
+    if (!client_recent) {
+      /* No recent local client command: adopt backend-reported preset and notify client. */
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: resending requested preset %s after %d mismatches\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, MAX_PRESET_MISMATCH);
+        fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s (no recent local command)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset);
       }
-      control_set_mode(sp, sp->requested_preset);
+      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
       sp->preset_mismatch_count = 0;
+      sp->last_client_command_ms = 0;
+      /* Notify this client so its UI can update (force update) */
+      char pm[64];
+      snprintf(pm, sizeof(pm), "M_FORCE:%s", sp->requested_preset);
+      pthread_mutex_lock(&sp->ws_mutex);
+      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+      int _r = onion_websocket_write(sp->ws, pm, strlen(pm));
+      if (_r <= 0) fprintf(stderr, "send_ws_text_to_session (M_FORCE): write failed: %d msg=%s\n", _r, pm);
+      pthread_mutex_unlock(&sp->ws_mutex);
     } else {
+      /* Recent local command exists; track mismatches and resend after threshold. */
+      sp->preset_mismatch_count++;
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
         fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
                 __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
+      }
+      if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: resending requested preset %s after %d mismatches\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, MAX_PRESET_MISMATCH);
+        }
+        control_set_mode(sp, sp->requested_preset);
+        sp->preset_mismatch_count = 0;
       }
     }
   } else {
@@ -2433,26 +2455,47 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         *last_sent_backend_frequency = Channel.tune.freq;
         sp->freq_mismatch_count = 0;
       } else {
-        sp->freq_mismatch_count++;
-        if(verbose && debug_send) {
-          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-          fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
-            __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
-        }
-        if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-          /* After repeated mismatches reassert our requested frequency by
-             resending it to the backend rather than adopting the polled value. */
+        const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
+        unsigned long now = now_ms();
+        bool client_recent = (sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS);
+
+        if (!client_recent) {
+          /* No recent local client command: adopt backend frequency and notify client. */
           if (verbose && debug_send) {
             unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-            fprintf(stderr, "%s: +%lums: SSRC %u: resending requested freq %.3f kHz after %d mismatches\n",
-                    __FUNCTION__, elapsed_ms, sp->ssrc, sp->frequency * 0.001, MAX_FREQ_MISMATCH);
+            fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz (no recent local command)\n",
+                    __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001);
           }
-          {
-            char freq_msg[64];
-            snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
-            control_set_frequency(sp, freq_msg);
-          }
+          sp->frequency = (uint32_t)lround(Channel.tune.freq);
+          char freq_msg[64];
+          snprintf(freq_msg, sizeof(freq_msg), "BFREQ_FORCE:%.3f", Channel.tune.freq);
+          send_ws_text_to_session(sp, freq_msg);
+          /* Keep last_sent_backend_frequency in sync when we actually notify */
+          *last_sent_backend_frequency = Channel.tune.freq;
           sp->freq_mismatch_count = 0;
+          sp->last_client_command_ms = 0;
+        } else {
+          sp->freq_mismatch_count++;
+          if(verbose && debug_send) {
+            unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+            fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
+              __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+          }
+          if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+            /* After repeated mismatches reassert our requested frequency by
+               resending it to the backend rather than adopting the polled value. */
+            if (verbose && debug_send) {
+              unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+              fprintf(stderr, "%s: +%lums: SSRC %u: resending requested freq %.3f kHz after %d mismatches\n",
+                      __FUNCTION__, elapsed_ms, sp->ssrc, sp->frequency * 0.001, MAX_FREQ_MISMATCH);
+            }
+            {
+              char freq_msg[64];
+              snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+              control_set_frequency(sp, freq_msg);
+            }
+            sp->freq_mismatch_count = 0;
+          }
         }
       }
     }
