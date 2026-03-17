@@ -8,6 +8,53 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // Client identifier and per-client sequence for reliable client->server control acks
+      // Backend must be updated to accept wrapped messages in the form:
+      //   C:<clientId>:<seq>:<payload>
+      // and to emit ack messages like:
+      //   ACK:<clientId>:<seq>
+      // This allows the client to avoid "parroting" server-driven updates
+      // and provides deterministic pending/ack handling.
+      let clientId = null;
+      try {
+        clientId = (window.localStorage && localStorage.getItem('ka9q_client_id')) || null;
+      } catch (e) { clientId = null; }
+      if (!clientId) {
+        clientId = ('c' + Math.random().toString(36).slice(2,10));
+        try { if (window.localStorage) localStorage.setItem('ka9q_client_id', clientId); } catch (e) {}
+      }
+      let _localSeq = 0;
+      function nextSeq() { _localSeq = (_localSeq + 1) >>> 0; return _localSeq; }
+      const _pendingAcks = new Map(); // seq -> { type, rawMsg, sentAt, retries }
+      const ACK_TIMEOUT_MS = 1000;
+      const ACK_MAX_RETRIES = 2;
+      function wrapControlMessage(cid, seq, raw) { return 'C:' + cid + ':' + seq.toString() + ':' + raw; }
+      function scheduleAckCheck(seq) {
+        try {
+          setTimeout(() => {
+            try {
+              const entry = _pendingAcks.get(seq);
+              if (!entry) return;
+              if (entry.retries >= ACK_MAX_RETRIES) {
+                console.warn('[radio.js] ack not received for seq', seq, 'giving up');
+                _pendingAcks.delete(seq);
+                return;
+              }
+              // attempt resend if websocket open
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                  const wrapped = wrapControlMessage(clientId, seq, entry.rawMsg);
+                  ws.send(wrapped);
+                  entry.retries += 1;
+                  entry.sentAt = Date.now();
+                  _pendingAcks.set(seq, entry);
+                  scheduleAckCheck(seq);
+                } catch (e) { console.warn('[radio.js] resend failed for seq', seq, e); }
+              }
+            } catch (e) { /* ignore */ }
+          }, ACK_TIMEOUT_MS);
+        } catch (e) {}
+      }
       // QuickBW debug overlay state
       let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
       // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
@@ -121,12 +168,13 @@
           const item = queue.shift();
           if (queue.length === 0) _controlState.pending.delete(type);
           else _controlState.pending.set(type, queue);
-          const msg = item.msg;
+          const rawMsg = item.msg;
+          const seq = item.seq || nextSeq();
 
           // If the pending message matches the most recently-sent message, skip
           try {
             const lastMsg = _controlState.lastMsg.get(type);
-            if (lastMsg && lastMsg === msg) {
+            if (lastMsg && lastMsg === rawMsg) {
               // schedule next queued send if any
               if (_controlState.pending.has(type) && !_controlState.timers.has(type)) {
                 _controlState.timers.set(type, setTimeout(() => _flushControl(type), minGlobalIntervalMs));
@@ -137,17 +185,20 @@
 
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
-              ws.send(msg);
-              // record last message string
-              try { _controlState.lastMsg.set(type, msg); } catch (e) {}
+              const wrapped = wrapControlMessage(clientId, seq, rawMsg);
+              ws.send(wrapped);
+              // record last message string (raw)
+              try { _controlState.lastMsg.set(type, rawMsg); } catch (e) {}
               const sentAt = Date.now();
               _controlState.lastSend.set(type, sentAt);
               lastGlobalSend = sentAt;
+              // register pending ack for this seq
+              try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: sentAt, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
             } catch (e) {
               console.warn('sendControl flush failed for', type, e);
               // requeue at front and retry later
               const q = _controlState.pending.get(type) || [];
-              q.unshift({ msg: msg, when: Date.now() });
+              q.unshift({ msg: rawMsg, when: Date.now(), seq: seq });
               _controlState.pending.set(type, q);
               if (!_controlState.timers.has(type)) {
                 _controlState.timers.set(type, setTimeout(() => _flushControl(type), DEFAULT_CONTROL_MIN_MS));
@@ -206,16 +257,22 @@
               }
             }
           } catch (e) { console.debug('[radio.js] sendControl CW-adjust error', e); }
+          // assign sequence and capture the final raw message for dedupe/ack handling
+          const seq = (typeof nextSeq === 'function') ? nextSeq() : 0;
+          const rawMsg = msg;
           const now = Date.now();
           const sinceGlobal = now - (lastGlobalSend || 0);
           if (sinceGlobal >= minIntervalMs) {
             // immediate send
             if (ws && ws.readyState === WebSocket.OPEN) {
               try {
-                  ws.send(msg);
-                  try { _controlState.lastMsg.set(type, msg); } catch (e) {}
+                  const wrapped = wrapControlMessage(clientId, seq, rawMsg);
+                  ws.send(wrapped);
+                  try { _controlState.lastMsg.set(type, rawMsg); } catch (e) {}
                   _controlState.lastSend.set(type, now);
                   lastGlobalSend = now;
+                  // register pending ack and schedule check
+                  try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: now, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
                   // If there are queued items for this type, handle scheduling.
                   try {
                     const q = _controlState.pending.get(type);
@@ -243,9 +300,9 @@
               let q = _controlState.pending.get(type) || [];
               if (type === 'freq' || type === 'edges') {
                 // For frequency and filter-edge changes, only keep the most recent queued value
-                q = [{ msg: msg, when: now }];
+                q = [{ msg: rawMsg, when: now, seq: seq }];
               } else {
-                q.push({ msg: msg, when: now });
+                q.push({ msg: rawMsg, when: now, seq: seq });
               }
               _controlState.pending.set(type, q);
               
@@ -260,9 +317,9 @@
           try {
             let q = _controlState.pending.get(type) || [];
             if (type === 'freq' || type === 'edges') {
-              q = [{ msg: msg, when: now }];
+              q = [{ msg: rawMsg, when: now, seq: seq }];
             } else {
-              q.push({ msg: msg, when: now });
+              q.push({ msg: rawMsg, when: now, seq: seq });
             }
             _controlState.pending.set(type, q);
             if (!_controlState.timers.has(type)) {
@@ -929,6 +986,38 @@ function applyQuickBW() {
           //console.log(evt.data);
           let temp=evt.data.toString();
           let args=temp.split(":");
+          // Handle server ACKs for clientId/seq protocol: ACK:<clientId>:<seq>
+          try {
+            if (args[0] === 'ACK' && args.length > 2) {
+              const ackCid = args[1];
+              const ackSeq = parseInt(args[2], 10);
+              if (ackCid === clientId && Number.isFinite(ackSeq)) {
+                try {
+                  const pend = _pendingAcks.get(ackSeq);
+                  if (pend) {
+                    _pendingAcks.delete(ackSeq);
+                    // update CW debug ack info for edges if available
+                    try {
+                      if (pend.type === 'edges') {
+                        const parts = (pend.rawMsg || '').split(':');
+                        if (parts.length >= 3) {
+                          const low = Math.round(Number(parts[1]) || 0);
+                          const high = Math.round(Number(parts[2]) || 0);
+                          cwDebug.lastAck = { low: low, high: high, time: Date.now() };
+                        }
+                      } else {
+                        cwDebug.lastAck = { low: null, high: null, time: Date.now() };
+                      }
+                      cwDebug.wsState = (ws && ws.readyState) || -1;
+                      updateCWDebugOverlay();
+                    } catch (e) {}
+                  }
+                } catch (e) {}
+              }
+              // ACK handled; return early
+              return;
+            }
+          } catch (e) {}
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }

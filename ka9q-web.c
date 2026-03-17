@@ -174,6 +174,283 @@ useconds_t spectrum_poll_us = 100000; // default 100 ms
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len);
 
+/* Forward declarations for static helpers used by handle_ws_message */
+static void check_frequency(struct session *sp);
+static void zoom_to(struct session *sp, int level);
+static void zoom(struct session *sp, int shift);
+static void adjust_center_within_bounds(struct session *sp);
+/* Define zoom_table type and table so handler can compute size */
+struct zoom_table_t {
+  int bin_width;
+  int bin_count;
+};
+
+const struct zoom_table_t zoom_table[] = {
+  {40000, 1620},
+  {20000, 1620},
+  {10000, 1620},
+  {8000, 1620},
+  {5000, 1620},
+  {4000, 1620},
+  {2000, 1620},
+  {1000, 1620},
+  {800, 1620},
+  {500, 1620},
+  {400, 1620},
+  {200, 1620},
+  {100, 1620},
+  {80, 1620},
+  {50, 1620},
+  {40, 1620},
+  {20, 1620},
+  {10, 1620},
+  {8, 1620},
+  {5, 1620},
+  {4, 1620},
+  {2, 1620},
+  {1, 1620}
+};
+
+/* Dispatch a single websocket text message `tmp` for session `sp`.
+   Called with `session_mutex` already held. Returns an Onion status. */
+static onion_connection_status handle_ws_message(struct session *sp, char *tmp) {
+  char *saveptr = NULL;
+  char *token = strtok_r(tmp, ":", &saveptr);
+  if (token == NULL) {
+    return OCS_NEED_MORE_DATA;
+  }
+  if (strlen(token) == 1) {
+    switch (*token) {
+      case 'S':
+      case 's':
+        {
+          char *temp = malloc(16);
+          sprintf(temp, "S:%d", sp->ssrc);
+          pthread_mutex_lock(&sp->ws_mutex);
+          onion_websocket_set_opcode(sp->ws,OWS_TEXT);
+          int r=onion_websocket_write(sp->ws,temp,strlen(temp));
+          if(r!=strlen(temp)) {
+            fprintf(stderr,"%s: S: response failed: %d\n",__FUNCTION__,r);
+          }
+          pthread_mutex_unlock(&sp->ws_mutex);
+          free(temp);
+          if(pthread_create(&sp->spectrum_task,NULL,spectrum_thread,sp) == -1){
+            perror("pthread_create: spectrum_thread");
+          } else {
+            char buff[16];
+            snprintf(buff,16,"spec_%u",sp->ssrc+1);
+            pthread_setname_np(sp->spectrum_task, buff);
+          }
+        }
+        break;
+      case 'A':
+      case 'a':
+        token = strtok_r(NULL, ":", &saveptr);
+        if(token && strcmp(token,"START")==0) {
+          sp->audio_active=true;
+        } else if(token && strcmp(&tmp[2],"STOP")==0) {
+          sp->audio_active=false;
+        }
+        break;
+      case 'e':
+      case 'E':
+        {
+          char *low = strtok_r(NULL, ":", &saveptr);
+          char *high = strtok_r(NULL, ":", &saveptr);
+          if (low != NULL && high != NULL) {
+            control_set_filter_edges(sp, low, high);
+          }
+        }
+        break;
+      case 'g':
+      case 'G':
+        {
+          char *avg = strtok_r(NULL, ":", &saveptr);
+          if (avg != NULL) {
+            control_set_spectrum_average(sp, avg);
+            fflush(stderr);
+          }
+        }
+        break;
+      case 'w':
+      case 'W':
+        {
+          char *type = strtok_r(NULL, ":", &saveptr);
+          char *param = strtok_r(NULL, ":", &saveptr);
+          if (type != NULL) {
+            control_set_window_type(sp, type, param ? param : "");
+          }
+        }
+        break;
+      case 'v':
+      case 'V':
+        {
+          char *ov = strtok_r(NULL, ":", &saveptr);
+          if (ov != NULL) {
+            control_set_spectrum_overlap(sp, ov);
+            fflush(stderr);
+          }
+        }
+        break;
+      case 'F':
+      case 'f':
+        sp->frequency = (uint32_t)lround(strtod(&tmp[2],0) * 1000.0);
+        {
+          int32_t span = sp->bin_width * sp->bins;
+          int32_t min_f = sp->center_frequency - (span / 2);
+          int32_t max_f = sp->center_frequency + (span / 2);
+          int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
+          int32_t edge_bin_margin = 30;
+          if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
+            if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
+              int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
+              sp->center_frequency -= shift * sp->bin_width;
+            } else {
+              sp->center_frequency = sp->frequency;
+            }
+          } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
+            if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
+              int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
+              sp->center_frequency += shift * sp->bin_width;
+            } else {
+              sp->center_frequency = sp->frequency;
+            }
+          }
+        }
+        check_frequency(sp);
+        control_set_frequency(sp,&tmp[2]);
+        break;
+      case 'M':
+      case 'm':
+        {
+          char prev_requested[32];
+          strlcpy(prev_requested, sp->requested_preset, sizeof(prev_requested));
+          char *new_preset = &tmp[2];
+          if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
+              && !(strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)) {
+            sp->left_cw_pending = 1;
+            sp->left_cw_time_ms = now_ms();
+            strlcpy(sp->left_cw_prev_preset, prev_requested, sizeof(sp->left_cw_prev_preset));
+            if (verbose)
+              fprintf(stderr, "SSRC %u: marked recent CW->non-CW preset change (prev=%s)\n", sp->ssrc, prev_requested);
+          }
+          else if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
+                   && (strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)
+                   && strncasecmp(prev_requested, new_preset, 3) != 0) {
+            sp->cw_flip_pending = 1;
+            sp->cw_flip_time_ms = now_ms();
+            strlcpy(sp->cw_flip_prev_preset, prev_requested, sizeof(sp->cw_flip_prev_preset));
+            if (verbose)
+              fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
+          }
+        }
+        control_set_mode(sp,&tmp[2]);
+        control_poll(sp);
+        break;
+      case 'T':
+      case 't':
+        control_set_shift(sp, &tmp[2]);
+        break;
+      case 'P':
+      case 'p':
+        {
+          char *val = strtok_r(NULL, ":", &saveptr);
+          if (val != NULL) {
+            int v = atoi(val);
+            sp->adoptOnParameterMismatch = (v != 0);
+            if (verbose)
+              fprintf(stderr, "%s: SSRC %u adoptOnParameterMismatch set to %d\n", __FUNCTION__, (unsigned)sp->ssrc, sp->adoptOnParameterMismatch);
+          }
+        }
+        break;
+      case 'R':
+      case 'r':
+        {
+          char *endptr;
+          long v = strtol(&tmp[2], &endptr, 10);
+          if (&tmp[2] != endptr && v > 0) {
+            spectrum_poll_us = (useconds_t)(v * 1000L);
+            if (verbose)
+              fprintf(stderr, "%s: set spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)spectrum_poll_us, v);
+          }
+        }
+        break;
+      case 'Z':
+      case 'z':
+        token=strtok_r(NULL,":", &saveptr);
+        if(token && strcmp(token,"+")==0) {
+          pthread_mutex_lock(&sp->spectrum_mutex);
+          zoom(sp,1);
+          pthread_mutex_unlock(&sp->spectrum_mutex);
+          check_frequency(sp);
+        } else if(token && strcmp(token,"-")==0) {
+          pthread_mutex_lock(&sp->spectrum_mutex);
+          zoom(sp,-1);
+          pthread_mutex_unlock(&sp->spectrum_mutex);
+          check_frequency(sp);
+        } else if(token && strcmp(token,"c")==0) {
+          token = strtok_r(NULL,":", &saveptr);
+          if (token)
+          {
+            char *endptr;
+            double f = strtod(token,&endptr) * 1000.0;
+            if (token != endptr) {
+              sp->center_frequency = f;
+            }
+          }
+       adjust_center_within_bounds(sp);
+          pthread_mutex_lock(&sp->spectrum_mutex);
+          control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
+          pthread_mutex_unlock(&sp->spectrum_mutex);
+          control_poll(sp);
+        } else if (token && strcmp(token, "SIZE") == 0) {
+            int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+            char response[16];
+            snprintf(response, sizeof(response), "ZSIZE:%d", table_size);
+            pthread_mutex_lock(&sp->ws_mutex);
+            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+            onion_websocket_write(sp->ws, response, strlen(response));
+            pthread_mutex_unlock(&sp->ws_mutex);
+        } else {
+          char *end_ptr;
+          long int zoom_level = strtol(&tmp[2],&end_ptr,10);
+          if (&tmp[2] != end_ptr) {
+            pthread_mutex_lock(&sp->spectrum_mutex);
+            zoom_to(sp,zoom_level);
+            pthread_mutex_unlock(&sp->spectrum_mutex);
+            check_frequency(sp);
+          }
+        }
+        break;
+      case 'C':
+      case 'c':
+        {
+          /* Expect format: C:<clientId>:<seq>:<payload...> */
+          char *client = strtok_r(NULL, ":", &saveptr);
+          char *seq = strtok_r(NULL, ":", &saveptr);
+          char *payload = saveptr; /* rest of string */
+          if (client != NULL && seq != NULL && payload != NULL && *payload != '\0') {
+            /* Process the inner payload as a separate message (use a copy to avoid tokenizer conflicts) */
+            char *payload_copy = strdup(payload);
+            if (payload_copy) {
+              handle_ws_message(sp, payload_copy);
+              free(payload_copy);
+            }
+            /* Send ACK back to the originating websocket */
+            char ackbuf[256];
+            snprintf(ackbuf, sizeof(ackbuf), "ACK:%s:%s", client, seq);
+            pthread_mutex_lock(&sp->ws_mutex);
+            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+            onion_websocket_write(sp->ws, ackbuf, strlen(ackbuf));
+            pthread_mutex_unlock(&sp->ws_mutex);
+          }
+        }
+        break;
+    }
+  }
+  return OCS_NEED_MORE_DATA;
+}
+
 onion_connection_status audio_source(void *data, onion_request * req,
                                           onion_response * res);
 onion_connection_status stream_audio(void *data, onion_request * req,
@@ -329,64 +606,6 @@ static void check_frequency(struct session *sp) {
     }
 }
 
-struct zoom_table_t {
-  int bin_width;
-  int bin_count;
-};
-
-#if 0
-const struct zoom_table_t zoom_table[] = {
-  {40000, 1620},
-  {20000, 1620},
-  {16000, 1620},
-  {8000, 1620},
-  {4000, 1620},
-  {2000, 1620},
-  {1000, 1620},
-  {800, 1620},
-  {400, 1620},
-  {200, 1620},
-  {120, 1620},
-  {80, 1620},
-  {40, 1620},
-  {20, 1620},
-  {10, 1620},
-  {5, 1620},
-  {2, 1620},
-  {1, 1620}
-};
-#else
-const struct zoom_table_t zoom_table[] = {
-  //{100000, 1620}, // useful only for very fast front ends?
-  //{80000, 1620},
-  //{50000, 1620},
-  {40000, 1620},
-  {20000, 1620},
-  {10000, 1620},
-  {8000, 1620},
-  {5000, 1620},
-  {4000, 1620},
-  {2000, 1620},
-  {1000, 1620},
-  {800, 1620},
-  {500, 1620},
-  {400, 1620},
-  {200, 1620},
-  {100, 1620},
-  {80, 1620},
-  {50, 1620},
-  {40, 1620},
-  {20, 1620},
-  {10, 1620},
-  {8, 1620},
-  {5, 1620},
-  {4, 1620},
-  {2, 1620},
-  {1, 1620}
-};
-#endif
-
-
 static void zoom_to(struct session *sp, int level) {
   const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
 
@@ -499,251 +718,10 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
   //ONION_INFO("Read from websocket: %d: %s", len, tmp);
 
 
-  char *token=strtok(tmp,":");
-  if(strlen(token)==1) {
-    switch(*token) {
-      case 'S':
-      case 's':
-        char *temp=malloc(16);
-        sprintf(temp,"S:%d",sp->ssrc);
-        pthread_mutex_lock(&sp->ws_mutex);
-        onion_websocket_set_opcode(sp->ws,OWS_TEXT);
-        int r=onion_websocket_write(sp->ws,temp,strlen(temp));
-        if(r!=strlen(temp)) {
-          fprintf(stderr,"%s: S: response failed: %d\n",__FUNCTION__,r);
-        }
-        pthread_mutex_unlock(&sp->ws_mutex);
-        free(temp);
-        // client is ready - start spectrum thread
-        if(pthread_create(&sp->spectrum_task,NULL,spectrum_thread,sp) == -1){
-          perror("pthread_create: spectrum_thread");
-        } else {
-          char buff[16];
-          snprintf(buff,16,"spec_%u",sp->ssrc+1);
-          pthread_setname_np(sp->spectrum_task, buff);
-        }
-        break;
-      case 'A':
-      case 'a':
-        token=strtok(NULL,":");
-        if(strcmp(token,"START")==0) {
-          sp->audio_active=true;
-        } else if(strcmp(&tmp[2],"STOP")==0) {
-          sp->audio_active=false;
-        }
-        break;
-      case 'e':
-      case 'E':
-        {
-          // Expect format: e:<low>:<high>
-          char *low = strtok(NULL, ":");
-          char *high = strtok(NULL, ":");
-          if (low != NULL && high != NULL) {
-            control_set_filter_edges(sp, low, high);
-          }
-        }
-        break;
-      case 'g':
-      case 'G':
-        {
-          // Expect format: g:<avg>
-          char *avg = strtok(NULL, ":");
-          if (avg != NULL) {
-            /* fprintf(stderr, "%s: received websocket spectrum average g:%s for sp=%p ssrc=%d\n", __FUNCTION__, avg, sp, sp?sp->ssrc:0); */
-            /* fflush(stderr); */
-            control_set_spectrum_average(sp, avg);
-            //fprintf(stderr, "%s: forwarded spectrum average g:%s to control socket\n", __FUNCTION__, avg);
-            fflush(stderr);
-          }
-        }
-        break;
-      case 'w':
-      case 'W':
-        {
-          // Expect format: w:<TYPE>:<PARAM>
-          char *type = strtok(NULL, ":");
-          char *param = strtok(NULL, ":");
-          if (type != NULL) {
-            control_set_window_type(sp, type, param ? param : "");
-          }
-        }
-        break;
-      case 'v':
-      case 'V':
-        {
-          // Expect format: v:<overlap_float>
-          char *ov = strtok(NULL, ":");
-          if (ov != NULL) {
-            control_set_spectrum_overlap(sp, ov);
-            fflush(stderr);
-          }
-        }
-        break;
-      case 'F':
-      case 'f':
-        /*{
-          double freq = strtod(&tmp[2],0);
-          fprintf(stderr, "[DEBUG] JS requested new frequency: %.3f kHz\n", freq);
-          fflush(stderr);
-        }*/
-          /* Convert kHz string to Hz and round to nearest Hz to avoid
-            floating-point truncation producing off-by-one Hz errors. */
-          sp->frequency = (uint32_t)lround(strtod(&tmp[2],0) * 1000.0);
-        int32_t span = sp->bin_width * sp->bins;
-        int32_t min_f = sp->center_frequency - (span / 2);
-        int32_t max_f = sp->center_frequency + (span / 2);
-        int32_t edge_outside_margin_frequency = 50 * sp->bin_width;
-        int32_t edge_bin_margin = 30; // Number of bins to keep tuned frequency away from the edge
-        // Shift if frequency is within edge_bin_margin bins of the edge
-      
-        if (sp->frequency < min_f + edge_bin_margin * sp->bin_width) {
-          if ((min_f + edge_bin_margin * sp->bin_width) - sp->frequency <= edge_outside_margin_frequency) {
-            // Shift so that frequency is edge_bin_margin bins above the new min edge
-            int32_t shift = ((min_f + edge_bin_margin * sp->bin_width - sp->frequency + sp->bin_width - 1) / sp->bin_width);
-            sp->center_frequency -= shift * sp->bin_width;
-          } else {
-            sp->center_frequency = sp->frequency;
-          }
-        } else if (sp->frequency > max_f - edge_bin_margin * sp->bin_width) {
-          if (sp->frequency - (max_f - edge_bin_margin * sp->bin_width) <= edge_outside_margin_frequency) {
-            // Shift so that frequency is edge_bin_margin bins below the new max edge
-            int32_t shift = ((sp->frequency - (max_f - edge_bin_margin * sp->bin_width) + sp->bin_width - 1) / sp->bin_width);
-            sp->center_frequency += shift * sp->bin_width;
-          } else {
-            sp->center_frequency = sp->frequency;
-          }
-        }
-        check_frequency(sp);
-        control_set_frequency(sp,&tmp[2]);
-        break;
-      case 'M':
-      case 'm':
-        {
-          /* If this session previously requested a CW preset (cwu/cwl)
-             and the client is now requesting a non-CW preset, mark a
-             short-lived pending flag so the status packet handler can
-             adopt the backend un-shifted frequency when the backend
-             clears the CW shift. */
-          char prev_requested[32];
-          strlcpy(prev_requested, sp->requested_preset, sizeof(prev_requested));
-          char *new_preset = &tmp[2];
-          if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
-              && !(strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)) {
-            sp->left_cw_pending = 1;
-            sp->left_cw_time_ms = now_ms();
-            strlcpy(sp->left_cw_prev_preset, prev_requested, sizeof(sp->left_cw_prev_preset));
-            if (verbose)
-              fprintf(stderr, "SSRC %u: marked recent CW->non-CW preset change (prev=%s)\n", sp->ssrc, prev_requested);
-          }
-          /* If switching between CWU and CWL (flip), mark a separate pending
-             flag so we can accept the doubled-shift frequency change from the
-             backend immediately. */
-          else if ((strncasecmp(prev_requested, "cwu", 3) == 0 || strncasecmp(prev_requested, "cwl", 3) == 0)
-                   && (strncasecmp(new_preset, "cwu", 3) == 0 || strncasecmp(new_preset, "cwl", 3) == 0)
-                   && strncasecmp(prev_requested, new_preset, 3) != 0) {
-            sp->cw_flip_pending = 1;
-            sp->cw_flip_time_ms = now_ms();
-            strlcpy(sp->cw_flip_prev_preset, prev_requested, sizeof(sp->cw_flip_prev_preset));
-            if (verbose)
-              fprintf(stderr, "SSRC %u: marked recent CW flip preset change (prev=%s new=%s)\n", sp->ssrc, prev_requested, new_preset);
-          }
-        }
-        control_set_mode(sp,&tmp[2]);
-        control_poll(sp);
-        break;
-      case 'T':
-      case 't':
-        /* Expect format: t:<shift_in_Hz> */
-        control_set_shift(sp, &tmp[2]);
-        break;
-      case 'P':
-      case 'p':
-        {
-          /* Expect format: P:<0|1>  -- 0=do not adopt, 1=adopt backend changes */
-          char *val = strtok(NULL, ":");
-          if (val != NULL) {
-            int v = atoi(val);
-            sp->adoptOnParameterMismatch = (v != 0);
-            if (verbose)
-              fprintf(stderr, "%s: SSRC %u adoptOnParameterMismatch set to %d\n", __FUNCTION__, (unsigned)sp->ssrc, sp->adoptOnParameterMismatch);
-          }
-        }
-        break;
-      case 'R':
-      case 'r':
-        /* Set spectrum poll interval. Client sends milliseconds; server stores microseconds */
-        {
-          char *endptr;
-          long v = strtol(&tmp[2], &endptr, 10);
-          if (&tmp[2] != endptr && v > 0) {
-            spectrum_poll_us = (useconds_t)(v * 1000L);
-            if (verbose)
-              fprintf(stderr, "%s: set spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)spectrum_poll_us, v);
-          }
-        }
-        break;
-      case 'Z':
-      case 'z':
-        token=strtok(NULL,":");
-        if(strcmp(token,"+")==0) {
-          pthread_mutex_lock(&sp->spectrum_mutex);
-          zoom(sp,1);
-          pthread_mutex_unlock(&sp->spectrum_mutex);
-          check_frequency(sp);
-        } else if(strcmp(token,"-")==0) {
-          pthread_mutex_lock(&sp->spectrum_mutex);
-          zoom(sp,-1);
-          pthread_mutex_unlock(&sp->spectrum_mutex);
-          check_frequency(sp);
-        } else if(strcmp(token,"c")==0) {
-          /* If a center value follows, use it; otherwise do not force the
-             center to the tuned frequency. This allows client panning to
-             move the visible window past the tuned frequency without the
-             server nudging it back into view. */
-          token = strtok(NULL,":");
-          if (token)
-          {
-            char *endptr;
-            double f = strtod(token,&endptr) * 1000.0;
-            if (token != endptr) {
-              sp->center_frequency = f;
-            }
-          }
-       /* Ensure center stays within sample-rate bounds. Do NOT call
-         check_frequency() here because it will move the center to
-         include the tuned frequency; we want client panning to be
-         respected. */
-       adjust_center_within_bounds(sp);
-          /* Immediately request updated spectrum bins for the new center */
-          pthread_mutex_lock(&sp->spectrum_mutex);
-          control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
-          pthread_mutex_unlock(&sp->spectrum_mutex);
-          control_poll(sp);
-        } else if (strcmp(token, "SIZE") == 0) { // New command to get zoom table size
-            int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
-            char response[16];
-            snprintf(response, sizeof(response), "ZSIZE:%d", table_size);
-            pthread_mutex_lock(&sp->ws_mutex);
-            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-            onion_websocket_write(sp->ws, response, strlen(response));
-            pthread_mutex_unlock(&sp->ws_mutex);
-        } else {
-          char *end_ptr;
-          long int zoom_level = strtol(&tmp[2],&end_ptr,10);
-          if (&tmp[2] != end_ptr) {
-            pthread_mutex_lock(&sp->spectrum_mutex);
-            zoom_to(sp,zoom_level);
-            pthread_mutex_unlock(&sp->spectrum_mutex);
-            check_frequency(sp);
-          }
-        }
-        break;
-    }
-  }
-
+  onion_connection_status rc = handle_ws_message(sp, tmp);
   pthread_mutex_unlock(&session_mutex);
 
-  return OCS_NEED_MORE_DATA;
+  return rc;
 }
 
 /*
@@ -2383,35 +2361,22 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
     }
     if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-      /* Adopt preset if user allows adoption on mismatch OR if this session
-         has a non-zero per-session CW shift reported by the backend. */
-      bool adopt_preset = sp->adoptOnParameterMismatch ||
-                          (!isnan(sp->shift) && sp->shift != 0.0);
-      if (adopt_preset) {
-        if (verbose && debug_send) {
-          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-          fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s after %d mismatches\n",
-                  __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
-        }
-        /* Adopt backend preset into session requested_preset */
-        strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
-        sp->preset_mismatch_count = 0;
-        /* Notify this client so its UI can update */
-        char pm[64];
-        snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
-        pthread_mutex_lock(&sp->ws_mutex);
-        onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-        onion_websocket_write(sp->ws, pm, strlen(pm));
-        pthread_mutex_unlock(&sp->ws_mutex);
-      } else {
-        if (verbose && debug_send) {
-          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-          fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (adoption disabled, resending preset, mismatch count %d)\n",
-                  __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-        }
-        control_set_mode(sp, sp->requested_preset);
-        sp->preset_mismatch_count = 0;
+      /* After repeated mismatches assume server state is authoritative and
+         adopt the backend-reported preset into the session and notify the client. */
+      if (verbose && debug_send) {
+        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+        fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s after %d mismatches\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset, MAX_PRESET_MISMATCH);
       }
+      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+      sp->preset_mismatch_count = 0;
+      /* Notify this client so its UI can update */
+      char pm[64];
+      snprintf(pm, sizeof(pm), "M:%s", sp->requested_preset);
+      pthread_mutex_lock(&sp->ws_mutex);
+      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+      onion_websocket_write(sp->ws, pm, strlen(pm));
+      pthread_mutex_unlock(&sp->ws_mutex);
     } else {
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
@@ -2440,15 +2405,12 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     bool backend_changed = isnan(*last_sent_backend_frequency) ||
                            (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
       if (backend_changed) {
+      /* Always notify client of backend frequency changes; server state is authoritative. */
       current_backend_frequency = Channel.tune.freq;
       char freq_msg[64];
       snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
-      /* Only notify client of backend frequency changes when adoption is enabled.
-         Update the last_sent_backend_frequency only when a notification is sent. */
-        if (sp->adoptOnParameterMismatch) {
-          send_ws_text_to_session(sp, freq_msg);
-          *last_sent_backend_frequency = Channel.tune.freq;
-        }
+      send_ws_text_to_session(sp, freq_msg);
+      *last_sent_backend_frequency = Channel.tune.freq;
     }
   }
 
@@ -2499,29 +2461,19 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
         }
         if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
-          bool adopt_freq = sp->adoptOnParameterMismatch;
-            if (adopt_freq) {
-            if (verbose && debug_send) {
-              unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-              fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
-                      __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
-            }
-            sp->frequency = (uint32_t)lround(Channel.tune.freq);
-            char freq_msg[64];
-            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-            send_ws_text_to_session(sp, freq_msg);
-            /* Keep last_sent_backend_frequency in sync when we actually notify */
-            *last_sent_backend_frequency = Channel.tune.freq;
-          } else {
-            char f[128];
-                  if(verbose && debug_send) {
-              unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-              fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (adoption disabled, resending freq, mismatch count %d)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, sp->freq_mismatch_count);
-                  }
-            sprintf(f, "%.3f", 0.001 * sp->frequency);
-            control_set_frequency(sp, f);
+          /* After repeated mismatches assume server state is authoritative
+             and adopt the backend frequency into the session, notifying the client. */
+          if (verbose && debug_send) {
+            unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+            fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled freq %.3f kHz after %d mismatches\n",
+                    __FUNCTION__, elapsed_ms, sp->ssrc, Channel.tune.freq * 0.001, MAX_FREQ_MISMATCH);
           }
+          sp->frequency = (uint32_t)lround(Channel.tune.freq);
+          char freq_msg[64];
+          snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+          send_ws_text_to_session(sp, freq_msg);
+          /* Keep last_sent_backend_frequency in sync when we actually notify */
+          *last_sent_backend_frequency = Channel.tune.freq;
           sp->freq_mismatch_count = 0;
         }
       }
