@@ -436,16 +436,16 @@ let quickBWPrevEdges = null; // { low: number, high: number }
 let suppressEdgeAutoSend = false;
 // Suppress control sends when UI is updated programmatically from server status/BFREQ
 let suppressProgrammaticUI = false;
-// When true, allow backend-driven updates to change user-editable inputs (freq, mode, presets, etc.)
-// When false, server status updates MUST NOT change user input controls.
-let adoptOnParameterMismatch = false;
+// Adoption of backend parameter changes is determined solely by the backend-reported
+// post-detection audio/CW shift. If the backend shift exceeds a small tolerance,
+// we consider adoption enabled.
 
 // Helper: treat adoption as enabled when either the user has enabled
 // `adoptOnParameterMismatch` OR the backend reports a non-zero post-detection
 // audio/CW shift for this session. Use a small tolerance (1 Hz) to treat
 // near-zero shifts as zero.
 function adoptEnabled() {
-  return adoptOnParameterMismatch || (Number.isFinite(shiftHz) && Math.abs(shiftHz) > 1.0);
+  return (Number.isFinite(shiftHz) && Math.abs(shiftHz) > 1.0);
 }
 // Keep Frequency Centered (KFC): when true, left-click frequency selection will
 // also send a zoom-center command so the tuned frequency is placed in the
@@ -585,7 +585,6 @@ function applyQuickBW() {
         // get the SSRC
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
-          try { ws.send('P:' + (adoptOnParameterMismatch ? '1' : '0')); } catch (e) { console.warn('Failed to send initial adopt state P:', e); }
         }
         // default to 20 Mtr band
         //document.getElementById('20').click()
@@ -3150,7 +3149,6 @@ function saveSettings() {
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
-  try { localStorage.setItem("adoptOnParameterMismatch", (document.getElementById("ckAdoptOnMismatch") && document.getElementById("ckAdoptOnMismatch").checked) ? "true" : "false"); } catch (e) {}
   try { localStorage.setItem("keepFreqCentered", (document.getElementById("ckKeepFreqCentered") && document.getElementById("ckKeepFreqCentered").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
@@ -3368,10 +3366,7 @@ function loadSettings() {
 
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
-  const adoptVal = getLS("adoptOnParameterMismatch", v => (v === "true"), false);
-  adoptOnParameterMismatch = adoptVal;
-  try { const adEl = document.getElementById('ckAdoptOnMismatch'); if (adEl) adEl.checked = adoptVal; } catch (e) {}
-  try { sendControl('adopt', 'P:' + (adoptVal ? '1' : '0'), 100); } catch (e) {}
+  // adoptOnParameterMismatch client-side option removed; adoption is driven by backend shift
   // Keep Frequency Centered (KFC) persisted setting
   const kfcVal = getLS("keepFreqCentered", v => (v === "true"), false);
   window.keepFreqCentered = kfcVal;
@@ -3798,13 +3793,7 @@ function initializeDialogEventListeners() {
     saveSettings();
   });
 
-  try {
-    document.getElementById('ckAdoptOnMismatch').addEventListener('change', function () {
-      adoptOnParameterMismatch = this.checked;
-      try { sendControl('adopt', 'P:' + (this.checked ? '1' : '0'), 100); } catch (e) {}
-      saveSettings();
-    });
-  } catch (e) {}
+  // 'Adopt backend changes' option removed from UI; no event handler needed
 
   // Make the dialog box draggable
   makeDialogDraggable(optionsDialog);

@@ -89,7 +89,6 @@ struct session {
   float bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
   int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
-  bool adoptOnParameterMismatch; /* per-session adopt-on-mismatch flag */
   float spectrum_base;
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
@@ -160,8 +159,8 @@ static unsigned long now_ms(void) {
     return (unsigned long)time(NULL) * 1000UL;
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
-/* Per-session 'adopt on mismatch' flag moved into `struct session` as
-   `sp->adoptOnParameterMismatch`. Default false for new sessions. */
+/* Adopt-on-parameter-mismatch control removed from clients; server adoption
+  decisions are now driven by backend-reported post-detection shift values. */
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* static int error_count = 0; */
 /* static int ok_count = 0; */
@@ -351,18 +350,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
       case 't':
         control_set_shift(sp, &tmp[2]);
         break;
-      case 'P':
-      case 'p':
-        {
-          char *val = strtok_r(NULL, ":", &saveptr);
-          if (val != NULL) {
-            int v = atoi(val);
-            sp->adoptOnParameterMismatch = (v != 0);
-            if (verbose)
-              fprintf(stderr, "%s: SSRC %u adoptOnParameterMismatch set to %d\n", __FUNCTION__, (unsigned)sp->ssrc, sp->adoptOnParameterMismatch);
-          }
-        }
-        break;
+      /* 'P' (adopt-on-mismatch) messages removed: adoption is now server-driven */
       case 'R':
       case 'r':
         {
@@ -944,7 +932,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->ws=ws;
   sp->spectrum_active=true;
   sp->audio_active=false;
-  sp->adoptOnParameterMismatch = false;
+  /* adoptOnParameterMismatch removed; adoption controlled server-side by backend shift */
 
 
   sp->frequency=10000000;
