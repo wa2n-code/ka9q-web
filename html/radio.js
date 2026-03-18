@@ -1637,11 +1637,41 @@ function applyQuickBW() {
                 try { updateCWMarker(); } catch (e) { /* ignore */ }
               };
               if (modeEl) {
-                modeEl.addEventListener('change', updateBackendMarkerForMode);
-                // initialize marker based on current mode immediately
-                updateBackendMarkerForMode();
-              }
+                    modeEl.addEventListener('change', updateBackendMarkerForMode);
+                    // initialize marker based on current mode immediately
+                    updateBackendMarkerForMode();
+                  }
             } catch (e) { /* ignore */ }
+            // Attach contextmenu directly to the Edge button so right-click works
+            // reliably in all browsers (disabled elements may not receive events).
+            try {
+              const edgeBtn = document.getElementById('edge_button');
+              if (edgeBtn) {
+                edgeBtn.title = 'Left click: send filter edges — Right click: load backend/preset filter edges';
+                // Ensure the button always receives pointer/context events; handle right-click here
+                edgeBtn.addEventListener('contextmenu', function(ev) {
+                  try {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const lowEl = document.getElementById('filterLowInput');
+                    const highEl = document.getElementById('filterHighInput');
+                    if (!lowEl || !highEl) return;
+                    const oldLow = lowEl.value;
+                    const oldHigh = highEl.value;
+                    const prevSuppress = suppressEdgeAutoSend;
+                    // Avoid triggering auto-send handlers while we update the inputs
+                    suppressEdgeAutoSend = true;
+                    if (Number.isFinite(filter_low)) lowEl.value = Math.round(filter_low);
+                    if (Number.isFinite(filter_high)) highEl.value = Math.round(filter_high);
+                    suppressEdgeAutoSend = prevSuppress;
+                    // If the values actually changed, DO NOT mark manual-dirty.
+                    // Right-click loads backend/preset values — the button should
+                    // remain visually disabled until the user edits the inputs.
+                    // (Leave `edgeManualDirty` unchanged so only user edits enable it.)
+                  } catch (e) { /* ignore */ }
+                }, { passive: false });
+              }
+            } catch (e) {}
             settingsReady = true; // Allow saves after initialization
           } catch (e) { console.warn('Continuing init failed', e); }
         });
@@ -2355,12 +2385,19 @@ function applyQuickBW() {
       try {
         const btn = document.getElementById('edge_button');
         if (!btn) return;
+        // Keep the button enabled so it receives pointer/context events
+        // in all browsers (Firefox may not deliver events to disabled controls).
+        btn.removeAttribute('disabled');
         if (edgeManualDirty) {
-          btn.removeAttribute('disabled');
+          // visually enabled
           btn.style.opacity = '';
+          btn.classList.remove('edge-visually-disabled');
+          btn.setAttribute('aria-disabled', 'false');
         } else {
-          btn.setAttribute('disabled','disabled');
+          // visually indicate disabled but keep interactive
           btn.style.opacity = '0.6';
+          btn.classList.add('edge-visually-disabled');
+          btn.setAttribute('aria-disabled', 'true');
         }
       } catch (e) {}
     }
