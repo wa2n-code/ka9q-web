@@ -8,10 +8,61 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // Client identifier and per-client sequence for reliable client->server control acks
+      // Backend must be updated to accept wrapped messages in the form:
+      //   C:<clientId>:<seq>:<payload>
+      // and to emit ack messages like:
+      //   ACK:<clientId>:<seq>
+      // This allows the client to avoid "parroting" server-driven updates
+      // and provides deterministic pending/ack handling.
+      let clientId = null;
+      try {
+        clientId = (window.localStorage && localStorage.getItem('ka9q_client_id')) || null;
+      } catch (e) { clientId = null; }
+      if (!clientId) {
+        clientId = ('c' + Math.random().toString(36).slice(2,10));
+        try { if (window.localStorage) localStorage.setItem('ka9q_client_id', clientId); } catch (e) {}
+      }
+      let _localSeq = 0;
+      function nextSeq() { _localSeq = (_localSeq + 1) >>> 0; return _localSeq; }
+      const _pendingAcks = new Map(); // seq -> { type, rawMsg, sentAt, retries }
+      const ACK_TIMEOUT_MS = 1000;
+      const ACK_MAX_RETRIES = 2;
+      function wrapControlMessage(cid, seq, raw) { return 'C:' + cid + ':' + seq.toString() + ':' + raw; }
+      function scheduleAckCheck(seq) {
+        try {
+          setTimeout(() => {
+            try {
+              const entry = _pendingAcks.get(seq);
+              if (!entry) return;
+              if (entry.retries >= ACK_MAX_RETRIES) {
+                console.warn('[radio.js] ack not received for seq', seq, 'giving up');
+                _pendingAcks.delete(seq);
+                return;
+              }
+              // attempt resend if websocket open
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                  const wrapped = wrapControlMessage(clientId, seq, entry.rawMsg);
+                  ws.send(wrapped);
+                  entry.retries += 1;
+                  entry.sentAt = Date.now();
+                  _pendingAcks.set(seq, entry);
+                  scheduleAckCheck(seq);
+                } catch (e) { console.warn('[radio.js] resend failed for seq', seq, e); }
+              }
+            } catch (e) { /* ignore */ }
+          }, ACK_TIMEOUT_MS);
+        } catch (e) {}
+      }
       // QuickBW debug overlay state
       let cwDebug = { lastSent: null, lastAck: null, wsState: -1 };
       // Simple in-file flag to enable/disable the on-screen debug overlay (non-persistent)
       const CW_DEBUG_OVERLAY = false; // set to true to enable overlay during debugging
+      // Milliseconds to stagger paired control sends (mode then frequency)
+      const COMMAND_SEND_SPACING_MS = 50;
+      // Milliseconds to delay sending the client's displayed frequency after
+      // a mode change. Previously adjustable; removed in favor of single mode send.
       // pending filter edges to send once websocket opens
       let pendingFilterEdges = null;
       // expected ack tracking for last sent edges
@@ -27,6 +78,19 @@
 
       // Variable to store the actual backend frequency as reported by the server
       var backendFrequencyHz = 0;
+      // Server-provided post-detection audio/CW shift (Hz)
+      var shiftHz = 0;
+      // Previous shift value and time of last shift change
+      var prevShiftHz = NaN;
+      var lastShiftChangeMs = 0;
+      // Remember the last non-CW frequency so CWU/CWL switches can be
+      // calculated relative to the original un-shifted frequency.
+      var originalNonCWFreqHz = NaN;
+      // Track a recent mode change origin so we can adjust the immediate
+      // paired frequency send when leaving CWU/CWL (remove the CW shift)
+      var modeChangeFrom = null;
+      var modeChangePending = false;
+      const MODE_CHANGE_PENDING_MS = 5000; // ms to consider a paired mode->freq send
 
       function createCWDebugOverlay() {
         try {
@@ -65,93 +129,204 @@
         } catch (e) {}
       }
       // Generic throttled/coalesced control sender to avoid overloading WS/backend
-      // Use `sendControl(type, msg, minIntervalMs)` to send control messages.
+      // Use `sendControl(type, msg)` to send control messages; spacing is global-only.
       (function(){
         const DEFAULT_CONTROL_MIN_MS = 150; // default per-type min interval
+        // Global minimum spacing between ANY control send (ms). Editable at runtime.
+        let minGlobalIntervalMs = 50;
+        // Timestamp (ms) of last control send (any type)
+        let lastGlobalSend = 0;
+        // control send debug helper removed (temporary traces cleaned up)
+        window.setControlGlobalInterval = function(ms) { minGlobalIntervalMs = Math.max(0, Number(ms) || 0); console.info('minGlobalIntervalMs=', minGlobalIntervalMs); };
         const _controlState = {
           lastSend: new Map(),   // type -> timestamp
           // lastMsg: type -> last message string sent
           lastMsg: new Map(),
-          // pending: type -> { msg, when }
-          pending:  new Map(),   // type -> { msg, when }
+          // pending: type -> Array of { msg, when } (FIFO queue)
+          pending:  new Map(),   // type -> [ { msg, when }, ... ]
           timers:   new Map()    // type -> timer id
         };
 
         function _flushControl(type) {
-          const pendingObj = _controlState.pending.get(type);
-          if (!pendingObj) return;
-          _controlState.pending.delete(type);
+          const queue = _controlState.pending.get(type);
+          if (!queue || queue.length === 0) return;
           const t = _controlState.timers.get(type);
           if (t) { clearTimeout(t); _controlState.timers.delete(type); }
-          const msg = pendingObj.msg;
-          const queuedWhen = pendingObj.when || 0;
-          // If we already sent a newer message for this type after this was queued, skip
-          const last = _controlState.lastSend.get(type) || 0;
-          if (last >= queuedWhen) {
-            return; // newer send already occurred; avoid duplicate
+
+          // Enforce global spacing before sending any queued item
+          const now = Date.now();
+          const sinceGlobal = now - (lastGlobalSend || 0);
+          if (sinceGlobal < minGlobalIntervalMs) {
+            const wait = Math.max(1, minGlobalIntervalMs - sinceGlobal);
+            if (!_controlState.timers.has(type)) {
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+            }
+            return;
           }
+
+          // Pop the oldest queued item (FIFO)
+          const item = queue.shift();
+          if (queue.length === 0) _controlState.pending.delete(type);
+          else _controlState.pending.set(type, queue);
+          const rawMsg = item.msg;
+          const seq = item.seq || nextSeq();
+
           // If the pending message matches the most recently-sent message, skip
           try {
             const lastMsg = _controlState.lastMsg.get(type);
-            if (lastMsg && lastMsg === msg) return;
+            if (lastMsg && lastMsg === rawMsg) {
+              // schedule next queued send if any
+              if (_controlState.pending.has(type) && !_controlState.timers.has(type)) {
+                _controlState.timers.set(type, setTimeout(() => _flushControl(type), minGlobalIntervalMs));
+              }
+              return;
+            }
           } catch (e) {}
+
           if (ws && ws.readyState === WebSocket.OPEN) {
             try {
-              ws.send(msg);
-              // record last message string
-              try { _controlState.lastMsg.set(type, msg); } catch (e) {}
+              const wrapped = wrapControlMessage(clientId, seq, rawMsg);
+              ws.send(wrapped);
+              // record last message string (raw)
+              try { _controlState.lastMsg.set(type, rawMsg); } catch (e) {}
+              const sentAt = Date.now();
+              _controlState.lastSend.set(type, sentAt);
+              lastGlobalSend = sentAt;
+              // register pending ack for this seq
+              try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: sentAt, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
             } catch (e) {
               console.warn('sendControl flush failed for', type, e);
-              // re-schedule a retry
-              _controlState.pending.set(type, { msg: msg, when: Date.now() });
+              // requeue at front and retry later
+              const q = _controlState.pending.get(type) || [];
+              q.unshift({ msg: rawMsg, when: Date.now(), seq: seq });
+              _controlState.pending.set(type, q);
               if (!_controlState.timers.has(type)) {
                 _controlState.timers.set(type, setTimeout(() => _flushControl(type), DEFAULT_CONTROL_MIN_MS));
               }
               return;
             }
+
+            // If more items remain, schedule next send after global interval
+            if (_controlState.pending.has(type) && !_controlState.timers.has(type)) {
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), minGlobalIntervalMs));
+            }
           } else {
             // keep pending until ws opens
           }
-          _controlState.lastSend.set(type, Date.now());
         }
 
-        window.sendControl = function sendControl(type, msg, minIntervalMs) {
-          minIntervalMs = (typeof minIntervalMs === 'number') ? minIntervalMs : DEFAULT_CONTROL_MIN_MS;
+        window.sendControl = function sendControl(type, msg/*, minIntervalMs - ignored, use global */) {
+          // Per-type minInterval is deprecated; use global spacing instead
+          const minIntervalMs = minGlobalIntervalMs;
+          // Optional 4th argument: bypass programmatic-UI guard (boolean).
+          const bypassProgrammaticGuard = (arguments.length >= 4 && arguments[3] === true);
+          // If UI is being updated programmatically from server status, do not
+          // allow those programmatic changes to trigger control sends for
+          // frequency or mode — avoid feedback loops. Allow explicit bypass.
+          try {
+            if (!bypassProgrammaticGuard && suppressProgrammaticUI && (type === 'freq' || type === 'mode')) {
+              console.debug('[radio.js] sendControl suppressed by programmatic UI flag; type=', type, 'msg=', msg);
+              return;
+            }
+          } catch (e) { console.debug('[radio.js] sendControl guard error', e); }
+          // If we're sending a frequency immediately after changing mode from
+          // CWU/CWL to a non-CW mode, remove the CW `shiftHz` so the backend
+          // receives the un-shifted tuned frequency.
+          try {
+            if ((type === 'freq' || (typeof msg === 'string' && msg.startsWith('F:'))) && modeChangePending && modeChangeFrom) {
+              const curModeEl = document.getElementById('mode');
+              const curMode = curModeEl ? (curModeEl.value || '').toLowerCase() : '';
+              // Only adjust when we're leaving CW modes (prev was CW, now not CW)
+              if (curMode !== 'cwu' && curMode !== 'cwl' && (modeChangeFrom === 'cwu' || modeChangeFrom === 'cwl')) {
+                // parse kHz value from message
+                const khz = parseFloat(String(msg).replace(/^F:\s*/i, '').trim());
+                if (!Number.isNaN(khz) && Number.isFinite(khz)) {
+                  let freqHz = khz * 1000.0;
+                  if (modeChangeFrom === 'cwu') {
+                    freqHz = freqHz - shiftHz; // displayed was shifted up; send un-shifted
+                  } else if (modeChangeFrom === 'cwl') {
+                    freqHz = freqHz + shiftHz; // displayed was shifted down; send un-shifted
+                  }
+                  // Replace message with corrected frequency (kHz with 3 decimals)
+                  msg = 'F:' + (freqHz / 1000.0).toFixed(3);
+                  console.debug('[radio.js] adjusted freq to remove CW shift:', modeChangeFrom, 'shiftHz=', shiftHz, '->', msg);
+                  // consume the pending flag so only the paired send is adjusted
+                  modeChangePending = false;
+                  modeChangeFrom = null;
+                }
+              }
+            }
+          } catch (e) { console.debug('[radio.js] sendControl CW-adjust error', e); }
+          // assign sequence and capture the final raw message for dedupe/ack handling
+          const seq = (typeof nextSeq === 'function') ? nextSeq() : 0;
+          const rawMsg = msg;
           const now = Date.now();
-          const last = _controlState.lastSend.get(type) || 0;
-          const since = now - last;
-          if (since >= minIntervalMs) {
+          const sinceGlobal = now - (lastGlobalSend || 0);
+          if (sinceGlobal >= minIntervalMs) {
             // immediate send
             if (ws && ws.readyState === WebSocket.OPEN) {
               try {
-                ws.send(msg);
-                try { _controlState.lastMsg.set(type, msg); } catch (e) {}
-                _controlState.lastSend.set(type, now);
-                // clear any pending/coalesced entry and timer for this type to avoid a later duplicate flush
-                try {
-                  _controlState.pending.delete(type);
-                  const t = _controlState.timers.get(type);
-                  if (t) { clearTimeout(t); _controlState.timers.delete(type); }
-                } catch (e) {}
-                return;
-              } catch (e) {
-                console.warn('sendControl immediate ws.send failed', e);
-                // fallthrough to coalesce
-              }
+                  const wrapped = wrapControlMessage(clientId, seq, rawMsg);
+                  ws.send(wrapped);
+                  try { _controlState.lastMsg.set(type, rawMsg); } catch (e) {}
+                  _controlState.lastSend.set(type, now);
+                  lastGlobalSend = now;
+                  // register pending ack and schedule check
+                  try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: now, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
+                  // If there are queued items for this type, handle scheduling.
+                  try {
+                    const q = _controlState.pending.get(type);
+                    if (q && q.length > 0) {
+                      // For frequency and filter-edge changes, keep only the most
+                      // recent queued value so older pending sends don't override
+                      // the just-sent setting. Other types remain FIFO.
+                      if (type === 'freq' || type === 'edges') {
+                        _controlState.pending.delete(type);
+                        const tt = _controlState.timers.get(type);
+                        if (tt) { clearTimeout(tt); _controlState.timers.delete(type); }
+                      } else if (!_controlState.timers.has(type)) {
+                        _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
+                      }
+                    }
+                  } catch (e) {}
+                  return;
+                } catch (e) {
+                  console.warn('sendControl immediate ws.send failed', e);
+                  // fallthrough to coalesce
+                }
             }
             // ws not open or fallback: queue as pending with timestamp
-            _controlState.pending.set(type, { msg: msg, when: now });
-            if (!_controlState.timers.has(type)) {
-              _controlState.timers.set(type, setTimeout(() => _flushControl(type), minIntervalMs));
-            }
+            try {
+              let q = _controlState.pending.get(type) || [];
+              if (type === 'freq' || type === 'edges') {
+                // For frequency and filter-edge changes, only keep the most recent queued value
+                q = [{ msg: rawMsg, when: now, seq: seq }];
+              } else {
+                q.push({ msg: rawMsg, when: now, seq: seq });
+              }
+              _controlState.pending.set(type, q);
+              
+              if (!_controlState.timers.has(type)) {
+                const wait = Math.max(1, minIntervalMs - sinceGlobal);
+                _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+              }
+            } catch (e) { console.debug('[radio.js] enqueue failed', e); }
             return;
           }
-          // coalesce pending message and schedule flush
-          _controlState.pending.set(type, { msg: msg, when: now });
-          if (!_controlState.timers.has(type)) {
-            const wait = Math.max(1, minIntervalMs - since);
-            _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
-          }
+          // enqueue pending message and schedule flush
+          try {
+            let q = _controlState.pending.get(type) || [];
+            if (type === 'freq' || type === 'edges') {
+              q = [{ msg: rawMsg, when: now, seq: seq }];
+            } else {
+              q.push({ msg: rawMsg, when: now, seq: seq });
+            }
+            _controlState.pending.set(type, q);
+            if (!_controlState.timers.has(type)) {
+              const wait = Math.max(1, minIntervalMs - sinceGlobal);
+              _controlState.timers.set(type, setTimeout(() => _flushControl(type), wait));
+            }
+          } catch (e) { console.debug('[radio.js] enqueue failed', e); }
         };
       })();
 
@@ -162,13 +337,27 @@
           const modeEl = document.getElementById('mode');
           const mode = modeEl ? (modeEl.value || '').toLowerCase() : '';
           if (mode === 'cwu' || mode === 'cwl') {
-            const tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum.frequency || 0);
+            // Prefer the local, client-side spectrum.frequency when we're in a
+            // stabilization window (shortly after a user action) or when the
+            // user is actively typing a frequency. Otherwise prefer the
+            // backend-confirmed `frequencyHz` so the marker follows the server.
+            const useLocal = (typeof suppressProgrammaticUpdatesUntil === 'number' && Date.now() < suppressProgrammaticUpdatesUntil) || !!userTypedFreq;
+            let tuned = 0;
+            if (useLocal) {
+              tuned = (spectrum && Number.isFinite(spectrum.frequency) && spectrum.frequency !== 0) ? spectrum.frequency : (frequencyHz || 0);
+            } else {
+              tuned = (frequencyHz && Number.isFinite(frequencyHz) && frequencyHz !== 0) ? frequencyHz : (spectrum && spectrum.frequency) || 0;
+            }
             if (tuned && Number.isFinite(tuned) && tuned !== 0) {
-              const offset = 500; // Hz
-              const markerHz = (mode === 'cwu') ? (tuned - offset) : (tuned + offset);
-              spectrum.backendMarkerHz = markerHz;
-              spectrum.backendMarkerActive = true;
-              return;
+              // Only show the backend CW marker when adoption is enabled
+              // (either user enabled or the backend reports a non-zero shift).
+              if (adoptEnabled()) {
+                const offset = shiftHz; // Hz
+                const markerHz = tuned - offset; // For both CWU and CWL, the marker is at tuned frequency minus the shift
+                spectrum.backendMarkerHz = markerHz;
+                spectrum.backendMarkerActive = true;
+                return;
+              }
             }
           }
           spectrum.backendMarkerActive = false;
@@ -245,6 +434,37 @@ let quickBWActive = false;
 let quickBWPrevEdges = null; // { low: number, high: number }
 // Suppress automatic sends when programmatically changing filter edge inputs
 let suppressEdgeAutoSend = false;
+// Suppress control sends when UI is updated programmatically from server status/BFREQ
+let suppressProgrammaticUI = false;
+// Adoption of backend parameter changes is determined solely by the backend-reported
+// post-detection audio/CW shift. If the backend shift exceeds a small tolerance,
+// we consider adoption enabled.
+
+// Helper: treat adoption as enabled when either the user has enabled
+// `adoptOnParameterMismatch` OR the backend reports a non-zero post-detection
+// audio/CW shift for this session. Use a small tolerance (1 Hz) to treat
+// near-zero shifts as zero.
+function adoptEnabled() {
+  return (Number.isFinite(shiftHz) && Math.abs(shiftHz) > 1.0);
+}
+// Keep Frequency Centered (KFC): when true, left-click frequency selection will
+// also send a zoom-center command so the tuned frequency is placed in the
+// center of the spectrum.
+// Expose Keep Frequency Centered on `window` so other modules (spectrum.js)
+// can read it. Default false.
+window.keepFreqCentered = false;
+// When non-zero and in the future, incoming programmatic updates (freq/mode)
+// should be ignored until this time to allow the backend to stabilize after
+// a user-initiated change.
+let suppressProgrammaticUpdatesUntil = 0;
+
+function blockProgrammaticUpdates(ms) {
+  try {
+    const until = Date.now() + (typeof ms === 'number' ? ms : 500);
+    if (until > suppressProgrammaticUpdatesUntil) suppressProgrammaticUpdatesUntil = until;
+    //console.debug('[radio.js] blocking programmatic updates until', new Date(suppressProgrammaticUpdatesUntil).toISOString());
+  } catch (e) { console.debug('[radio.js] blockProgrammaticUpdates error', e); }
+}
 function loadQuickBWPreset() {
   try {
     const v = (localStorage.getItem && localStorage.getItem('QuickBWPreset'));
@@ -359,6 +579,9 @@ function applyQuickBW() {
       }
 
       function on_ws_open() {
+          // Prevent server-driven programmatic UI writes for a short window
+          // while we force-send stored settings so the UI doesn't flash defaults.
+          try { blockProgrammaticUpdates(1500); } catch (e) {}
         // get the SSRC
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
@@ -368,10 +591,12 @@ function applyQuickBW() {
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         updateCWMarker();
         // Stagger initial control messages slightly to avoid overwhelming backend
-        setTimeout(() => { try { sendControl('mode','M:' + target_preset, 50); } catch (e) {} }, 30);
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString(), 80); } catch (e) {} }, 90);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), 80); } catch (e) {} }, 150);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), 80); } catch (e) {} }, 210);
+        // Send initial mode and frequency on open, but do NOT bypass programmatic
+        // UI suppression so we don't overwrite a server-driven state.
+        setTimeout(() => { try { sendControl('mode','M:' + target_preset); } catch (e) {} }, 30);
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 90);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 150);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 210);
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
@@ -383,7 +608,7 @@ function applyQuickBW() {
           try {
             if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
             // normalize pending edges
-            sendControl('edges', 'e:' + Math.round(pendingFilterEdges.low).toString() + ':' + Math.round(pendingFilterEdges.high).toString(), 200);
+            sendControl('edges', 'e:' + Math.round(pendingFilterEdges.low).toString() + ':' + Math.round(pendingFilterEdges.high).toString());
             cwDebug.lastSent = { low: Math.round(pendingFilterEdges.low), high: Math.round(pendingFilterEdges.high), time: Date.now() };
             cwDebug.wsState = ws.readyState;
             updateCWDebugOverlay();
@@ -394,18 +619,18 @@ function applyQuickBW() {
         try {
           if (pendingSpectrumAverage && ws && ws.readyState === WebSocket.OPEN) {
             // console.log('Flushing queued spectrum average to backend:', pendingSpectrumAverage.val);
-            sendControl('spectrum_avg', 'g:' + pendingSpectrumAverage.val.toString(), 333);
+            sendControl('spectrum_avg', 'g:' + pendingSpectrumAverage.val.toString());
             pendingSpectrumAverage = null;
           } else if (ws && ws.readyState === WebSocket.OPEN) {
             // Always send current spectrum_average so backend is in sync
             // console.log('Sending current spectrum_average to backend on WS open:', spectrum_average);
-            sendControl('spectrum_avg', 'g:' + spectrum_average.toString(), 333);
+            sendControl('spectrum_avg', 'g:' + spectrum_average.toString());
           }
         } catch (e) { console.error('Failed to flush/send spectrum average', e); }
         // Flush queued window prefs if any
         try {
           if (pendingWindowPrefs && ws && ws.readyState === WebSocket.OPEN) {
-            sendControl('window', 'w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''), 200);
+            sendControl('window', 'w:' + pendingWindowPrefs.t + ':' + (pendingWindowPrefs.p || ''));
             pendingWindowPrefs = null;
           }
         } catch (e) { console.error('Failed to flush/send window prefs', e); }
@@ -420,7 +645,7 @@ function applyQuickBW() {
               let ovVal = null;
               try { ovVal = (window.localStorage) ? localStorage.getItem('spectrumOverlap') : null; } catch (e) { ovVal = null; }
               if (ovVal !== null && ovVal !== '' && ws && ws.readyState === WebSocket.OPEN) {
-                try { sendControl('spectrum_overlap', 'v:' + ovVal, 200); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
+                try { sendControl('spectrum_overlap', 'v:' + ovVal); /*console.log('Sent deferred spectrum overlap on WS open', ovVal) */} catch (e) { console.warn('Failed to send deferred spectrum overlap on WS open', e); }
               }
             } catch (e) {}
           }, 100);
@@ -439,7 +664,7 @@ function applyQuickBW() {
         spectrumPoll = v;
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            sendControl('spectrum_poll', 'r:' + v.toString(), 200);
+            sendControl('spectrum_poll', 'r:' + v.toString());
             console.log('Sent spectrum poll request:', v);
           } catch (e) {
             console.error('Failed to send spectrum poll:', e);
@@ -460,7 +685,7 @@ function applyQuickBW() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
             // Format: w:<WINDOW_TYPE>:<PARAM>
-            sendControl('window', 'w:' + t + ':' + p, 200);
+            sendControl('window', 'w:' + t + ':' + p);
             // persist selection when sent
             try { saveWindowPrefs(); } catch (e) {}
           } catch (e) { console.error('Failed to send window parameter', e); }
@@ -483,13 +708,39 @@ function applyQuickBW() {
         // Format matches console interface: 'v:<float>'
         if (ws && ws.readyState === WebSocket.OPEN) {
           try {
-            sendControl('spectrum_overlap', 'v:' + v.toString(), 200);
+            sendControl('spectrum_overlap', 'v:' + v.toString());
             try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
             //console.log('Sent spectrum overlap', v);
           } catch (e) { console.error('Failed to send spectrum overlap', e); }
         } else {
           console.warn('WebSocket not open, cannot send spectrum overlap');
           try { if (window.localStorage) localStorage.setItem('spectrumOverlap', v.toString()); } catch (e) {}
+        }
+      }
+
+      // Send post-detection audio shift (Hz) to backend
+      // Only send when explicitly requested by the user (bypassProgrammaticGuard=true).
+      function sendShift(bypassProgrammaticGuard = false) {
+        // Prevent parroting server-driven updates back to the server
+        if (!bypassProgrammaticGuard && suppressProgrammaticUI) {
+          console.debug('[radio.js] sendShift suppressed by programmatic UI flag');
+          return;
+        }
+        const el = document.getElementById('shiftInput');
+        if (!el) return;
+        const v = parseFloat(el.value);
+        if (!isFinite(v)) {
+          console.warn('Invalid shift value', el.value);
+          return;
+        }
+        // Format: t:<shift_in_Hz>
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            sendControl('shift', 't:' + v.toString());
+            console.log('Sent shift request:', v);
+          } catch (e) { console.error('Failed to send shift request', e); }
+        } else {
+          console.warn('WebSocket not open, cannot send shift');
         }
       }
 
@@ -561,7 +812,7 @@ function applyQuickBW() {
             const p = pEl ? (pEl.value || '').trim() : '';
             if (t) {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                try { sendControl('window', 'w:' + t + ':' + p, 200); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
+                try { sendControl('window', 'w:' + t + ':' + p); } catch (e) { console.warn('Failed to send loaded window prefs', e); pendingWindowPrefs = { t: t, p: p }; }
               } else {
                 pendingWindowPrefs = { t: t, p: p };
               }
@@ -681,7 +932,7 @@ function applyQuickBW() {
             const highInt = Math.round(high);
             const payload = 'e:' + lowInt.toString() + ':' + highInt.toString();
             // Throttled send to avoid overrunning backend
-            sendControl('edges', payload, 100);
+            sendControl('edges', payload);
             // update debug overlay state (record attempt)
             try { cwDebug.lastSent = { low: lowInt, high: highInt, time: Date.now() }; cwDebug.wsState = ws.readyState; updateCWDebugOverlay(); } catch (e) {}
             //console.log('Sent filter edges:', low, high);
@@ -701,8 +952,8 @@ function applyQuickBW() {
                     if (expectedFilterAck && expectedFilterAck.retries === 0) {
                     expectedFilterAck.retries = 1;
                     //console.log('[sendFilterEdges] No ack within timeout, retrying send for', expectedFilterAck.low, expectedFilterAck.high);
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                      sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 200);
+                      if (ws && ws.readyState === WebSocket.OPEN) {
+                      sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString());
                       cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                       updateCWDebugOverlay();
                     }
@@ -734,10 +985,210 @@ function applyQuickBW() {
           //console.log(evt.data);
           let temp=evt.data.toString();
           let args=temp.split(":");
+          // Handle server ACKs for clientId/seq protocol: ACK:<clientId>:<seq>
+          try {
+            if (args[0] === 'ACK' && args.length > 2) {
+              const ackCid = args[1];
+              const ackSeq = parseInt(args[2], 10);
+              if (ackCid === clientId && Number.isFinite(ackSeq)) {
+                try {
+                  const pend = _pendingAcks.get(ackSeq);
+                  if (pend) {
+                    _pendingAcks.delete(ackSeq);
+                    // update CW debug ack info for edges if available
+                    try {
+                      if (pend.type === 'edges') {
+                        const parts = (pend.rawMsg || '').split(':');
+                        if (parts.length >= 3) {
+                          const low = Math.round(Number(parts[1]) || 0);
+                          const high = Math.round(Number(parts[2]) || 0);
+                          cwDebug.lastAck = { low: low, high: high, time: Date.now() };
+                        }
+                      } else {
+                        cwDebug.lastAck = { low: null, high: null, time: Date.now() };
+                      }
+                      cwDebug.wsState = (ws && ws.readyState) || -1;
+                      updateCWDebugOverlay();
+                    } catch (e) {}
+                  }
+                } catch (e) {}
+              }
+              // ACK handled; return early
+              return;
+            }
+          } catch (e) {}
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
+          // BFREQ: server-sent backend frequency in kHz (e.g., "BFREQ:10000.000")
+          // BFREQ_FORCE: server-forced backend frequency update (UI should always apply)
+          if ((args[0] === 'BFREQ' || args[0] === 'BFREQ_FORCE') && args.length > 1) {
+            const f_raw = parseFloat(args[1]);
+            if (Number.isFinite(f_raw)) {
+              // Detect whether server sent kHz (e.g., 14183.000) or Hz (e.g., 14183000)
+              let hz;
+              if (f_raw > 1000000) {
+                // large number — assume already in Hz
+                hz = Math.round(f_raw);
+                // console.debug('[radio.js] BFREQ text received (server) interpreted as Hz:', args[1], 'hz=', hz);
+              } else {
+                // assume kHz
+                hz = Math.round(f_raw * 1000);
+                // console.debug('[radio.js] BFREQ text received (server) interpreted as kHz:', args[1], 'hz=', hz);
+              }
+              backendFrequencyHz = hz;
+              try {
+                const freqEl = document.getElementById('freq');
+                if (freqEl) {
+                  const now = Date.now();
+                  // Decide whether to update the frequency UI. We allow updates when:
+                  // - `adoptEnabled()` is true (normal adoption behavior), or
+                  // - a recent mode change / shift toggle indicates we should follow the backend
+                  //   (allow brief override window even when adoption is not enabled).
+                  let shouldUpdate = false;
+                  if (adoptEnabled()) {
+                    if (now < suppressProgrammaticUpdatesUntil) {
+                      let allow = false;
+                      try {
+                        if (modeChangePending) allow = true;
+                        else if (lastShiftChangeMs) {
+                          if ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS) {
+                            try {
+                              const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 1.0;
+                              const prevZero = Number.isNaN(prevShiftHz) || Math.abs(prevShiftHz) <= 1.0;
+                              const nowNonZero = Math.abs(shiftHz) > 1.0;
+                              const nowZero = Math.abs(shiftHz) <= 1.0;
+                              // Allow when shift was just cleared OR just set (entering or leaving CW)
+                              if ((prevNonZero && nowZero) || (prevZero && nowNonZero)) allow = true;
+                            } catch (e) { /* ignore */ }
+                          }
+                        }
+                      } catch (e) { /* ignore */ }
+                      if (allow) shouldUpdate = true;
+                    } else {
+                      shouldUpdate = true;
+                    }
+                  } else {
+                    // Adoption disabled: still allow a short window to accept a
+                    // backend-driven frequency when a CW shift was just cleared
+                    // (so the tuned frequency moved by the shift amount back to
+                    // the un-shifted carrier).
+                    if (modeChangePending) shouldUpdate = true;
+                    else if (lastShiftChangeMs && ((now - lastShiftChangeMs) <= MODE_CHANGE_PENDING_MS)) {
+                      const prevNonZero = !Number.isNaN(prevShiftHz) && Math.abs(prevShiftHz) > 1.0;
+                      const nowZero = Math.abs(shiftHz) <= 1.0;
+                      if (prevNonZero && nowZero) shouldUpdate = true;
+                    }
+                  }
+
+                  // If server sent a forced update, accept it regardless of adoptEnabled
+                  if (args[0] === 'BFREQ_FORCE') shouldUpdate = true;
+                  if (shouldUpdate) {
+                    suppressProgrammaticUI = true;
+                    freqEl.value = (hz / 1000.0).toFixed(3);
+                    setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                    // Keep local state in sync so visuals follow the reported backend frequency
+                    try {
+                      frequencyHz = hz;
+                    } catch (e) {}
+                    try {
+                      if (typeof spectrum !== 'undefined' && spectrum) {
+                        spectrum.setFrequency(hz);
+                        updateCWMarker();
+                        try {
+                          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+                            if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                            else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false);
+                          }
+                        } catch (e) {}
+                        try { spectrum.checkFrequencyAndClearOverlays(hz); } catch (e) {}
+                      }
+                    } catch (e) {}
+                    console.log('[radio.js] BFREQ updated freq UI to', (hz / 1000.0).toFixed(3), 'backendFrequencyHz=', backendFrequencyHz);
+                    modeChangePending = false;
+                    modeChangeFrom = null;
+                  }
+                }
+              } catch (e) { /* console.debug('[radio.js] BFREQ handler failed to set freq UI', e); */ }
+            } else {
+              // console.debug('[radio.js] BFREQ parseFloat returned NaN for', args[1]);
+            }
+            return;
+          }
+
+          // SHIFT: server-sent per-session post-detection audio shift in Hz (e.g., "SHIFT:123.000")
+          if (args[0] === 'SHIFT' && args.length > 1) {
+            const s_raw = parseFloat(args[1]);
+            if (Number.isFinite(s_raw)) {
+              // Track previous shift and when it changed so BFREQ handling can
+              // decide whether to override any stabilization suppression.
+              const changed = (typeof shiftHz !== 'number') || (Math.abs(shiftHz - s_raw) > 0.0001);
+              prevShiftHz = (typeof shiftHz === 'number') ? shiftHz : NaN;
+              shiftHz = s_raw;
+              lastShiftChangeMs = Date.now();
+              try {
+                const si = document.getElementById('shiftInput');
+                if (si) {
+                //if (si && adoptOnParameterMismatch) {
+                  si.value = shiftHz.toFixed(0);
+                }
+              } catch (e) { /* ignore UI set errors */ }
+              try {
+                if (changed) updateCWMarker();
+              } catch (e) { console.debug('[radio.js] updateCWMarker failed', e); }
+              
+            } else {
+              console.debug('[radio.js] SHIFT parseFloat returned NaN for', args[1]);
+            }
+            return;
+          }
           // (BFREQ messages ignored for marker placement)
+          // Mode change from server (e.g., "M:usb") - apply without echoing back
+          // M_FORCE: server-forced mode update (UI should always apply)
+          if ((args[0] === 'M' || args[0] === 'M_FORCE') && args.length > 1) {
+            try {
+              const modeVal = (args[1] || '').toLowerCase();
+              console.info('[radio.js] server mode message:', modeVal);
+              const modeEl = document.getElementById('mode');
+              if (modeEl) {
+                // If this is a forced server update, apply regardless of adoptEnabled
+                if (args[0] === 'M_FORCE' || adoptEnabled()) {
+                  // Prevent sending a mode command while we apply the server-driven change
+                  const prevSuppress = suppressProgrammaticUI;
+                  suppressProgrammaticUI = true;
+                  try {
+                    modeEl.value = modeVal;
+                    try { setMode(modeVal, false); } catch (e) { console.warn('Failed to apply server mode', e); }
+                    console.info('[radio.js] applied server mode to UI:', modeVal);
+                  } finally {
+                    suppressProgrammaticUI = prevSuppress;
+                  }
+                } else {
+                  // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
+                }
+              } else {
+                console.warn('[radio.js] server mode received but mode element missing');
+              }
+            } catch (e) { console.debug('[radio.js] server mode handler failed', e); }
+          }
+          // Some servers may send a different token for mode/preset; handle 'PRES' or 'PRESET'
+          if (args[0].toLowerCase() === 'preset' && args.length > 1) {
+            try {
+              const modeVal = (args[1] || '').toLowerCase();
+              console.info('[radio.js] server preset message:', modeVal);
+              const modeEl = document.getElementById('mode');
+              if (modeEl) {
+                  if (!adoptEnabled()) {
+                    // console.debug('[radio.js] adopt disabled; skipping server preset UI update', modeVal);
+                  } else {
+                  const prevSuppress = suppressProgrammaticUI;
+                  suppressProgrammaticUI = true;
+                  try { modeEl.value = modeVal; try { setMode(modeVal, false); } catch (e) {} } finally { suppressProgrammaticUI = prevSuppress; }
+                  console.info('[radio.js] applied server preset to UI:', modeVal);
+                }
+              }
+            } catch (e) { console.debug('[radio.js] server preset handler failed', e); }
+          }
         } else if(evt.data instanceof ArrayBuffer) {
           var data = evt.data;
           rx(data.byteLength);
@@ -845,8 +1296,15 @@ function applyQuickBW() {
 
             if(update) {
               calcFrequencies();
-              spectrum.setLowHz(lowHz);
-              spectrum.setHighHz(highHz);
+              // Always update the spectrum band limits so the axes (frequency
+              // labels and band-edge markers) are rendered even when the UI is
+              // configured to not adopt other server-driven parameter changes.
+              try {
+                spectrum.setLowHz(lowHz);
+                spectrum.setHighHz(highHz);
+              } catch (e) {
+                console.debug('[radio.js] failed to update spectrum band edges', e);
+              }
               // record the server-provided center so the UI can align incoming waterfall rows
               try {
                 spectrum._lastServerCenterHz = centerHz;
@@ -856,15 +1314,20 @@ function applyQuickBW() {
               if (!spectrum._leftDragging) {
                 spectrum.setCenterHz(centerHz);
               }
-              spectrum.setFrequency(frequencyHz);
+              if (adoptEnabled()) {
+                spectrum.setFrequency(frequencyHz);
+              } else {
+                // console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
+              }
               updateCWMarker();
               spectrum.setSpanHz(binWidthHz * binCount);
               spectrum.bins = binCount;
               try {
                 const zoomEl = document.getElementById("zoom_level");
-                if (zoomEl) {
+                  if (zoomEl) {
                   const maxVal = (typeof zoomTableSize === 'number' && !isNaN(zoomTableSize)) ? (zoomTableSize - 1) : Number(zoomEl.max) || 0;
                   zoomEl.max = maxVal;
+                  try { updateZoomMarkers(); } catch (e) {}
                   // If the frontend sample rate is the lower value (<= 64.8 MHz) disallow zoom level 0
                   const minVal = (typeof input_samprate === 'number' && input_samprate > 0 && input_samprate <= 64800000) ? 1 : 0;
                   zoomEl.min = minVal;
@@ -872,13 +1335,37 @@ function applyQuickBW() {
                   let clamped = z_level;
                   if (clamped < minVal) clamped = minVal;
                   if (clamped > maxVal) clamped = maxVal;
-                  zoomEl.value = clamped;
+                    // Always update the zoom control value so the slider and
+                    // the lower-status zoom display remain in sync with the
+                    // server-provided zoom level even when `adoptOnParameterMismatch`
+                    // is disabled.
+                    try {
+                      zoomEl.value = clamped;
+                    } catch (e) { /* ignore UI set errors */ }
                 } else {
-                  document.getElementById("zoom_level").value = z_level;
+                    try {
+                      const zEl = document.getElementById("zoom_level");
+                      if (zEl) zEl.value = z_level;
+                    } catch (e) { /* ignore UI set errors */ }
                 }
               } catch (e) { console.warn('Failed to update zoom control bounds', e); }
               //console.log("Zoom level=",z_level);
-              document.getElementById("freq").value = (frequencyHz / 1000.0).toFixed(3);
+              try {
+                const freqEl = document.getElementById("freq");
+                if (freqEl) {
+                  // console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
+                  backendFrequencyHz = frequencyHz;
+                  if (!adoptEnabled()) {
+                    // console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
+                  } else if (Date.now() < suppressProgrammaticUpdatesUntil) {
+                    // console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
+                  } else {
+                    suppressProgrammaticUI = true;
+                    freqEl.value = (frequencyHz / 1000.0).toFixed(3);
+                    setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                  }
+                }
+              } catch (e) { console.debug('[radio.js] spectrum update failed to set freq UI', e); }
               saveSettings();
               // Show bandwidth popup for the newly-applied zoom level (server-driven)
               try {
@@ -990,6 +1477,7 @@ function applyQuickBW() {
                 filter_high = Number(filter_high);
                 if (Number.isFinite(filter_low) && Number.isFinite(filter_high)) {
                   spectrum.setFilter(filter_low, filter_high);
+                  // Client no longer infers mode from filter edges; skip
                 } else {
                   console.warn('Invalid filter edges received:', filter_low, filter_high);
                 }
@@ -1008,7 +1496,7 @@ function applyQuickBW() {
                       expectedFilterAck.retries++;
                       //console.log('[on_ws_message] ACK mismatch; resending expected edges', expectedFilterAck.low, expectedFilterAck.high, 'retry=', expectedFilterAck.retries);
                         if (ws && ws.readyState === WebSocket.OPEN) {
-                        sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString(), 300);
+                        sendControl('edges', 'e:' + Math.round(expectedFilterAck.low).toString() + ':' + Math.round(expectedFilterAck.high).toString());
                         cwDebug.lastSent = { low: expectedFilterAck.low, high: expectedFilterAck.high, time: Date.now() };
                         updateCWDebugOverlay();
                       }
@@ -1133,6 +1621,8 @@ function applyQuickBW() {
             try { document.getElementById('cursor').checked = spectrum.cursor_active; } catch (e) {}
             try { document.getElementById('pause').textContent = (spectrum.paused ? "Spectrum Run" : "Spectrum Pause"); } catch (e) {}
             try { document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on"); } catch (e) {}
+            try { const sb = document.getElementById('sendShiftButton'); if (sb) sb.addEventListener('click', () => sendShift(true), false); } catch (e) {}
+            try { const si = document.getElementById('shiftInput'); if (si) si.addEventListener('keypress', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); sendShift(true); } }); } catch (e) {}
 
             // set zoom, preset, spectrum percentage?
             try { spectrum.setAveraging(spectrum.averaging); } catch (e) {}
@@ -1249,11 +1739,42 @@ function applyQuickBW() {
             return;
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
-        sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
+      // user-initiated freq change: block incoming programmatic updates briefly
+      if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
+      // Suppress remote-driven redraws for a short window so our immediate
+      // local redraw isn't overwritten by incoming data — only when KFC is enabled.
+      try { if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) { if (typeof spectrum !== 'undefined') spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } } catch (e) {}
+      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
+      // Update local frequency first so overlays draw at the new tuned position
+      spectrum.setFrequency(value);
+      try {
+        if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+          const newCenterHz = value;
+          try {
+            spectrum.setCenterHz(newCenterHz);
+          } catch (e) {}
+          const centerMsg = "Z:c:" + (value / 1000.0).toFixed(3);
+          setTimeout(() => {
+            try {
+              if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+              else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+            } catch (e) {}
+          }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+        }
+      } catch (e) {}
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(value);
         updateCWMarker();
+        // Immediate redraw so overlays and waterfall render together; force bypass suppression
+        // only when KFC is enabled. If KFC is off, accept remote updates as they arrive.
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+              if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false, true);
+              else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false, true);
+            }
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -1267,11 +1788,41 @@ function applyQuickBW() {
             return;
         }
         document.getElementById("freq").value = (value / 1000.0).toFixed(3);
-        sendControl('freq', "F:" + (value / 1000.0).toFixed(3), 50);
+      if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
+      // Suppress remote-driven redraws for a short window so our immediate
+      // local redraw isn't overwritten by incoming data — only when KFC is enabled.
+      try { if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) { if (typeof spectrum !== 'undefined') spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } } catch (e) {}
+      sendControl('freq', "F:" + (value / 1000.0).toFixed(3), undefined, true);
+      // Update local frequency first so overlays draw at the new tuned position
+      spectrum.setFrequency(value);
+      try {
+        if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+          const newCenterHz = value;
+          try {
+            spectrum.setCenterHz(newCenterHz);
+          } catch (e) {}
+          const centerMsg = "Z:c:" + (value / 1000.0).toFixed(3);
+          setTimeout(() => {
+            try {
+              if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+              else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+            } catch (e) {}
+          }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+        }
+      } catch (e) {}
         //document.getElementById("freq").value=value.toString();
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(value);
         updateCWMarker();
+        // Immediate redraw so overlays and waterfall render together; force bypass suppression
+        // only when KFC is enabled. If KFC is off, accept remote updates as they arrive.
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+              if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false, true);
+              else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false, true);
+            }
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(value);
         saveSettings();
     }
@@ -1536,11 +2087,37 @@ function applyQuickBW() {
             asCount = 3; // set the autoscale counter to 17 between 100 kHz and 3 MHz
         }
         //console.log("setFrequencyW() f= ",f," waitToAutoscale=",waitToAutoscale,"freq diff = ",frequencyDifference, " asCount= ",asCount);
+        if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
         sendControl('freq', "F:" + (f / 1000.0).toFixed(3), 50);
+        // Update the local tuned frequency first so overlays render correctly
+        spectrum.setFrequency(f);
+        // If this was a user left-click and KFC is enabled, send a zoom-center
+        // command so the tuned frequency is centered in the spectrum.
+        try {
+          if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered && evt && ('button' in evt) && evt.button === 0) {
+            const newCenterHz = f;
+            try {
+              spectrum.setCenterHz(newCenterHz);
+            } catch (e) {}
+            const centerMsg = "Z:c:" + (f / 1000.0).toFixed(3);
+            setTimeout(() => {
+              try {
+                if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+                else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+              } catch (e) {}
+            }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+          }
+        } catch (e) { /* ignore */ }
         //document.getElementById("freq").value=document.getElementById('msg').value;
         //band.value=document.getElementById('msg').value;
-        spectrum.setFrequency(f);
         updateCWMarker();
+        // Immediate redraw so overlays and pre-shifted waterfall render together
+        try {
+          if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+            if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+            else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false);
+          }
+        } catch (e) {}
         spectrum.checkFrequencyAndClearOverlays(f);
         // If this change was initiated by the user (typed in the `freq` box or
         // they pressed the Set button), do NOT auto-switch mode even if
@@ -1559,19 +2136,23 @@ function applyQuickBW() {
     }
 
     function setBand(freq) {
-        //console.log("setBand() called with freq=",freq);
-        var f = parseInt(freq);
-        document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
-        if (!spectrum.checkFrequencyIsValid(f)) {
-            return;
-        }
-        spectrum.setFrequency(f);
-        updateCWMarker();
-        spectrum.checkFrequencyAndClearOverlays(f);
-        setModeBasedOnFrequencyIfAllowed(freq);
-        sendControl('freq', "F:" + (freq / 1000).toFixed(3), 50);
-        autoAutoscale(0, true);  // wait for autoscale
-        saveSettings();
+      //console.log("setBand() called with freq=",freq);
+      var f = parseInt(freq);
+      document.getElementById("freq").value = (freq / 1000.0).toFixed(3);
+      if (!spectrum.checkFrequencyIsValid(f)) {
+        return;
+      }
+      spectrum.setFrequency(f);
+      updateCWMarker();
+      spectrum.checkFrequencyAndClearOverlays(f);
+      setModeBasedOnFrequencyIfAllowed(freq);
+      // block programmatic updates briefly so incoming status updates don't
+      // collide with the new requested frequency
+      if (!suppressProgrammaticUI) blockProgrammaticUpdates(600);
+      // Stagger frequency send slightly after any preceding paired send (mode)
+      setTimeout(() => { sendControl('freq', "F:" + (freq / 1000.0).toFixed(3), 50); }, COMMAND_SEND_SPACING_MS);
+      autoAutoscale(0, true);  // wait for autoscale
+      saveSettings();
     }
 
     function setModeBasedOnFrequencyIfAllowed(f) {
@@ -1596,7 +2177,7 @@ function applyQuickBW() {
       }
     }
 
-    function setMode(selected_mode) {
+    function setMode(selected_mode, forceSend = false) {
       // If QuickBW is active and the change is driven by frequency-based switching,
       // deactivate QuickBW and drop any saved edges so they won't be restored later.
       if (quickBWActive && switchModesByFrequency) {
@@ -1607,9 +2188,70 @@ function applyQuickBW() {
         try { updateQuickBWButtonState(); } catch (e) {}
       }
 
-      document.getElementById('mode').value = selected_mode;
-      sendControl('mode', "M:" + selected_mode, 100);
-
+      const modeEl = document.getElementById('mode');
+      const prevMode = modeEl ? (modeEl.value || '').toLowerCase() : '';
+      if (modeEl) modeEl.value = selected_mode;
+      if (forceSend || !suppressProgrammaticUI) {
+        blockProgrammaticUpdates(600);
+        // Pass `forceSend` as 4th argument to allow bypassing the programmatic
+        // UI guard inside sendControl when explicitly requested (e.g., recall).
+        sendControl('mode', "M:" + selected_mode, 100, !!forceSend);
+        const sel = (selected_mode || '').toLowerCase();
+        const wasCW = (prevMode === 'cwu' || prevMode === 'cwl');
+        const willBeCW = (sel === 'cwu' || sel === 'cwl');
+        try {
+          // Entering CW from non-CW: remember the original un-shifted frequency
+          if (!wasCW && willBeCW) {
+            try {
+              const freqEl = document.getElementById('freq');
+              let base = NaN;
+              if (freqEl) {
+                const v = parseFloat(freqEl.value);
+                if (Number.isFinite(v)) base = v * 1000.0;
+              }
+              if (!Number.isFinite(base)) {
+                base = (backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz;
+              }
+              originalNonCWFreqHz = base;
+              if (CW_DEBUG_OVERLAY) console.debug('[radio.js] remembered original non-CW freq', originalNonCWFreqHz);
+            } catch (e) { /* ignore */ }
+          }
+          // Leaving CW to non-CW: clear remembered base frequency
+          if (wasCW && !willBeCW) {
+            originalNonCWFreqHz = NaN;
+            // Mark pending CW->non-CW so paired sends adjust shift removal
+            modeChangeFrom = prevMode;
+            modeChangePending = true;
+            setTimeout(function(){ modeChangePending = false; modeChangeFrom = null; }, MODE_CHANGE_PENDING_MS);
+          }
+          // Switching between CWU <-> CWL: compute and send the correct
+          // frequency relative to the original non-CW frequency.
+          if (wasCW && willBeCW && (prevMode !== sel)) {
+            const baseHz = Number.isFinite(originalNonCWFreqHz) ? originalNonCWFreqHz : ((backendFrequencyHz && Number.isFinite(backendFrequencyHz) && backendFrequencyHz !== 0) ? backendFrequencyHz : frequencyHz);
+            const targetHz = baseHz + (sel === 'cwu' ? shiftHz : -shiftHz);
+            // Send paired frequency immediately after mode change, bypassing the programmatic guard
+            setTimeout(() => { try { sendControl('freq', "F:" + (targetHz / 1000.0).toFixed(3), 50, true); } catch (e) { console.debug('paired CW mode->freq send failed', e); } }, COMMAND_SEND_SPACING_MS);
+            // Update UI immediately so user sees the target
+            try {
+              const freqEl = document.getElementById('freq');
+              if (freqEl) {
+                suppressProgrammaticUI = true;
+                freqEl.value = (targetHz / 1000.0).toFixed(3);
+                setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+              }
+              spectrum.setFrequency(Math.round(targetHz));
+              updateCWMarker();
+            } catch (e) { console.debug('update UI for CW->CW failed', e); }
+          }
+        } catch (e) { /* ignore */ }
+        // After sending mode, also send the client's displayed frequency so
+        // the backend can apply mode-specific behavior immediately. Skip when
+        // we've already scheduled a CW<->CW paired send above.
+        // Post-mode delayed frequency resend removed — only send mode here.
+      } else {
+        console.debug('[radio.js] setMode suppressed send; forceSend=', forceSend, 'suppressProgrammaticUI=', suppressProgrammaticUI);
+      }
+      
       // Determine the new sample rate and number of channels based on the mode
       let newSampleRate = 12000;
       let newChannels = 1;
@@ -1651,12 +2293,7 @@ function applyQuickBW() {
   }
 
     function selectMode(mode) {
-        let element = document.getElementById('mode');
-        element.value = mode;
-        sendControl('mode', "M:"+mode, 100);
-      setFilterEdgesForMode(mode);
-      try { updateQuickBWButtonState(); } catch (e) {}
-      saveSettings();
+      try { setMode(mode); } catch (e) {}
     }
 
     // Set filter input values according to mode defaults
@@ -1703,6 +2340,9 @@ function applyQuickBW() {
   edgeManualDirty = false;
   updateEdgeButtonState();
     }
+
+    // inferModeFromFilterEdges and updateModeUI removed — no client-side mode
+    // inference from filter edges. Mode changes are handled explicitly elsewhere.
 
     // When the user changes the filter inputs via the UI (spinner carets or keyboard arrows)
     // immediately send the new values to the backend. Programmatic changes are suppressed
@@ -2514,6 +3154,7 @@ function saveSettings() {
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
+  try { localStorage.setItem("keepFreqCentered", (document.getElementById("ckKeepFreqCentered") && document.getElementById("ckKeepFreqCentered").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
@@ -2644,7 +3285,15 @@ function loadSettings() {
 
   spectrum.averaging = getLS("averaging", v => parseInt(v, 10), spectrum.averaging);
   spectrum_average = getLS("spectrum_average", v => parseInt(v, 10), spectrum_average);
-  const tune = getLS("tune_hz", v => parseFloat(v), spectrum.frequency);
+  let tune = getLS("tune_hz", v => parseFloat(v), spectrum.frequency);
+  // Heuristic: if stored value is small (e.g. 3755) it's likely kHz not Hz
+  // convert to Hz so UI shows the expected value at startup.
+  try {
+    if (typeof tune === 'number' && isFinite(tune) && tune > 0 && tune < 10000) {
+      console.debug('[radio.js] loadSettings: converting stored tune_hz (assumed kHz) to Hz:', tune, '->', tune * 1000);
+      tune = Math.round(tune * 1000);
+    }
+  } catch (e) { console.debug('[radio.js] loadSettings tune conversion error', e); }
   spectrum.frequency = tune;
   frequencyHz = tune;
   target_frequency = frequencyHz;
@@ -2722,6 +3371,12 @@ function loadSettings() {
 
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+  // adoptOnParameterMismatch client-side option removed; adoption is driven by backend shift
+  // Keep Frequency Centered (KFC) persisted setting
+  const kfcVal = getLS("keepFreqCentered", v => (v === "true"), false);
+  window.keepFreqCentered = kfcVal;
+  try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.checked = kfcVal; } catch (e) {}
+  try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.addEventListener('change', function() { window.keepFreqCentered = this.checked; saveSettings(); }); } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();
@@ -2981,19 +3636,32 @@ function setShowBandEdges(checked) {
         const saved = localStorage.getItem(MEMORY_KEY);
         if (saved) {
             try {
-                const arr = JSON.parse(saved);
-                // Backward compatibility: upgrade from string array to object array
-                if (Array.isArray(arr) && arr.length === 50) {
-                    if (typeof arr[0] === 'string') {
-                        memories = arr.map(f => ({ freq: f, desc: '', mode: '' }));
-                    } else {
-                        memories = arr.map(m => ({
-                            freq: m.freq || '',
-                            desc: m.desc || '',
-                            mode: m.mode || ''
-                        }));
-                    }
-                }
+          const arr = JSON.parse(saved);
+          // Backward compatibility: upgrade from legacy string-array or
+          // mixed-object array to a normalized object array with `freq` in Hz.
+          if (Array.isArray(arr) && arr.length === 50) {
+            // Helper to normalize a numeric-like value to Hz string.
+            const normalizeToHz = (val) => {
+              if (val === null || val === undefined || val === '') return '';
+              const n = Number(val);
+              if (Number.isNaN(n)) return String(val || '');
+              // Heuristic: values smaller than 100k are likely kHz, convert to Hz
+              if (n < 100000) return Math.round(n * 1000).toString();
+              return Math.round(n).toString();
+            };
+
+            if (typeof arr[0] === 'string') {
+              memories = arr.map(f => ({ freq: normalizeToHz(f), desc: '', mode: '' }));
+            } else {
+              memories = arr.map(m => ({
+                freq: normalizeToHz(m && m.freq ? m.freq : ''),
+                desc: (m && m.desc) ? m.desc : '',
+                mode: (m && m.mode) ? m.mode : ''
+              }));
+            }
+            // Persist normalized form back to localStorage so future loads are consistent
+            try { localStorage.setItem(MEMORY_KEY, JSON.stringify(memories)); } catch (e) {}
+          }
             } catch (e) {
                 memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
             }
@@ -3023,15 +3691,24 @@ function setShowBandEdges(checked) {
         // Determine the max width for frequency (e.g., 13 chars for extra padding)
         const PAD_WIDTH = 28;
         for (let i = 0; i < 50; i++) {
-            const m = memories[i];
-            let freqStr = m.freq ? m.freq : '---';
-            // Pad freqStr with non-breaking spaces to PAD_WIDTH
-            let padLen = Math.max(0, PAD_WIDTH - freqStr.length);
-            let paddedFreq = freqStr + '\u00A0'.repeat(padLen);
-            let label = m.freq ? `${i+1}: ${paddedFreq}` : `${i+1}: ---`;
-            if (m.desc) label += ` (${m.desc})`;
-            sel.options[i].text = label;
-            sel.options[i].value = i; // Ensure value is always the index
+          const m = memories[i];
+          let freqStr = '---';
+          if (m && m.freq) {
+            const n = Number(m.freq);
+            if (!Number.isNaN(n)) {
+              // stored as Hz -> display in kHz with 3 decimals
+              freqStr = (n / 1000.0).toFixed(3);
+            } else {
+              freqStr = m.freq;
+            }
+          }
+          // Pad freqStr with non-breaking spaces to PAD_WIDTH
+          let padLen = Math.max(0, PAD_WIDTH - freqStr.length);
+          let paddedFreq = freqStr + '\u00A0'.repeat(padLen);
+          let label = (freqStr !== '---') ? `${i+1}: ${paddedFreq}` : `${i+1}: ---`;
+          if (m && m.desc) label += ` (${m.desc})`;
+          sel.options[i].text = label;
+          sel.options[i].value = i; // Ensure value is always the index
         }
     }
 
@@ -3064,11 +3741,30 @@ function initializeDialogEventListeners() {
     // Get the position of the launch button
     const buttonRect = optionsButton.getBoundingClientRect();
 
-    // Position the dialog just below the launch button
+    // Position the dialog with a smart vertical placement so it stays visible
     optionsDialog.style.position = 'absolute'; // Use absolute positioning
     optionsDialog.style.left = `${buttonRect.left + window.scrollX}px`; // Adjust for horizontal scrolling
-    optionsDialog.style.top = `${buttonRect.bottom + window.scrollY + 10}px`; // Adjust for vertical scrolling and add 10px spacing below button
     optionsDialog.style.transform = 'none'; // Reset any transform applied by CSS
+
+    // Measure the dialog height without flashing it on-screen
+    optionsDialog.style.visibility = 'hidden';
+    optionsDialog.classList.add('open');
+    const dialogHeight = optionsDialog.offsetHeight || 0;
+    optionsDialog.classList.remove('open');
+    optionsDialog.style.visibility = '';
+
+    // Default desired placement is just below the button with 10px spacing
+    const desiredTop = buttonRect.bottom + window.scrollY + 10;
+    // Maximum top that keeps the dialog inside the viewport with a 10px margin
+    const maxTop = window.scrollY + window.innerHeight - dialogHeight - 10;
+    // Choose the smaller of the two so it doesn't overflow the bottom
+    let top = Math.min(desiredTop, maxTop);
+    // If there's still not enough room, try placing above the button
+    if (top < window.scrollY + 10) {
+      const aboveTop = buttonRect.top + window.scrollY - dialogHeight - 10;
+      top = Math.max(window.scrollY + 10, aboveTop);
+    }
+    optionsDialog.style.top = `${top}px`;
 
     // Show the dialog
     optionsDialog.classList.add('open');
@@ -3101,6 +3797,8 @@ function initializeDialogEventListeners() {
     onlyAutoscaleByButton = this.checked;
     saveSettings();
   });
+
+  // 'Adopt backend changes' option removed from UI; no event handler needed
 
   // Make the dialog box draggable
   makeDialogDraggable(optionsDialog);
@@ -3241,6 +3939,7 @@ async function fetchZoomTableSize() {
         const zoomLevelControl = document.getElementById("zoom_level");
         if (zoomLevelControl) {
             zoomLevelControl.max = zoomTableSize - 1; // Set max to table size - 1
+          try { updateZoomMarkers(); } catch (e) {}
         }
 
         return size; // Return the size for further use if needed
@@ -3283,6 +3982,60 @@ window.zoomTable = [
   { bin_width: 2, bin_count: 1620 },
   { bin_width: 1, bin_count: 1620 }
 ];
+
+// Update the datalist used by the zoom range control so tick marks match the
+// effective zoom index range. Shows at most a few ticks (<=7), roughly half
+// of the available levels, and always includes the min and max entries.
+function updateZoomMarkers() {
+  try {
+    const dlist = document.getElementById('zmarkers');
+    const zoomEl = document.getElementById('zoom_level');
+    if (!dlist || !zoomEl) return;
+
+    const min = Number(zoomEl.min) || 0;
+    const max = Number(zoomEl.max) || (Array.isArray(window.zoomTable) ? (window.zoomTable.length - 1) : 0);
+    const count = Math.max(0, (max - min + 1));
+    if (count <= 0) {
+      dlist.innerHTML = '';
+      return;
+    }
+
+    // Desired number of ticks: about half of available entries, capped to 7.
+    const nTicks = Math.min(7, Math.max(2, Math.ceil(count / 2)));
+
+    // Build evenly spaced tick indices including both ends
+    const seen = new Set();
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < nTicks; ++i) {
+      const v = Math.round(min + (i / (nTicks - 1)) * (max - min));
+      if (seen.has(v)) continue;
+      seen.add(v);
+      const opt = document.createElement('option');
+      opt.value = String(v);
+      frag.appendChild(opt);
+    }
+
+    // Always ensure min and max are present
+    if (!seen.has(min)) {
+      const o = document.createElement('option'); o.value = String(min); frag.insertBefore(o, frag.firstChild);
+    }
+    if (!seen.has(max)) {
+      const o = document.createElement('option'); o.value = String(max); frag.appendChild(o);
+    }
+
+    // Replace datalist contents
+    dlist.innerHTML = '';
+    dlist.appendChild(frag);
+  } catch (e) {
+    console.debug('updateZoomMarkers error', e);
+  }
+}
+// Ensure markers are populated once DOM exists (best-effort)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() { try { updateZoomMarkers(); } catch (e) {} }, { once: true });
+} else {
+  try { updateZoomMarkers(); } catch (e) {}
+}
 
 // Utility: Find closest zoom level index for a given value
 window.findClosestZoomIndex = function(requestedZoom) {
@@ -3458,27 +4211,78 @@ window.addEventListener('DOMContentLoaded', function() {
             saveBtn.onclick = function() {
                 window.loadMemories();
                 var idx = parseInt(sel.value, 10);
-                var freq = document.getElementById('freq').value.trim();
-                var desc = descBox.value.trim().slice(0, 20);
-                var mode = document.getElementById('mode').value;
-                if (freq) {
-                    window.memories[idx] = { freq, desc, mode };
-                    window.saveMemories();
-                    window.updateDropdownLabels();
+              var freqUI = document.getElementById('freq').value.trim();
+              var desc = descBox.value.trim().slice(0, 20);
+              var mode = document.getElementById('mode').value;
+              if (freqUI) {
+                // Normalize stored frequency to Hz (integer string). The UI value is in kHz.
+                var fnum = parseFloat(freqUI);
+                var storedFreq = freqUI;
+                if (!Number.isNaN(fnum)) {
+                  storedFreq = Math.round(fnum * 1000).toString();
                 }
+                window.memories[idx] = { freq: storedFreq, desc, mode };
+                window.saveMemories();
+                window.updateDropdownLabels();
+              }
             };
             recallBtn.onclick = function() {
                 window.loadMemories();
                 var idx = parseInt(sel.value, 10);
                 var m = window.memories[idx];
                 if (m && m.freq) {
-                    document.getElementById('freq').value = m.freq;
-                    descBox.value = m.desc || '';
-                    setFrequencyW(false);
-                    if (m.mode) {
-                        document.getElementById('mode').value = m.mode;
-                        setMode(m.mode);
+                // Apply stored mode first (force send) so automatic frequency-based
+                // mode switching won't overwrite the recalled mode. Use forceSend
+                // to bypass programmatic UI suppression.
+                if (m.mode) {
+                  document.getElementById('mode').value = m.mode;
+                  try { setMode(m.mode, true); } catch (e) { console.warn('setMode recall failed', e); }
+                }
+                // Apply frequency in UI and to spectrum, then force-send to backend
+                try {
+                  const freqEl = document.getElementById('freq');
+                  const fHz = Number(m.freq);
+                  const fKHz = (Number.isFinite(fHz) && fHz !== 0) ? (fHz / 1000.0).toFixed(3) : m.freq;
+                  if (freqEl) freqEl.value = fKHz;
+                  descBox.value = m.desc || '';
+                  const fVal = Number(fHz);
+                  if (!Number.isNaN(fVal) && typeof spectrum !== 'undefined' && spectrum) {
+                    spectrum.setFrequency(Math.round(fVal));
+                    updateCWMarker();
+                    spectrum.checkFrequencyAndClearOverlays(Math.round(fVal));
+                  }
+                  // Briefly block incoming programmatic updates, then force-send freq
+                  blockProgrammaticUpdates(600);
+                  try {
+                    // Force-send the recalled frequency to the backend, bypassing
+                    // the programmatic UI guard so recalls always reach the server.
+                    if (typeof sendControl === 'function') {
+                      sendControl('freq', 'F:' + (Math.round(fVal) / 1000.0).toFixed(3), undefined, true);
+                    } else if (ws && ws.readyState === WebSocket.OPEN) {
+                      ws.send('F:' + (Math.round(fVal) / 1000.0).toFixed(3));
                     }
+                    // If keepFreqCentered is enabled, also center the zoom on the recalled frequency
+                    try {
+                      if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+                        try {
+                          spectrum.setCenterHz(Math.round(fVal));
+                        } catch (e) {}
+                        // Suppress remote-driven redraws briefly so local redraw isn't overwritten
+                        try { spectrum._suppressRemoteDrawUntil = Date.now() + (Number.isFinite(window.remoteDrawSuppressMs) ? window.remoteDrawSuppressMs : 300); } catch (e) {}
+                        const centerMsg = 'Z:c:' + (Math.round(fVal) / 1000.0).toFixed(3);
+                        setTimeout(() => {
+                          try {
+                            if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150, true);
+                            else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+                          } catch (e) {}
+                        }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+                      }
+                    } catch (e) {}
+                  } catch (e) { console.warn('Failed to send recalled frequency to backend', e); }
+                  saveSettings();
+                } catch (e) {
+                  console.warn('Recall frequency apply failed', e);
+                }
                 } else {
                     descBox.value = '';
                 }

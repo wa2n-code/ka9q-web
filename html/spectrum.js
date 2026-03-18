@@ -4,6 +4,12 @@
  * See the LICENSE file for further details.
  */
 'use strict';
+// Configurable delay (milliseconds) between sending `F:` and `Z:c:` when KFC
+// is enabled. Edit this value here to adjust how quickly the spectrum recenters.
+window.zoomCenterDelayMs = 20;
+// Suppress remote-driven redraws for a short window after a user-initiated change
+// to avoid transient visual jumps. Edit this value (ms) to tune behavior.
+window.remoteDrawSuppressMs = 100;
 
 /**
  * Spectrum constructor function.
@@ -407,9 +413,33 @@ function Spectrum(id, options) {
                     if (typeof sendControl === 'function') sendControl('freq', snapMsg, 200);
                     else ws.send(snapMsg);
                     spectrum.frequency = snapped_khz * 1000;
-                    if (spectrum.bin_copy) {
-                        spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
-                    }
+                    // If Keep Frequency Centered (KFC) is enabled, pre-shift and
+                    // set the center so overlays and waterfall are consistent
+                    // before we force a redraw below.
+                    try {
+                        if (typeof window.keepFreqCentered !== 'undefined' && window.keepFreqCentered) {
+                            const newCenterHz = snapped_khz * 1000;
+                            try {
+                                spectrum.setCenterHz(newCenterHz);
+                            } catch (e) {}
+                            const centerMsg = "Z:c:" + snapped_khz.toFixed(3);
+                            setTimeout(() => {
+                                try {
+                                    if (typeof sendControl === 'function') sendControl('zoom_center', centerMsg, 150);
+                                    else if (ws && ws.readyState === WebSocket.OPEN) ws.send(centerMsg);
+                                } catch (e) {}
+                            }, (Number.isFinite(window.zoomCenterDelayMs) ? window.zoomCenterDelayMs : 20));
+                        }
+                    } catch (e) { /* ignore */ }
+                    // Ensure overlays and waterfall are redrawn together using the
+                    // latest local data so the frequency line/filter do not jump.
+                    try { if (typeof updateCWMarker === 'function') updateCWMarker(); } catch (e) {}
+                    try {
+                        if (typeof spectrum.drawSpectrumWaterfall === 'function') {
+                            if (spectrum.bin_copy && spectrum.bin_copy.length) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+                            else if (spectrum.binsAverage && spectrum.binsAverage.length) spectrum.drawSpectrumWaterfall(spectrum.binsAverage, false);
+                        }
+                    } catch (e) {}
                 }
             } else if (leftDragStarted) {
                 // Drag finished — send final center to backend so it will return freshly centered bins
@@ -1354,8 +1384,13 @@ Spectrum.prototype.addData = function(data) {
  * - Calls `resize` to ensure the display is properly sized.
  * The function applies optional biases to the spectrum and waterfall ranges for optimal visual presentation.
  */
-Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax) 
+Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax, force) 
 {
+    // If a suppression window is active (user-initiated change), skip
+    // remote-driven draws unless `force` is true.
+    try {
+        if (!force && this._suppressRemoteDrawUntil && Date.now() < this._suppressRemoteDrawUntil) return;
+    } catch (e) {}
         const useN0 = false;
         const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
         if(getNewMinMax){
@@ -1603,6 +1638,7 @@ Spectrum.prototype.setRange = function(min_db, max_db, adjust_waterfall,wf_min_a
     this.updateAxes();
     this.saveSettings();
 }
+
 
 Spectrum.prototype.baselineUp = function() {
     this.min_db -=5;

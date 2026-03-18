@@ -41,7 +41,7 @@ h4#heading {
   width: auto;
   max-width: 600px;
   padding: 2px 5px 5px 5px; /* Top padding reduced to 2px, others remain 5px */
-  background-color: lightgray;
+  background-color: #efefef; /* Slightly lighter for subtle contrast against page background */
   border: 2px solid #ccc;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000;

@@ -58,7 +58,7 @@
    <input type="number" id="csvMinuteInput" min="0" value="0" style="width:38px; font-size:12px; margin-left:2px;" title="Enter minutes for periodic Write Info. 0 = off.">
    <!-- Spectrum poll input (milliseconds) and send button -->
    <button type="button" id="spectrumPollButton" style="font-size:12px; padding:2px 4px; height:24px; margin-left:2px;" onclick="sendSpectrumPoll()" title="Send spectrum poll interval to server">Poll</button>
-   <input type="number" id="spectrumPollInput" min="30" max="2000" step="10" value="100" style="width:50px; font-size:12px; margin-left:2px;" title="Spectrum poll interval in milliseconds (30-200 ms)">
+   <input type="number" id="spectrumPollInput" min="30" max="2000" step="10" value="100" style="width:50px; font-size:12px; margin-left:2px;" title="Spectrum poll interval in milliseconds (30-2000 ms)">
       <input type="number" id="waterfallBiasInput" step="1" inputmode="numeric" title="Waterfall bias amount, decrease to lighten waterfall background. Default value 5" style="width:48px; font-size:12px; margin-left:6px;" onchange="setWaterfallBias(this.value)" />
       <input type="number" id="cw_lower_input" step="1" inputmode="numeric" title="QuickBW lower offset (Hz)" style="width:48px; font-size:12px; margin-left:6px;" />
       <input type="number" id="cw_upper_input" step="1" inputmode="numeric" title="QuickBW upper offset (Hz)" style="width:48px; font-size:12px; margin-left:2px;" />
@@ -87,6 +87,10 @@
          <button type="button" id="sendWindowParamButton" title="Send window type and shape to radiod" style="font-size:12px; padding:2px 6px; height:24px; margin-left:2px;" onclick="sendWindowParameter()">SendW</button>
          <input type="number" id="spectrumOverlapInput" step="0.01" min="0" max="0.99" placeholder="overlap" title="Spectrum FFT overlap (0 to <1). e.g. 0.5" style="width:56px; font-size:12px; margin-left:6px;">
          <button type="button" id="sendSpectrumOverlapButton" title="Send spectrum overlap to radiod" style="font-size:12px; padding:2px 6px; height:24px; margin-left:2px;" onclick="sendSpectrumOverlap()">SendOv</button>
+      </div>
+      <div style="margin-top:6px; display:flex; align-items:center; gap:6px;">
+         <input type="number" id="shiftInput" step="10" placeholder="0" title="Enter CW shift value in Hz (e.g. -1000 or 1000)" style="width:72px; font-size:12px;" />
+         <button type="button" id="sendShiftButton" title="Set CW frequency offset shift (used for CW carrier offset)" style="font-size:12px; padding:2px 6px; height:24px;">Set Shift</button>
       </div>
      </form>
 </div>
