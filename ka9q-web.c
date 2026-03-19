@@ -147,6 +147,8 @@ int64_t Timeout = BILLION;
 int ConnTimeoutSeconds = 60; /* seconds; 0 == wait forever */
 uint16_t rtp_seq=0;
 int verbose = 0;
+/* Gate extra SSRC/session debug prints to avoid console flooding */
+int debugSSRC = 0;
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 1;
 int debug_send_poll = 0;
@@ -920,6 +922,15 @@ onion_connection_status home(void *data, onion_request * req,
   // create session
   int i;
   struct session *sp=calloc(1,sizeof(*sp));
+  /*
+   * SSRC allocation convention:
+   *  - Each logical client session is assigned a pair of SSRCs by the backend.
+   *    The even SSRC (sp->ssrc) identifies the audio/status stream and
+   *    the odd SSRC (sp->ssrc + 1) identifies the spectrum stream. Clients
+   *    must receive spectrum RTP packets with SSRC == sp->ssrc + 1 so the
+   *    browser can correctly associate spectrum frames when multiple
+   *    sessions/clients are active.
+   */
   if(nsessions==0) {
     sp->ssrc=START_SESSION_ID;
   } else {
@@ -2042,18 +2053,30 @@ void *ctrl_thread(void *arg)
     ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
     if (rx_length <= 2)
       continue;
+    if (debugSSRC)
+      fprintf(stderr, "ctrl_thread: recv_status_packet len=%zd ssrc=%u\n", rx_length, ssrc);
 
     if (ssrc % 2 == 1) { /* spectrum */
       struct session *sp = find_session_from_ssrc(ssrc - 1);
       if (sp) {
+        if (debugSSRC)
+          fprintf(stderr, "ctrl_thread: spectrum packet ssrc=%u -> session ssrc=%u sp=%p\n", ssrc, sp->ssrc, (void *)sp);
         process_spectrum_packet(sp, buffer, (int)rx_length);
         pthread_mutex_unlock(&session_mutex);
+      } else {
+        if (debugSSRC)
+          fprintf(stderr, "ctrl_thread: spectrum packet ssrc=%u -> no session found for lookup ssrc=%u\n", ssrc, ssrc - 1);
       }
     } else { /* regular status */
       struct session *sp = find_session_from_ssrc(ssrc);
       if (sp) {
+        if (debugSSRC)
+          fprintf(stderr, "ctrl_thread: status packet ssrc=%u -> session ssrc=%u sp=%p\n", ssrc, sp->ssrc, (void *)sp);
         process_status_packet(sp, buffer, (int)rx_length, &last_sent_backend_frequency);
         pthread_mutex_unlock(&session_mutex);
+      } else {
+        if (debugSSRC)
+          fprintf(stderr, "ctrl_thread: status packet ssrc=%u -> no session found\n", ssrc);
       }
     }
   }
@@ -2092,8 +2115,8 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
   pthread_mutex_lock(&sp->ws_mutex);
   onion_websocket_set_opcode(sp->ws, OWS_BINARY);
   int r = onion_websocket_write(sp->ws, (char *)buf, size);
-  if (r <= 0)
-    fprintf(stderr, "send_ws_binary_to_session: write failed: %d(size=%d)\n", r, size);
+  if (r <= 0 && debugSSRC)
+    fprintf(stderr, "send_ws_binary_to_session: write failed: %d (size=%d) ssrc=%u\n", r, size, sp->ssrc);
   pthread_mutex_unlock(&sp->ws_mutex);
 }
 
@@ -2170,6 +2193,9 @@ static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want)
         `sp->bins_max_db`, but this function does not perform any automatic
         rescaling/autoranging of the outgoing payload.
 */
+/* Outgoing spectrum RTP packets must carry the spectrum SSRC (sp->ssrc + 1).
+  Using sp->ssrc+1 for spectrum ensures the browser can disambiguate spectrum
+  frames from the audio/status stream when multiple clients are connected. */
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length)
 {
   struct rtp_header rtp;
@@ -2184,7 +2210,8 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
   memset(&rtp, 0, sizeof(rtp));
   rtp.type = 0x7F; /* spectrum data */
   rtp.version = RTP_VERS;
-  rtp.ssrc = sp->ssrc;
+  /* Use the spectrum SSRC (sp->ssrc + 1) for outgoing spectrum RTP packets */
+  rtp.ssrc = sp->ssrc + 1;
   rtp.marker = true;
   rtp.seq = rtp_seq++;
 
