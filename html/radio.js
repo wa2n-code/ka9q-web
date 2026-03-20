@@ -2057,6 +2057,18 @@ function applyQuickBW() {
     document.addEventListener('keydown', function(e) {
       // Prefer e.code when available; fall back to e.key for older browsers
       if (e.code === 'Space' || e.key === ' ') {
+        // If a text input, textarea, or contenteditable element has focus,
+        // let it handle the space character (do not toggle audio).
+        try {
+          const active = document.activeElement;
+          if (active) {
+            const tag = (active.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || active.isContentEditable) {
+              return;
+            }
+          }
+        } catch (ex) { /* ignore focus checks on older browsers */ }
+
         // If the spectrum is fullscreen, prevent page scrolling but do not toggle audio here.
         // Let Spectrum.prototype.onKeypress handle keys while fullscreen.
         if (typeof spectrum !== 'undefined' && spectrum && spectrum.fullscreen) {
