@@ -1864,15 +1864,16 @@ function applyQuickBW() {
         // mouse event path
         const evt = a;
         const base = (typeof b === 'number') ? b : 1;
-        // only handle left mouse button
-        if ('button' in evt && evt.button !== 0) {
-          multiplier = base;
-        } else if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
-          // If Alt-button active: for single-step +/-, use 10 Hz; for < or > (base==10) use 100 Hz
+        // Determine base multiplier from Alt state and which control (base may be 1 or 10)
+        if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
           const targetHz = (base === 10) ? 100 : 10;
           multiplier = targetHz / increment;
         } else {
           multiplier = base;
+        }
+        // If right mouse button, scale the shift by 10x relative to left-click
+        if ('button' in evt && evt.button === 2) {
+          multiplier = multiplier * 10;
         }
       } else {
         multiplier = (typeof a === 'number') ? a : 1;
@@ -1892,13 +1893,15 @@ function applyQuickBW() {
       if (a && typeof a === 'object' && ('ctrlKey' in a)) {
         const evt = a;
         const base = (typeof b === 'number') ? b : 1;
-        if ('button' in evt && evt.button !== 0) {
-          multiplier = base;
-        } else if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
+        if (typeof window.isAlternateFreqActive === 'function' && window.isAlternateFreqActive()) {
           const targetHz = (base === 10) ? 100 : 10;
           multiplier = targetHz / increment;
         } else {
           multiplier = base;
+        }
+        // Right-click should move 10× the left-click amount
+        if ('button' in evt && evt.button === 2) {
+          multiplier = multiplier * 10;
         }
       } else {
         multiplier = (typeof a === 'number') ? a : 1;
