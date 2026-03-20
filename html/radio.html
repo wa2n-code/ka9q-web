@@ -367,7 +367,8 @@
         <li>Left click and drag the spectrum to pan left and right</li>
         <li>Use mouse wheel to increment or decrement frequency by Step amount.</li>
         <li>Enter frequency in kHz and hit Return or press Set to change frequency</li>
-        <li>Press Alt button to change behavior of the '&lt; - Set + and &gt;' buttons. In Alt mode, these buttons adjust frequency by larger steps and Set rounds to the nearest 1 kHz</li>
+        <li>Press Alt button to change behavior of the '&lt; - Set + and &gt;' buttons. In Alt mode, these buttons adjust frequency by larger steps and Set rounds to the nearest 1 kHz with a left mouse click</li>
+        <li>With a right mouse click, the frequency change buttons above change the fequency by 10x the value of the left click </li>
         <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location</li>
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
@@ -375,7 +376,6 @@
         <li>Space bar toggles audio (when not in full screen mode)</li>
         <li>Check AZC to enable Auto Zoom Center to scroll spectrum background and keep tuned frequency centered</li>
         <li>Use the Edge button to send the filter low and high edge frequencies set in the text boxes next to the mode selector</li>
-        <li>Check Adopt background changes to allow KA9Q's control program to control the GUI. Uncheck for GUI-only control</li>
         <li>Press QuickBW button to change filter low and high filter edges to change filters to settings saved with Save QuickBW in Options dialog</li>
         <li>'f' to toggle fullscreen mode on and off</li>
     </ul>
@@ -397,7 +397,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.81: Adjustable FFT window and overlap, Auto Zoom Center (AZC), CW shift tone is changeable</li>
+            <li>v2.81: Adjustable FFT window and overlap, Auto Zoom Center (AZC), CW shift tone is changeable, right click on frequency buttons changes frequency by 10x the left click value</li>
             <li>v2.80: Throttled websocket commands. Adopt back end changes checkbox allows KA9Q's control pgm to control the gui. Faster response to GUI changes</li>
             <li>v2.79: Added CB band selector & channels, more band edges, more zoom levels, spectrum averaging input, waterfall bias setting, Alternate frequency set buttons, Spectrum Window Type - by Phil KA9Q & Wayne WA2N</li>
             <li>v2.78: Add red "pip" indicator for base frequency when in CWU or CWL mode, add QuickBW function</li>
