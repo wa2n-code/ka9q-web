@@ -376,9 +376,10 @@ static unsigned long now_ms(void) {
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
 
-/* Log the current git short commit hash (runtime). This uses `git` and requires
-   the repository metadata to be present where the binary runs. It's intended
-   for development checkouts; packaged installs may prefer build-time embedding. */
+/* If no build-time `GIT_COMMIT` is embedded, provide a runtime fallback that
+   reads the short commit from the local git metadata. This helper is omitted
+   when `GIT_COMMIT` is defined to avoid unused-function warnings. */
+#ifndef GIT_COMMIT
 static void log_git_commit_runtime(void) {
   char buf[128];
   FILE *f = popen("git rev-parse --short HEAD 2>/dev/null", "r");
@@ -394,6 +395,7 @@ static void log_git_commit_runtime(void) {
     syslog(LOG_INFO, "ka9q-web commit: unknown");
   }
 }
+#endif
 /* Adopt-on-parameter-mismatch control removed from clients; server adoption
   decisions are now driven by backend-reported post-detection shift values. */
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
@@ -995,9 +997,14 @@ int main(int argc,char **argv) {
   char const *dirname=xstr(RESOURCES_BASE_DIR) "/html";
   char const *mcast="hf.local";
   App_path=argv[0];
-  /* Open syslog and record the current git commit (if available in the checkout) */
+  /* Open syslog and record the current git commit. Prefer the build-time
+     embedded `GIT_COMMIT` if available; otherwise fall back to runtime git. */
   openlog(App_path, LOG_PID|LOG_CONS, LOG_USER);
+#ifdef GIT_COMMIT
+  syslog(LOG_INFO, "ka9q-web commit: %s (build)", GIT_COMMIT);
+#else
   log_git_commit_runtime();
+#endif
   {
     int c;
     while((c = getopt(argc,argv,"d:p:m:hn:vb:rT:")) != -1){
