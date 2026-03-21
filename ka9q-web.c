@@ -38,6 +38,7 @@
 #include <strings.h>
 #include <math.h>
 #include <sys/time.h>
+#include <syslog.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -373,6 +374,25 @@ static unsigned long now_ms(void) {
   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
     return (unsigned long)time(NULL) * 1000UL;
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
+}
+
+/* Log the current git short commit hash (runtime). This uses `git` and requires
+   the repository metadata to be present where the binary runs. It's intended
+   for development checkouts; packaged installs may prefer build-time embedding. */
+static void log_git_commit_runtime(void) {
+  char buf[128];
+  FILE *f = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+  if (f) {
+    if (fgets(buf, sizeof(buf), f)) {
+      buf[strcspn(buf, "\r\n")] = '\0';
+      syslog(LOG_INFO, "ka9q-web commit: %s", buf);
+    } else {
+      syslog(LOG_INFO, "ka9q-web commit: unknown");
+    }
+    pclose(f);
+  } else {
+    syslog(LOG_INFO, "ka9q-web commit: unknown");
+  }
 }
 /* Adopt-on-parameter-mismatch control removed from clients; server adoption
   decisions are now driven by backend-reported post-detection shift values. */
@@ -975,6 +995,9 @@ int main(int argc,char **argv) {
   char const *dirname=xstr(RESOURCES_BASE_DIR) "/html";
   char const *mcast="hf.local";
   App_path=argv[0];
+  /* Open syslog and record the current git commit (if available in the checkout) */
+  openlog(App_path, LOG_PID|LOG_CONS, LOG_USER);
+  log_git_commit_runtime();
   {
     int c;
     while((c = getopt(argc,argv,"d:p:m:hn:vb:rT:")) != -1){
