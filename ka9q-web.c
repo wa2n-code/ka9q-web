@@ -1125,6 +1125,8 @@ onion_connection_status status(void *data, onion_request * req,
           "<th>Audio</th>"
           "</tr>");
 
+      /* Protect iteration over the global sessions list */
+      pthread_mutex_lock(&session_mutex);
       struct session *sp = sessions;
       while(sp!=NULL) {
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
@@ -1146,6 +1148,7 @@ onion_connection_status status(void *data, onion_request * req,
         onion_response_write0(res, text);
         sp=sp->next;
       }
+      pthread_mutex_unlock(&session_mutex);
       onion_response_write0(res, "</table>");
     }
 
