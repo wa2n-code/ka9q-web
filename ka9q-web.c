@@ -37,6 +37,7 @@
 #include <time.h>
 #include <strings.h>
 #include <math.h>
+#include <sys/time.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -53,10 +54,12 @@ onion_handler *onion_handler_export_local_new(const char *localpath);
 // Global variable to mirror Channel.tune.freq for external use
 double current_backend_frequency = 0.0;
 
-int Ctl_fd,Input_fd,Status_fd;
+int Ctl_fd = -1, Input_fd = -1, Status_fd = -1;
 pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
 pthread_t audio_task;
+pthread_t monitor_task;
+static int monitor_started = 0;
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
@@ -93,6 +96,10 @@ struct session {
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+    unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
+    bool spectrum_requested_by_client; /* true if client requested spectrum */
+    int spectrum_restart_attempts;    /* number of restart attempts made */
+    unsigned long last_spectrum_restart_ms; /* monotonic ms of last restart attempt */
     /* If the client recently commanded a mode change leaving CWU/CWL, this
       flag records that event so we can adopt the backend frequency when the
       backend clears the CW shift. `left_cw_time_ms` is the monotonic time in
@@ -154,6 +161,197 @@ int debug_send = 1;
 int debug_send_poll = 0;
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
 static unsigned long poll_start_ms = 0;
+/* Monotonic ms timestamp of last successful status packet recv */
+static unsigned long last_status_recv_ms = 0;
+/* Monotonic ms timestamp of last successful audio packet recv */
+static unsigned long last_audio_recv_ms = 0;
+
+/* Monitor parameters */
+#define STALL_MS 2000 /* consider stalled if no packets for 2s */
+#define MONITOR_SLEEP_MS 1000
+/* Grace period after start during which monitor will not attempt recovery */
+#define MONITOR_STARTUP_GRACE_MS 15000
+/* Restart policy */
+#define RESTART_MAX_ATTEMPTS 3
+#define RESTART_INITIAL_DELAY_MS 5000
+
+/* Forward declaration: monotonic time in milliseconds helper */
+static unsigned long now_ms(void);
+
+/* Forward declarations for session globals referenced by monitor_thread */
+static int nsessions; /* defined later with initializer */
+static struct session *sessions; /* defined later with initializer */
+extern pthread_mutex_t session_mutex;
+
+/*
+  monitor_thread
+  ----------------
+  Background watchdog that periodically checks for stalled multicast
+  inputs and attempts server-side recovery. Actions performed:
+    - Monitors `Status_fd` and reopens the multicast status socket if no
+      status packets have been received for `STALL_MS` (reapplies socket
+      options after reopen).
+    - Monitors `Input_fd` (audio) and forces a close so `audio_thread`
+      will reopen the socket and resume audio when audio packets stall.
+    - Iterates all `struct session` entries and checks `last_spectrum_recv_ms`.
+      For sessions that requested spectrum, it attempts automatic restart
+      with exponential backoff (configured by `RESTART_INITIAL_DELAY_MS` and
+      `RESTART_MAX_ATTEMPTS`). If restart attempts are exhausted the
+      monitor falls back to stopping the spectrum stream and cleaning up the
+      session's spectrum thread. For sessions that did not request spectrum,
+      the monitor simply stops the spectrum stream to clean up resources.
+
+  Notes:
+    - Recovery is performed server-side only; the monitor does not emit
+      additional websocket messages to clients (no extra client traffic).
+    - A startup grace period (`MONITOR_STARTUP_GRACE_MS`) prevents false
+      positives during initialization.
+    - Uses monotonic time via `now_ms()` to measure staleness.
+*/
+static void *monitor_thread(void *arg) {
+  (void)arg;
+  unsigned long started_ms = now_ms();
+  for (;;) {
+    usleep(MONITOR_SLEEP_MS * 1000);
+    unsigned long now = now_ms();
+
+    /* During initial startup grace period, do not attempt recovery. */
+    if ((now - started_ms) < MONITOR_STARTUP_GRACE_MS)
+      continue;
+
+    /* If socket not open or we've never received a packet, treat as not stalled
+       to avoid false positives during startup. */
+    unsigned long status_ago = 0;
+    if (Status_fd != -1 && last_status_recv_ms != 0)
+      status_ago = now - last_status_recv_ms;
+
+    unsigned long audio_ago = 0;
+    if (Input_fd != -1 && last_audio_recv_ms != 0)
+      audio_ago = now - last_audio_recv_ms;
+
+    /* Status socket stalled -> try to reopen */
+    if (status_ago > STALL_MS) {
+      fprintf(stderr, "monitor: status stalled %lu ms, attempting reopen\n", status_ago);
+      if (Status_fd != -1) {
+        close(Status_fd);
+        Status_fd = -1;
+      }
+      int newfd = listen_mcast(NULL, &Metadata_dest_socket, NULL);
+      if (newfd != -1) {
+        Status_fd = newfd;
+        /* Reapply an increased receive buffer on reopen to help absorb
+           short bursts of UDP/multicast packets and reduce packet loss.
+           This is a kernel hint (may be adjusted by the OS). Also set
+           a 1s recv timeout so monitor/control code can make progress. */
+        int rcv = 256 * 1024; /* 256 KiB */
+        if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv)) < 0) {
+          perror("setsockopt SO_RCVBUF Status_fd (monitor)");
+        }
+        struct timeval tv;
+        tv.tv_sec = 1; tv.tv_usec = 0;
+        if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+          perror("setsockopt SO_RCVTIMEO Status_fd (monitor)");
+        }
+        fprintf(stderr, "monitor: status socket reopened\n");
+      } else {
+        fprintf(stderr, "monitor: failed to reopen status socket\n");
+      }
+    }
+
+    /* Audio stalled -> close Input_fd so audio_thread re-opens it */
+    if (audio_ago > STALL_MS) {
+      fprintf(stderr, "monitor: audio stalled %lu ms, forcing reopen\n", audio_ago);
+      pthread_mutex_lock(&output_dest_socket_mutex);
+      if (Input_fd != -1) {
+        close(Input_fd);
+        Input_fd = -1;
+      }
+      pthread_mutex_unlock(&output_dest_socket_mutex);
+      /* audio_thread will detect Input_fd == -1 and re-open it */
+    }
+
+    /* Per-session spectrum stall checking: collect stalled sessions, then recover */
+    if (nsessions > 0) {
+      struct session **stalled = calloc(nsessions, sizeof(*stalled));
+      int stalled_n = 0;
+      pthread_mutex_lock(&session_mutex);
+      struct session *sp = sessions;
+      while (sp != NULL) {
+        if (sp->spectrum_active && sp->last_spectrum_recv_ms != 0) {
+          unsigned long spec_ago = now - sp->last_spectrum_recv_ms;
+          if (spec_ago > STALL_MS) {
+            stalled[stalled_n++] = sp;
+          }
+        }
+        sp = sp->next;
+      }
+      pthread_mutex_unlock(&session_mutex);
+
+      for (int i = 0; i < stalled_n; ++i) {
+        struct session *ssp = stalled[i];
+        unsigned long spec_ago = now - ssp->last_spectrum_recv_ms;
+        /* If client requested spectrum, attempt automatic restart with backoff; otherwise stop */
+        if (ssp->spectrum_requested_by_client) {
+          int attempts = ssp->spectrum_restart_attempts;
+          unsigned long since_last = now - ssp->last_spectrum_restart_ms;
+          unsigned long delay = RESTART_INITIAL_DELAY_MS * (1UL << (attempts > 0 ? attempts - 0 : 0));
+          if (attempts >= RESTART_MAX_ATTEMPTS) {
+            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, max restarts reached -> stopping\n", ssp->ssrc, spec_ago);
+            pthread_mutex_lock(&ssp->spectrum_mutex);
+            if (ssp->spectrum_active) {
+              stop_spectrum_stream(ssp);
+              ssp->spectrum_active = false;
+              pthread_mutex_unlock(&ssp->spectrum_mutex);
+              pthread_join(ssp->spectrum_task, NULL);
+            } else {
+              pthread_mutex_unlock(&ssp->spectrum_mutex);
+            }
+          } else if (attempts == 0 || since_last >= delay) {
+            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, attempting restart #%d\n", ssp->ssrc, spec_ago, attempts + 1);
+            /* Clean up any existing spectrum thread */
+            pthread_mutex_lock(&ssp->spectrum_mutex);
+            if (ssp->spectrum_active) {
+              stop_spectrum_stream(ssp);
+              ssp->spectrum_active = false;
+              pthread_mutex_unlock(&ssp->spectrum_mutex);
+              pthread_join(ssp->spectrum_task, NULL);
+            } else {
+              pthread_mutex_unlock(&ssp->spectrum_mutex);
+            }
+            /* Request backend to start spectrum demod again */
+            control_get_powers(ssp, (float)ssp->center_frequency, ssp->bins, (float)ssp->bin_width);
+            /* Start the spectrum thread */
+            if(pthread_create(&ssp->spectrum_task, NULL, spectrum_thread, ssp) == -1) {
+              perror("pthread_create: spectrum_thread (restart)");
+            } else {
+              char buff[16];
+              snprintf(buff, 16, "spec_%u", ssp->ssrc+1);
+              pthread_setname_np(ssp->spectrum_task, buff);
+              ssp->spectrum_active = true;
+            }
+            ssp->spectrum_restart_attempts++;
+            ssp->last_spectrum_restart_ms = now;
+          } else {
+            /* Not time yet for next restart attempt */
+          }
+        } else {
+          fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, sending stop\n", ssp->ssrc, spec_ago);
+          pthread_mutex_lock(&ssp->spectrum_mutex);
+          if (ssp->spectrum_active) {
+            stop_spectrum_stream(ssp);
+            ssp->spectrum_active = false;
+            pthread_mutex_unlock(&ssp->spectrum_mutex);
+            pthread_join(ssp->spectrum_task, NULL);
+          } else {
+            pthread_mutex_unlock(&ssp->spectrum_mutex);
+          }
+        }
+      }
+      free(stalled);
+    }
+  }
+  return NULL;
+}
 
 /* Helper: monotonic time in milliseconds */
 static unsigned long now_ms(void) {
@@ -162,6 +360,9 @@ static unsigned long now_ms(void) {
     return (unsigned long)time(NULL) * 1000UL;
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
+/* Adopt-on-parameter-mismatch control removed from clients; server adoption
+  decisions are now driven by backend-reported post-detection shift values. */
+/* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
 /* Adopt-on-parameter-mismatch control removed from clients; server adoption
   decisions are now driven by backend-reported post-detection shift values. */
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
@@ -236,6 +437,9 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           }
           pthread_mutex_unlock(&sp->ws_mutex);
           free(temp);
+          sp->spectrum_requested_by_client = true;
+          sp->spectrum_restart_attempts = 0;
+          sp->last_spectrum_restart_ms = 0;
           if(pthread_create(&sp->spectrum_task,NULL,spectrum_thread,sp) == -1){
             perror("pthread_create: spectrum_thread");
           } else {
@@ -544,6 +748,10 @@ void websocket_closed(struct session *sp) {
     pthread_mutex_unlock(&sp->spectrum_mutex);
     pthread_join(sp->spectrum_task,NULL);
   }
+  /* Client disconnected: mark that client no longer requests spectrum */
+  sp->spectrum_requested_by_client = false;
+  sp->spectrum_restart_attempts = 0;
+  sp->last_spectrum_restart_ms = 0;
   pthread_mutex_unlock(&sp->ws_mutex);
 }
 
@@ -834,33 +1042,51 @@ onion_connection_status status(void *data, onion_request * req,
       "<!DOCTYPE html>"
       "<html>"
         "<head>"
-        "  <title>G0ORX Web SDR - Status</title>"
+        "  <title>KA9Q Web SDR - Status</title>"
         "  <meta charset=\"UTF-8\" />"
         "  <meta http-equiv=\"refresh\" content=\"30\" />"
         "</head>"
         "<body>"
-        "  <h1>G0ORX Web SDR - Status</h1>");
+        "  <h1>KA9Q Web SDR - Status</h1>");
     sprintf(text,"<b>Sessions: %d</b>",nsessions);
     onion_response_write0(res, text);
 
+    /* Show last status packet receive time */
+    if (last_status_recv_ms == 0) {
+      onion_response_write0(res, "<p><b>Last status recv:</b> never</p>");
+    } else {
+      unsigned long ago = now_ms() - last_status_recv_ms;
+      char tbuf[128];
+      snprintf(tbuf, sizeof(tbuf), "<p><b>Last status recv:</b> %lu ms ago</p>", ago);
+      onion_response_write0(res, tbuf);
+    }
+
     if(nsessions!=0) {
       onion_response_write0(res, "<table border=1>"
-         "<tr>"
-         "<th>client</th>"
-         "<th>ssrc</th>"
-         "<th>frequency range(Hz)</th>"
-         "<th>frequency(Hz)</th>"
-         "<th>center frequency(Hz)</th>"
-         "<th>bins</th>"
-         "<th>bin width(Hz)</th>"
-         "<th>Audio</th>"
-         "</tr>");
+        "<tr>"
+          "<th>client</th>"
+          "<th>ssrc</th>"
+          "<th>frequency range(Hz)</th>"
+          "<th>frequency(Hz)</th>"
+          "<th>center frequency(Hz)</th>"
+          "<th>bins</th>"
+          "<th>bin width(Hz)</th>"
+          "<th>Last spectrum recv</th>"
+          "<th>Audio</th>"
+          "</tr>");
 
       struct session *sp = sessions;
       while(sp!=NULL) {
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
         int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
-        sprintf(text,"<tr><td>%s</td><td>%d</td><td>%d to %d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>",sp->client,sp->ssrc,min_f,max_f,sp->frequency,sp->center_frequency,sp->bins,sp->bin_width,sp->audio_active?"Enabled":"Disabled");
+        char specbuf[64];
+        if (sp->last_spectrum_recv_ms == 0) {
+          snprintf(specbuf, sizeof(specbuf), "never");
+        } else {
+          snprintf(specbuf, sizeof(specbuf), "%lu ms ago", now_ms() - sp->last_spectrum_recv_ms);
+        }
+        sprintf(text,"<tr><td>%s</td><td>%d</td><td>%d to %d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td></tr>",
+                sp->client,sp->ssrc,min_f,max_f,sp->frequency,sp->center_frequency,sp->bins,sp->bin_width,specbuf,sp->audio_active?"Enabled":"Disabled");
         onion_response_write0(res, text);
         sp=sp->next;
       }
@@ -980,6 +1206,18 @@ onion_connection_status home(void *data, onion_request * req,
   //fprintf(stderr,"%s: onion_websocket_set_callback: websocket_cb\n",__FUNCTION__);
   onion_websocket_set_callback(ws, websocket_cb);
 
+  /* Start monitor thread on first client connect to avoid console noise */
+  if (!monitor_started) {
+    if (pthread_create(&monitor_task, NULL, monitor_thread, NULL) == -1) {
+      perror("pthread_create: monitor_thread");
+    } else {
+      char mbuf[16];
+      snprintf(mbuf, sizeof(mbuf), "monitor");
+      pthread_setname_np(monitor_task, mbuf);
+      monitor_started = 1;
+    }
+  }
+
   return OCS_WEBSOCKET;
 }
 
@@ -1012,16 +1250,39 @@ static void *audio_thread(void *arg) {
 
   //fprintf(stderr,"%s\n",__FUNCTION__);
 
-  {
+  /* Wait for dest socket to be ready, then try to open/maintain Input_fd
+     The monitor thread may close Input_fd to force a reopen; loop so we
+     recover automatically. */
+  for (;;) {
     pthread_mutex_lock(&output_dest_socket_mutex);
-    while(Channel.output.dest_socket.sa_family == 0)
-        pthread_cond_wait(&output_dest_socket_cond, &output_dest_socket_mutex);
-    Input_fd = listen_mcast(NULL,&Channel.output.dest_socket,NULL);
+    while (Channel.output.dest_socket.sa_family == 0)
+      pthread_cond_wait(&output_dest_socket_cond, &output_dest_socket_mutex);
+    /* Attempt to open if not already open */
+    if (Input_fd == -1) {
+      Input_fd = listen_mcast(NULL, &Channel.output.dest_socket, NULL);
+      if (Input_fd != -1) {
+        /* Increase receive buffer to 256 KiB to reduce packet drops during
+           brief bursts of multicast traffic; also set a 1s recv timeout so
+           the thread can periodically check shutdown conditions. */
+        int rcv = 256 * 1024; /* 256 KiB */
+        if (setsockopt(Input_fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv)) < 0) {
+          perror("setsockopt SO_RCVBUF Input_fd");
+        }
+        struct timeval tv;
+        tv.tv_sec = 1; tv.tv_usec = 0;
+        if (setsockopt(Input_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+          perror("setsockopt SO_RCVTIMEO Input_fd");
+        }
+      }
+    }
     pthread_mutex_unlock(&output_dest_socket_mutex);
-  }
 
-  if(Input_fd==-1) {
-    pthread_exit(NULL);
+    if (Input_fd == -1) {
+      /* Couldn't open yet; wait then retry */
+      usleep(500000);
+      continue;
+    }
+    break;
   }
 
   while(1) {
@@ -1050,6 +1311,9 @@ static void *audio_thread(void *arg) {
     }
     if(pkt->len <= 0)
       continue; // Used to be an assert, but would be triggered by bogus packets
+
+    /* record last successful audio packet recv for watchdog */
+    last_audio_recv_ms = now_ms();
 
 
     sp=find_session_from_ssrc(pkt->rtp.ssrc);
@@ -1116,6 +1380,24 @@ int init_connections(const char *multicast_group) {
     sleep(2);
   }
 
+  /* Increase receive buffer and set a recv timeout to avoid blocking indefinitely */
+      {
+    /* Increase kernel socket receive buffer to 256 KiB to reduce UDP
+       packet loss for short bursts. This is a kernel hint and may be
+       adjusted by the OS; it helps when the process cannot keep up with
+       incoming packets briefly. Also set a 1s recv timeout to avoid
+       blocking indefinitely. */
+    int rcv = 256 * 1024; /* 256 KiB receive buffer */
+    if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv)) < 0) {
+      perror("setsockopt SO_RCVBUF Status_fd");
+    }
+    struct timeval tv;
+    tv.tv_sec = 1; tv.tv_usec = 0; /* 1 second timeout */
+    if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+      perror("setsockopt SO_RCVTIMEO Status_fd");
+    }
+  }
+
   /* Retry connecting control socket until successful or timeout. */
   for (;;) {
     Ctl_fd = connect_mcast(&Metadata_dest_socket, iface, Mcast_ttl, IP_tos);
@@ -1145,6 +1427,7 @@ int init_connections(const char *multicast_group) {
     snprintf(buff,16,"audio");
     pthread_setname_np(audio_task,buff);
   }
+  /* monitor thread will be started on first client connect to avoid startup noise */
   return(EX_OK);
 }
 
@@ -1730,6 +2013,9 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
         break;
       if (handle_bin_byte_data(power, npower, cp, optlen) < 0)
         return -2;
+      /* record per-session spectrum receive time */
+      if (sp)
+        sp->last_spectrum_recv_ms = now_ms();
       break;
     case BIN_DATA:
       l_count = optlen/sizeof(float);
@@ -1739,6 +2025,9 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
         break;
       if (handle_bin_data(power, npower, cp, optlen, sp) < 0)
         return -2;
+      /* record per-session spectrum receive time */
+      if (sp)
+        sp->last_spectrum_recv_ms = now_ms();
       break;
     case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -2091,6 +2380,8 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
                                (struct sockaddr *)&Metadata_source_socket, &ssize);
   if (rx_length <= 0)
     return rx_length;
+  /* Record last successful status receive time (monotonic ms) */
+  last_status_recv_ms = now_ms();
   if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
     *out_ssrc = get_ssrc(buffer + 1, rx_length - 1);
   } else {
