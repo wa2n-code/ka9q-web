@@ -278,7 +278,13 @@ static void *monitor_thread(void *arg) {
       struct session *sp = sessions;
       while (sp != NULL) {
         if (sp->spectrum_active && sp->last_spectrum_recv_ms != 0) {
-          unsigned long spec_ago = now - sp->last_spectrum_recv_ms;
+          unsigned long spec_ago;
+          if (sp->last_spectrum_recv_ms > now) {
+            /* Bad/future timestamp — treat as zero age to avoid underflow */
+            spec_ago = 0;
+          } else {
+            spec_ago = now - sp->last_spectrum_recv_ms;
+          }
           if (spec_ago > STALL_MS) {
             stalled[stalled_n++] = sp;
           }
@@ -289,7 +295,15 @@ static void *monitor_thread(void *arg) {
 
       for (int i = 0; i < stalled_n; ++i) {
         struct session *ssp = stalled[i];
-        unsigned long spec_ago = now - ssp->last_spectrum_recv_ms;
+        unsigned long spec_ago;
+        if (ssp->last_spectrum_recv_ms == 0 || ssp->last_spectrum_recv_ms > now) {
+          spec_ago = 0;
+        } else {
+          spec_ago = now - ssp->last_spectrum_recv_ms;
+        }
+        /* Clamp displayed age to a reasonable maximum (24h) to avoid absurd numbers */
+        const unsigned long MAX_DISPLAY_AGE_MS = 24UL * 60UL * 60UL * 1000UL;
+        if (spec_ago > MAX_DISPLAY_AGE_MS) spec_ago = MAX_DISPLAY_AGE_MS;
         /* If client requested spectrum, attempt automatic restart with backoff; otherwise stop */
         if (ssp->spectrum_requested_by_client) {
           int attempts = ssp->spectrum_restart_attempts;
@@ -668,6 +682,12 @@ char const *description_override=0;
 bool run_with_realtime = false;
 
 void add_session(struct session *sp) {
+  /* Ensure per-session spectrum/restart fields are deterministic */
+  sp->last_spectrum_recv_ms = 0;
+  sp->spectrum_requested_by_client = false;
+  sp->spectrum_restart_attempts = 0;
+  sp->last_spectrum_restart_ms = 0;
+
   pthread_mutex_lock(&session_mutex);
   if(sessions==NULL) {
     sessions=sp;
@@ -1080,10 +1100,16 @@ onion_connection_status status(void *data, onion_request * req,
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
         int32_t max_f=sp->center_frequency+((sp->bin_width*sp->bins)/2);
         char specbuf[64];
-        if (sp->last_spectrum_recv_ms == 0) {
-          snprintf(specbuf, sizeof(specbuf), "never");
-        } else {
-          snprintf(specbuf, sizeof(specbuf), "%lu ms ago", now_ms() - sp->last_spectrum_recv_ms);
+        {
+          unsigned long now_s = now_ms();
+          if (sp->last_spectrum_recv_ms == 0 || sp->last_spectrum_recv_ms > now_s) {
+            snprintf(specbuf, sizeof(specbuf), "never");
+          } else {
+            unsigned long spec_age = now_s - sp->last_spectrum_recv_ms;
+            const unsigned long MAX_DISPLAY_AGE_MS = 24UL * 60UL * 60UL * 1000UL;
+            if (spec_age > MAX_DISPLAY_AGE_MS) spec_age = MAX_DISPLAY_AGE_MS;
+            snprintf(specbuf, sizeof(specbuf), "%lu ms ago", spec_age);
+          }
         }
         sprintf(text,"<tr><td>%s</td><td>%d</td><td>%d to %d</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td></tr>",
                 sp->client,sp->ssrc,min_f,max_f,sp->frequency,sp->center_frequency,sp->bins,sp->bin_width,specbuf,sp->audio_active?"Enabled":"Disabled");
