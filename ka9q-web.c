@@ -1344,21 +1344,43 @@ static void *audio_thread(void *arg) {
     break;
   }
 
-  while(1) {
+  while (1) {
+    int fd;
+    /* Snapshot Input_fd under the mutex to avoid races with monitor close */
+    pthread_mutex_lock(&output_dest_socket_mutex);
+    fd = Input_fd;
+    pthread_mutex_unlock(&output_dest_socket_mutex);
+
+    if (fd == -1) {
+      /* No input socket right now; back off and retry */
+      usleep(1000);
+      continue;
+    }
+
     struct sockaddr_storage sender;
     socklen_t socksize = sizeof(sender);
-    int size = recvfrom(Input_fd,&pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&sender,&socksize);
+    ssize_t size = recvfrom(fd, &pkt->content, sizeof(pkt->content), 0,
+                            (struct sockaddr *)&sender, &socksize);
 
-    if(size == -1){
-      if(errno != EINTR){ // Happens routinely, e.g., when window resized
-        perror("recvfrom");
-        fprintf(stderr,"address=%s\n",formatsock(&Channel.output.dest_socket,false));
+    if (size == -1) {
+      if (errno == EINTR)
+        continue; /* interrupted, try again */
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        continue; /* no data available yet, not an error to log */
+      if (errno == EBADF) {
+        /* Socket was closed by monitor thread after we snapped it; back off */
         usleep(1000);
+        continue;
       }
-      continue;  // Reuse current buffer
+      /* Unexpected error; log it once and back off briefly */
+      perror("recvfrom");
+      fprintf(stderr, "address=%s\n", formatsock(&Channel.output.dest_socket, false));
+      usleep(1000);
+      continue; /* reuse current buffer */
     }
-    if(size <= RTP_MIN_SIZE)
-      continue; // Must be big enough for RTP header and at least some data
+
+    if (size <= RTP_MIN_SIZE)
+      continue; /* Must be big enough for RTP header and at least some data */
 
     // Convert RTP header to host format
     uint8_t const *dp = ntoh_rtp(&pkt->rtp,pkt->content);
