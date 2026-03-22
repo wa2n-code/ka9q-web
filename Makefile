@@ -15,7 +15,8 @@ RESOURCES_BASE_DIR=$(PREFIX)/share/ka9q-web
 
 CFLAGS=$(DOPTS) $(COPTS)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || printf "unknown")
-CPPFLAGS=$(INCLUDES) -DRESOURCES_BASE_DIR=$(RESOURCES_BASE_DIR) -DGIT_COMMIT=\"$(GIT_COMMIT)\"
+GIT_COMMIT_INDEX := $(shell git rev-list --count HEAD 2>/dev/null || printf "unknown")
+CPPFLAGS=$(INCLUDES) -DRESOURCES_BASE_DIR=$(RESOURCES_BASE_DIR) -DGIT_COMMIT=\"$(GIT_COMMIT)\" -DGIT_COMMIT_INDEX=\"$(GIT_COMMIT_INDEX)\"
 
 KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_RADIO_DIR)/misc.o $(KA9Q_RADIO_DIR)/decode_status.o $(KA9Q_RADIO_DIR)/rtp.o
 
