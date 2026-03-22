@@ -192,8 +192,8 @@
               const sentAt = Date.now();
               _controlState.lastSend.set(type, sentAt);
               lastGlobalSend = sentAt;
-              // register pending ack for this seq
-              try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: sentAt, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
+              // register pending ack for this seq (skip for interactive freq sends)
+              try { if (type !== 'freq') { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: sentAt, retries: 0 }); scheduleAckCheck(seq); } } catch (e) {}
             } catch (e) {
               console.warn('sendControl flush failed for', type, e);
               // requeue at front and retry later
@@ -271,8 +271,8 @@
                   try { _controlState.lastMsg.set(type, rawMsg); } catch (e) {}
                   _controlState.lastSend.set(type, now);
                   lastGlobalSend = now;
-                  // register pending ack and schedule check
-                  try { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: now, retries: 0 }); scheduleAckCheck(seq); } catch (e) {}
+                  // register pending ack and schedule check (skip for interactive freq sends)
+                  try { if (type !== 'freq') { _pendingAcks.set(seq, { type: type, rawMsg: rawMsg, sentAt: now, retries: 0 }); scheduleAckCheck(seq); } } catch (e) {}
                   // If there are queued items for this type, handle scheduling.
                   try {
                     const q = _controlState.pending.get(type);

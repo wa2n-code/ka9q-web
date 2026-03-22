@@ -1734,7 +1734,9 @@ Spectrum.prototype.setSpanHz = function(hz) {
                 // this.setCenterHz(this.frequency);
                 if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
                     const zoomCenterMsg = "Z:c:" + (this.frequency / 1000.0).toFixed(3);
-                    if (typeof sendControl === 'function') sendControl('zoom_center', zoomCenterMsg, centerSendInterval);
+                    // Use a safe default if `centerSendInterval` isn't defined
+                    const csInterval = (typeof centerSendInterval === 'number') ? centerSendInterval : 50;
+                    if (typeof sendControl === 'function') sendControl('zoom_center', zoomCenterMsg, csInterval);
                     else ws.send(zoomCenterMsg);
                     //console.log("Zoomed center on frequency: " + this.frequency);
                 }

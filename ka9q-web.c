@@ -38,6 +38,7 @@
 #include <strings.h>
 #include <math.h>
 #include <sys/time.h>
+#include <syslog.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -58,8 +59,11 @@ int Ctl_fd = -1, Input_fd = -1, Status_fd = -1;
 pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
 pthread_t audio_task;
+/* Monitor task and started flag (optional) */
+#ifdef ENABLE_MONITOR
 pthread_t monitor_task;
 static int monitor_started = 0;
+#endif
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
@@ -166,7 +170,8 @@ static unsigned long last_status_recv_ms = 0;
 /* Monotonic ms timestamp of last successful audio packet recv */
 static unsigned long last_audio_recv_ms = 0;
 
-/* Monitor parameters */
+/* Monitor parameters (optional) */
+#ifdef ENABLE_MONITOR
 #define STALL_MS 2000 /* consider stalled if no packets for 2s */
 #define MONITOR_SLEEP_MS 1000
 /* Grace period after start during which monitor will not attempt recovery */
@@ -174,6 +179,7 @@ static unsigned long last_audio_recv_ms = 0;
 /* Restart policy */
 #define RESTART_MAX_ATTEMPTS 3
 #define RESTART_INITIAL_DELAY_MS 5000
+#endif
 
 /* Forward declaration: monotonic time in milliseconds helper */
 static unsigned long now_ms(void);
@@ -183,6 +189,8 @@ static int nsessions; /* defined later with initializer */
 static struct session *sessions; /* defined later with initializer */
 extern pthread_mutex_t session_mutex;
 
+/* monitor_thread: optional background watchdog for stalled inputs */
+#ifdef ENABLE_MONITOR
 /*
   monitor_thread
   ----------------
@@ -229,8 +237,14 @@ static void *monitor_thread(void *arg) {
     if (Input_fd != -1 && last_audio_recv_ms != 0)
       audio_ago = now - last_audio_recv_ms;
 
-    /* Status socket stalled -> try to reopen */
-    if (status_ago > STALL_MS) {
+    /* Only attempt recovery if there are active client sessions */
+    int active_sessions = 0;
+    pthread_mutex_lock(&session_mutex);
+    active_sessions = nsessions;
+    pthread_mutex_unlock(&session_mutex);
+
+    /* Status socket stalled -> try to reopen (only when clients exist) */
+    if (active_sessions > 0 && status_ago > STALL_MS) {
       fprintf(stderr, "monitor: status stalled %lu ms, attempting reopen\n", status_ago);
       if (Status_fd != -1) {
         close(Status_fd);
@@ -252,14 +266,18 @@ static void *monitor_thread(void *arg) {
         if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
           perror("setsockopt SO_RCVTIMEO Status_fd (monitor)");
         }
+        /* Prevent immediate re-detection by seeding last_status_recv_ms
+           with the reopen time. This avoids tight reopen loops when the
+           multicast source is temporarily silent. */
+        last_status_recv_ms = now_ms();
         fprintf(stderr, "monitor: status socket reopened\n");
       } else {
         fprintf(stderr, "monitor: failed to reopen status socket\n");
       }
     }
 
-    /* Audio stalled -> close Input_fd so audio_thread re-opens it */
-    if (audio_ago > STALL_MS) {
+    /* Audio stalled -> close Input_fd so audio_thread re-opens it (only when clients exist) */
+    if (active_sessions > 0 && audio_ago > STALL_MS) {
       fprintf(stderr, "monitor: audio stalled %lu ms, forcing reopen\n", audio_ago);
       pthread_mutex_lock(&output_dest_socket_mutex);
       if (Input_fd != -1) {
@@ -366,6 +384,7 @@ static void *monitor_thread(void *arg) {
   }
   return NULL;
 }
+#endif /* ENABLE_MONITOR */
 
 /* Helper: monotonic time in milliseconds */
 static unsigned long now_ms(void) {
@@ -374,6 +393,45 @@ static unsigned long now_ms(void) {
     return (unsigned long)time(NULL) * 1000UL;
   return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
+
+/* If no build-time `GIT_COMMIT` is embedded, provide a runtime fallback that
+   reads the short commit from the local git metadata. This helper is omitted
+   when `GIT_COMMIT` is defined to avoid unused-function warnings. */
+#ifndef GIT_COMMIT
+static void log_git_commit_runtime(void) {
+  char buf[128];
+  FILE *f = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+  if (f) {
+    if (fgets(buf, sizeof(buf), f)) {
+      buf[strcspn(buf, "\r\n")] = '\0';
+      syslog(LOG_INFO, "ka9q-web commit: %s", buf);
+    } else {
+      syslog(LOG_INFO, "ka9q-web commit: unknown");
+    }
+    pclose(f);
+  } else {
+    syslog(LOG_INFO, "ka9q-web commit: unknown");
+  }
+}
+#endif
+
+#ifndef GIT_COMMIT_INDEX
+static void log_git_commit_index_runtime(void) {
+  char ibuf[64];
+  FILE *f = popen("git rev-list --count HEAD 2>/dev/null", "r");
+  if (f) {
+    if (fgets(ibuf, sizeof(ibuf), f)) {
+      ibuf[strcspn(ibuf, "\r\n")] = '\0';
+      syslog(LOG_INFO, "ka9q-web commit-index: %s", ibuf);
+    } else {
+      syslog(LOG_INFO, "ka9q-web commit-index: unknown");
+    }
+    pclose(f);
+  } else {
+    syslog(LOG_INFO, "ka9q-web commit-index: unknown");
+  }
+}
+#endif
 /* Adopt-on-parameter-mismatch control removed from clients; server adoption
   decisions are now driven by backend-reported post-detection shift values. */
 /* Preset mismatch auto-acceptance removed: server will not auto-correct presets */
@@ -975,6 +1033,36 @@ int main(int argc,char **argv) {
   char const *dirname=xstr(RESOURCES_BASE_DIR) "/html";
   char const *mcast="hf.local";
   App_path=argv[0];
+  /* Open syslog and record the current git commit index. Prefer the build-time
+     embedded `GIT_COMMIT_INDEX` if available; otherwise fall back to runtime git. */
+  openlog(App_path, LOG_PID|LOG_CONS, LOG_USER);
+#ifdef GIT_COMMIT_INDEX
+  syslog(LOG_INFO, "ka9q-web commit-index: %s (build)", GIT_COMMIT_INDEX);
+#else
+  log_git_commit_index_runtime();
+#endif
+
+  /* Print commit index to stdout for visibility on startup. If not embedded,
+     query the local git metadata as a fallback. */
+#ifdef GIT_COMMIT_INDEX
+  printf("ka9q-web commit-index: %s\n", GIT_COMMIT_INDEX);
+#else
+  {
+    char ibuf[64];
+    FILE *fidx = popen("git rev-list --count HEAD 2>/dev/null", "r");
+    if (fidx) {
+      if (fgets(ibuf, sizeof(ibuf), fidx)) {
+        ibuf[strcspn(ibuf, "\r\n")] = '\0';
+        printf("ka9q-web commit-index: %s\n", ibuf);
+      } else {
+        printf("ka9q-web commit-index: unknown\n");
+      }
+      pclose(fidx);
+    } else {
+      printf("ka9q-web commit-index: unknown\n");
+    }
+  }
+#endif
   {
     int c;
     while((c = getopt(argc,argv,"d:p:m:hn:vb:rT:")) != -1){
@@ -1095,6 +1183,8 @@ onion_connection_status status(void *data, onion_request * req,
           "<th>Audio</th>"
           "</tr>");
 
+      /* Protect iteration over the global sessions list */
+      pthread_mutex_lock(&session_mutex);
       struct session *sp = sessions;
       while(sp!=NULL) {
         int32_t min_f=sp->center_frequency-((sp->bin_width*sp->bins)/2);
@@ -1116,6 +1206,7 @@ onion_connection_status status(void *data, onion_request * req,
         onion_response_write0(res, text);
         sp=sp->next;
       }
+      pthread_mutex_unlock(&session_mutex);
       onion_response_write0(res, "</table>");
     }
 
@@ -1128,7 +1219,22 @@ onion_connection_status status(void *data, onion_request * req,
 onion_connection_status version(void *data, onion_request * req,
                                           onion_response * res) {
     char text[1024];
-    sprintf(text, "{\"Version\":\"%s\"}", webserver_version);
+    char idx[64] = "unknown";
+#ifdef GIT_COMMIT_INDEX
+    strncpy(idx, GIT_COMMIT_INDEX, sizeof(idx)-1);
+    idx[sizeof(idx)-1] = '\0';
+#else
+    {
+      FILE *f = popen("git rev-list --count HEAD 2>/dev/null", "r");
+      if (f) {
+        if (fgets(idx, sizeof(idx), f)) {
+          idx[strcspn(idx, "\r\n")] = '\0';
+        }
+        pclose(f);
+      }
+    }
+#endif
+    snprintf(text, sizeof(text), "{\"Version\":\"%s (%s)\"}", webserver_version, idx);
     onion_response_write0(res, text);
     return OCS_PROCESSED;
 }
@@ -1233,6 +1339,7 @@ onion_connection_status home(void *data, onion_request * req,
   onion_websocket_set_callback(ws, websocket_cb);
 
   /* Start monitor thread on first client connect to avoid console noise */
+#ifdef ENABLE_MONITOR
   if (!monitor_started) {
     if (pthread_create(&monitor_task, NULL, monitor_thread, NULL) == -1) {
       perror("pthread_create: monitor_thread");
@@ -1243,6 +1350,7 @@ onion_connection_status home(void *data, onion_request * req,
       monitor_started = 1;
     }
   }
+#endif
 
   return OCS_WEBSOCKET;
 }
@@ -1311,21 +1419,43 @@ static void *audio_thread(void *arg) {
     break;
   }
 
-  while(1) {
+  while (1) {
+    int fd;
+    /* Snapshot Input_fd under the mutex to avoid races with monitor close */
+    pthread_mutex_lock(&output_dest_socket_mutex);
+    fd = Input_fd;
+    pthread_mutex_unlock(&output_dest_socket_mutex);
+
+    if (fd == -1) {
+      /* No input socket right now; back off and retry */
+      usleep(1000);
+      continue;
+    }
+
     struct sockaddr_storage sender;
     socklen_t socksize = sizeof(sender);
-    int size = recvfrom(Input_fd,&pkt->content,sizeof(pkt->content),0,(struct sockaddr *)&sender,&socksize);
+    ssize_t size = recvfrom(fd, &pkt->content, sizeof(pkt->content), 0,
+                            (struct sockaddr *)&sender, &socksize);
 
-    if(size == -1){
-      if(errno != EINTR){ // Happens routinely, e.g., when window resized
-        perror("recvfrom");
-        fprintf(stderr,"address=%s\n",formatsock(&Channel.output.dest_socket,false));
+    if (size == -1) {
+      if (errno == EINTR)
+        continue; /* interrupted, try again */
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        continue; /* no data available yet, not an error to log */
+      if (errno == EBADF) {
+        /* Socket was closed by monitor thread after we snapped it; back off */
         usleep(1000);
+        continue;
       }
-      continue;  // Reuse current buffer
+      /* Unexpected error; log it once and back off briefly */
+      perror("recvfrom");
+      fprintf(stderr, "address=%s\n", formatsock(&Channel.output.dest_socket, false));
+      usleep(1000);
+      continue; /* reuse current buffer */
     }
-    if(size <= RTP_MIN_SIZE)
-      continue; // Must be big enough for RTP header and at least some data
+
+    if (size <= RTP_MIN_SIZE)
+      continue; /* Must be big enough for RTP header and at least some data */
 
     // Convert RTP header to host format
     uint8_t const *dp = ntoh_rtp(&pkt->rtp,pkt->content);
@@ -2402,10 +2532,29 @@ void *ctrl_thread(void *arg)
 static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc)
 {
   socklen_t ssize = sizeof(Metadata_source_socket);
+  /* Snapshot Status_fd to avoid a null/closed fd obvious cases; callers
+     should handle non-positive returns. If Status_fd is -1 return -1 so
+     callers know there's no active socket. */
+  if (Status_fd == -1)
+    return -1;
   ssize_t rx_length = recvfrom(Status_fd, buffer, buflen, 0,
                                (struct sockaddr *)&Metadata_source_socket, &ssize);
-  if (rx_length <= 0)
+  if (rx_length <= 0) {
+    if (rx_length == -1) {
+      if (errno == EINTR)
+        return -1;
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        return -1;
+      if (errno == EBADF) {
+        /* Socket was closed by monitor thread; return so caller can continue */
+        return -1;
+      }
+      /* Unexpected recv error: log and return */
+      perror("recvfrom(status)");
+      return -1;
+    }
     return rx_length;
+  }
   /* Record last successful status receive time (monotonic ms) */
   last_status_recv_ms = now_ms();
   if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
