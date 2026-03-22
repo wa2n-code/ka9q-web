@@ -59,8 +59,11 @@ int Ctl_fd = -1, Input_fd = -1, Status_fd = -1;
 pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
 pthread_t audio_task;
+/* Monitor task and started flag (optional) */
+#ifdef ENABLE_MONITOR
 pthread_t monitor_task;
 static int monitor_started = 0;
+#endif
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
@@ -167,7 +170,8 @@ static unsigned long last_status_recv_ms = 0;
 /* Monotonic ms timestamp of last successful audio packet recv */
 static unsigned long last_audio_recv_ms = 0;
 
-/* Monitor parameters */
+/* Monitor parameters (optional) */
+#ifdef ENABLE_MONITOR
 #define STALL_MS 2000 /* consider stalled if no packets for 2s */
 #define MONITOR_SLEEP_MS 1000
 /* Grace period after start during which monitor will not attempt recovery */
@@ -175,6 +179,7 @@ static unsigned long last_audio_recv_ms = 0;
 /* Restart policy */
 #define RESTART_MAX_ATTEMPTS 3
 #define RESTART_INITIAL_DELAY_MS 5000
+#endif
 
 /* Forward declaration: monotonic time in milliseconds helper */
 static unsigned long now_ms(void);
@@ -184,6 +189,8 @@ static int nsessions; /* defined later with initializer */
 static struct session *sessions; /* defined later with initializer */
 extern pthread_mutex_t session_mutex;
 
+/* monitor_thread: optional background watchdog for stalled inputs */
+#ifdef ENABLE_MONITOR
 /*
   monitor_thread
   ----------------
@@ -367,6 +374,7 @@ static void *monitor_thread(void *arg) {
   }
   return NULL;
 }
+#endif /* ENABLE_MONITOR */
 
 /* Helper: monotonic time in milliseconds */
 static unsigned long now_ms(void) {
@@ -1266,6 +1274,7 @@ onion_connection_status home(void *data, onion_request * req,
   onion_websocket_set_callback(ws, websocket_cb);
 
   /* Start monitor thread on first client connect to avoid console noise */
+#ifdef ENABLE_MONITOR
   if (!monitor_started) {
     if (pthread_create(&monitor_task, NULL, monitor_thread, NULL) == -1) {
       perror("pthread_create: monitor_thread");
@@ -1276,6 +1285,7 @@ onion_connection_status home(void *data, onion_request * req,
       monitor_started = 1;
     }
   }
+#endif
 
   return OCS_WEBSOCKET;
 }
