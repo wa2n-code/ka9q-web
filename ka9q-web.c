@@ -230,8 +230,14 @@ static void *monitor_thread(void *arg) {
     if (Input_fd != -1 && last_audio_recv_ms != 0)
       audio_ago = now - last_audio_recv_ms;
 
-    /* Status socket stalled -> try to reopen */
-    if (status_ago > STALL_MS) {
+    /* Only attempt recovery if there are active client sessions */
+    int active_sessions = 0;
+    pthread_mutex_lock(&session_mutex);
+    active_sessions = nsessions;
+    pthread_mutex_unlock(&session_mutex);
+
+    /* Status socket stalled -> try to reopen (only when clients exist) */
+    if (active_sessions > 0 && status_ago > STALL_MS) {
       fprintf(stderr, "monitor: status stalled %lu ms, attempting reopen\n", status_ago);
       if (Status_fd != -1) {
         close(Status_fd);
@@ -253,14 +259,18 @@ static void *monitor_thread(void *arg) {
         if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
           perror("setsockopt SO_RCVTIMEO Status_fd (monitor)");
         }
+        /* Prevent immediate re-detection by seeding last_status_recv_ms
+           with the reopen time. This avoids tight reopen loops when the
+           multicast source is temporarily silent. */
+        last_status_recv_ms = now_ms();
         fprintf(stderr, "monitor: status socket reopened\n");
       } else {
         fprintf(stderr, "monitor: failed to reopen status socket\n");
       }
     }
 
-    /* Audio stalled -> close Input_fd so audio_thread re-opens it */
-    if (audio_ago > STALL_MS) {
+    /* Audio stalled -> close Input_fd so audio_thread re-opens it (only when clients exist) */
+    if (active_sessions > 0 && audio_ago > STALL_MS) {
       fprintf(stderr, "monitor: audio stalled %lu ms, forcing reopen\n", audio_ago);
       pthread_mutex_lock(&output_dest_socket_mutex);
       if (Input_fd != -1) {
@@ -2457,10 +2467,29 @@ void *ctrl_thread(void *arg)
 static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc)
 {
   socklen_t ssize = sizeof(Metadata_source_socket);
+  /* Snapshot Status_fd to avoid a null/closed fd obvious cases; callers
+     should handle non-positive returns. If Status_fd is -1 return -1 so
+     callers know there's no active socket. */
+  if (Status_fd == -1)
+    return -1;
   ssize_t rx_length = recvfrom(Status_fd, buffer, buflen, 0,
                                (struct sockaddr *)&Metadata_source_socket, &ssize);
-  if (rx_length <= 0)
+  if (rx_length <= 0) {
+    if (rx_length == -1) {
+      if (errno == EINTR)
+        return -1;
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        return -1;
+      if (errno == EBADF) {
+        /* Socket was closed by monitor thread; return so caller can continue */
+        return -1;
+      }
+      /* Unexpected recv error: log and return */
+      perror("recvfrom(status)");
+      return -1;
+    }
     return rx_length;
+  }
   /* Record last successful status receive time (monotonic ms) */
   last_status_recv_ms = now_ms();
   if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
