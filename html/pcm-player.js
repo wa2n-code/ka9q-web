@@ -68,7 +68,10 @@ PCMPlayer.prototype.pan = function(value) { // Method to set the pan value
 };
 
 PCMPlayer.prototype.resume = function() {
-    this.audioCtx.resume();
+    if (this.audioCtx && typeof this.audioCtx.resume === 'function') {
+        // resume() returns a promise in some browsers; ignore rejection here
+        try { this.audioCtx.resume().catch(() => {}); } catch (e) {}
+    }
 }
 
 PCMPlayer.prototype.isTypedArray = function(data) {
@@ -85,7 +88,9 @@ PCMPlayer.prototype.feed = function(data) {
     tmp.set(this.samples, 0);
     tmp.set(fdata, this.samples.length);
     this.samples = tmp;
-    this.audioCtx.resume();
+    if (this.audioCtx && typeof this.audioCtx.resume === 'function') {
+        try { this.audioCtx.resume().catch(() => {}); } catch (e) {}
+    }
 };
 
 PCMPlayer.prototype.getFormatedValue = function(data) {
@@ -102,17 +107,43 @@ PCMPlayer.prototype.volume = function(volume) {
     this.gainNode.gain.value = volume;
 };
 
+// Consolidated destroy: clear timers, stop recording, disconnect nodes, close context
 PCMPlayer.prototype.destroy = function() {
     if (this.interval) {
         clearInterval(this.interval);
+        this.interval = null;
     }
-    this.samples = null;
-    this.audioCtx.close();
-    this.audioCtx = null;
+
+    // Stop MediaRecorder if active
+    try {
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            try { this.mediaRecorder.stop(); } catch (e) {}
+        }
+    } catch (e) {}
+
+    // Disconnect nodes
+    try { if (this.scriptNode) { try { this.scriptNode.disconnect(); } catch (e) {} this.scriptNode = null; } } catch (e) {}
+    try { if (this.pannerNode) { try { this.pannerNode.disconnect(); } catch (e) {} this.pannerNode = null; } } catch (e) {}
+    try { if (this.gainNode) { try { this.gainNode.disconnect(); } catch (e) {} this.gainNode = null; } } catch (e) {}
+
+    // Close audio context
+    try {
+        if (this.audioCtx) {
+            try { this.audioCtx.close(); } catch (e) {}
+            this.audioCtx = null;
+        }
+    } catch (e) {}
+
+    // Release other resources
+    this.samples = new Float32Array();
+    this.mediaRecorder = null;
+    this.mediaStreamDestination = null;
+    this.recordedChunks = null;
 };
 
 PCMPlayer.prototype.flush = function() {
-    if (!this.samples.length) return;
+    if (!this.audioCtx) return;
+    if (!this.samples || !this.samples.length) return;
     var bufferSource = this.audioCtx.createBufferSource(),
         length = this.samples.length / this.option.channels,
         audioBuffer = this.audioCtx.createBuffer(this.option.channels, length, this.option.sampleRate),
