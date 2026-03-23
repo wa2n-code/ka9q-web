@@ -68,7 +68,11 @@ PCMPlayer.prototype.pan = function(value) { // Method to set the pan value
 };
 
 PCMPlayer.prototype.resume = function() {
-    this.audioCtx.resume();
+    if (this.audioCtx && typeof this.audioCtx.resume === 'function') {
+        try { this.audioCtx.resume().catch(() => {}); } catch (e) {}
+    } else {
+        console.warn('PCMPlayer.resume: no audioCtx to resume');
+    }
 }
 
 PCMPlayer.prototype.isTypedArray = function(data) {
@@ -85,7 +89,9 @@ PCMPlayer.prototype.feed = function(data) {
     tmp.set(this.samples, 0);
     tmp.set(fdata, this.samples.length);
     this.samples = tmp;
-    this.audioCtx.resume();
+    if (this.audioCtx && typeof this.audioCtx.resume === 'function') {
+        try { this.audioCtx.resume().catch(() => {}); } catch (e) {}
+    }
 };
 
 PCMPlayer.prototype.getFormatedValue = function(data) {
@@ -102,24 +108,63 @@ PCMPlayer.prototype.volume = function(volume) {
     this.gainNode.gain.value = volume;
 };
 
+// Consolidated destroy: clear timers, stop recording, disconnect nodes, close context
 PCMPlayer.prototype.destroy = function() {
     if (this.interval) {
         clearInterval(this.interval);
+        this.interval = null;
     }
-    this.samples = null;
-    this.audioCtx.close();
-    this.audioCtx = null;
+
+    // Stop MediaRecorder if active
+    try {
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+            try { this.mediaRecorder.stop(); } catch (e) {}
+        }
+    } catch (e) {}
+
+    // Disconnect nodes
+    try { if (this.scriptNode) { try { this.scriptNode.disconnect(); } catch (e) {} this.scriptNode = null; } } catch (e) {}
+    try { if (this.pannerNode) { try { this.pannerNode.disconnect(); } catch (e) {} this.pannerNode = null; } } catch (e) {}
+    try { if (this.gainNode) { try { this.gainNode.disconnect(); } catch (e) {} this.gainNode = null; } } catch (e) {}
+
+    // Close audio context
+    try {
+        if (this.audioCtx) {
+            try { this.audioCtx.close(); } catch (e) {}
+            this.audioCtx = null;
+        }
+    } catch (e) {}
+
+    // Release other resources
+    this.samples = new Float32Array();
+    this.mediaRecorder = null;
+    this.mediaStreamDestination = null;
+    this.recordedChunks = null;
 };
 
 PCMPlayer.prototype.flush = function() {
-    if (!this.samples.length) return;
+    if (!this.audioCtx) {
+        // AudioContext gone; nothing to flush
+        //console.warn('PCMPlayer.flush: audioCtx missing');
+        return;
+    }
+    if (!this.samples || !this.samples.length) return;
     var bufferSource = this.audioCtx.createBufferSource(),
         length = this.samples.length / this.option.channels,
-        audioBuffer = this.audioCtx.createBuffer(this.option.channels, length, this.option.sampleRate),
+        audioBuffer = null,
         audioData,
         channel,
         offset,
         i;
+
+    try {
+        audioBuffer = this.audioCtx.createBuffer(this.option.channels, length, this.option.sampleRate);
+    } catch (e) {
+        console.warn('PCMPlayer.flush: failed to create audio buffer', e);
+        // clear samples to avoid repeated failures
+        this.samples = new Float32Array();
+        return;
+    }
 
     for (channel = 0; channel < this.option.channels; channel++) {
         audioData = audioBuffer.getChannelData(channel);
@@ -135,24 +180,38 @@ PCMPlayer.prototype.flush = function() {
     }
 
     bufferSource.buffer = audioBuffer;
-    bufferSource.connect(this.pannerNode); // Connect to the panner node
-    bufferSource.start(this.startTime);
+    // Connect to the best available node: panner -> gain -> destination
+    try {
+        if (this.pannerNode) {
+            bufferSource.connect(this.pannerNode);
+        } else if (this.gainNode) {
+            bufferSource.connect(this.gainNode);
+        } else if (this.audioCtx.destination) {
+            bufferSource.connect(this.audioCtx.destination);
+        } else {
+            // nothing to connect to
+            //console.warn('PCMPlayer.flush: no destination node to connect bufferSource');
+            this.samples = new Float32Array();
+            return;
+        }
+    } catch (e) {
+        console.warn('PCMPlayer.flush: connect failed', e);
+        this.samples = new Float32Array();
+        return;
+    }
+
+    try {
+        bufferSource.start(this.startTime);
+    } catch (e) {
+        // start can fail if context state is not runnable; try resuming once
+        try { if (this.audioCtx && typeof this.audioCtx.resume === 'function') this.audioCtx.resume(); } catch (ee) {}
+        try { bufferSource.start(this.startTime); } catch (ee) { /* give up */ }
+    }
     this.startTime += audioBuffer.duration;
     this.samples = new Float32Array();
 };
 
-PCMPlayer.prototype.destroy = function() {
-    //console.log("destroy PCMPlayer");
-    if (this.audioCtx && this.scriptNode) {
-        this.scriptNode.disconnect();
-        this.scriptNode = null;
-    }
-    if (this.audioCtx) {
-        this.audioCtx.close();
-        this.audioCtx = null;
-    }
-    this.samples = [];
-};
+/* duplicate/old destroy removed; consolidated destroy above is the canonical implementation */
 
 PCMPlayer.prototype.startRecording = function() {
     if (!this.audioCtx) {

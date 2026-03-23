@@ -397,6 +397,7 @@
         sampleRate: 12000,
         flushingTime: 250
         });
+// (diagnostics removed)
       // Ensure player volume matches slider after creation. Defer if DOM not ready.
       const volumeSliderInit = document.getElementById('volume_control');
       if (volumeSliderInit) {
@@ -1524,6 +1525,50 @@ function applyQuickBW() {
                 audio_data[i+1]=tmp;
               }
               // push onto audio queue
+              try {
+                // If AudioContext is missing/closed/suspended, attempt to recover automatically
+                if (!player || !player.audioCtx) {
+                  try { console.warn('radio: audio pkt arrived but player/audioCtx missing — recreating player'); } catch (e) {}
+                  let modeEl = document.getElementById('mode');
+                  let currentMode = modeEl ? modeEl.value : 'am';
+                  let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
+                  let newChannels = (currentMode === 'iq') ? 2 : 1;
+                  try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
+                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
+                  try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                } else if (player.audioCtx && player.audioCtx.state === 'closed') {
+                  try { console.warn('radio: audioCtx closed — recreating player'); } catch (e) {}
+                  let modeEl = document.getElementById('mode');
+                  let currentMode = modeEl ? modeEl.value : 'am';
+                  let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
+                  let newChannels = (currentMode === 'iq') ? 2 : 1;
+                  try { player.destroy(); } catch (e) {}
+                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
+                  try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                } else if (player.audioCtx && player.audioCtx.state === 'suspended') {
+                  try { player.audioCtx.resume(); } catch (e) {}
+                  // If resume does not succeed, recreate after short delay
+                  (function(p){
+                    setTimeout(function(){
+                      try {
+                        if (!p || !p.audioCtx || (p.audioCtx && p.audioCtx.state !== 'running')) {
+                          try { console.warn('radio: resume failed or still suspended — recreating player'); } catch (e) {}
+                          let modeEl = document.getElementById('mode');
+                          let currentMode = modeEl ? modeEl.value : 'am';
+                          let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
+                          let newChannels = (currentMode === 'iq') ? 2 : 1;
+                          try { if (p && typeof p.destroy === 'function') p.destroy(); } catch (e) {}
+                          p = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
+                          try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                          player = p;
+                        }
+                      } catch (ee) {}
+                    }, 200);
+                  })(player);
+                }
+
+                // packet received; no diagnostic logging
+              } catch (e) {}
               player.feed(audio_data);
               break;
             default:
@@ -2659,8 +2704,25 @@ function applyQuickBW() {
           btn.value = "STOP";
           btn.innerHTML = "Stop Audio";
           sendControl('audio', "A:START:"+ssrc.toString(), 50);
-          player.resume();
-          // Ensure volume is set after resuming audio context
+          // If player or its AudioContext is gone, recreate it using current mode
+          try {
+            let modeEl = document.getElementById('mode');
+            let currentMode = modeEl ? modeEl.value : 'am';
+            let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
+            let newChannels = (currentMode === 'iq') ? 2 : 1;
+            if (!player || !player.audioCtx) {
+              try { player.destroy(); } catch (e) {}
+              player = new PCMPlayer({
+                encoding: '16bitInt',
+                channels: newChannels,
+                sampleRate: newSampleRate,
+                flushingTime: 250
+              });
+            }
+            // Resume and ensure volume is applied
+            try { player.resume(); } catch (e) { player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 }); }
+            // diagnostics disabled
+          } catch (e) {}
           const volumeSlider = document.getElementById('volume_control');
           if (volumeSlider) setPlayerVolume(volumeSlider.value);
         } else {
