@@ -78,6 +78,7 @@ struct session {
   pthread_t poll_task;
   pthread_t spectrum_task;
   pthread_mutex_t spectrum_mutex;
+  useconds_t spectrum_poll_us; /* per-session poll interval (microseconds) */
   uint32_t center_frequency;
   uint32_t frequency;           // tuned frequency, in Hz
   uint32_t bin_width;
@@ -638,9 +639,11 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           char *endptr;
           long v = strtol(&tmp[2], &endptr, 10);
           if (&tmp[2] != endptr && v > 0) {
-            spectrum_poll_us = (useconds_t)(v * 1000L);
+            pthread_mutex_lock(&sp->spectrum_mutex);
+            sp->spectrum_poll_us = (useconds_t)(v * 1000L);
+            pthread_mutex_unlock(&sp->spectrum_mutex);
             if (verbose)
-              fprintf(stderr, "%s: set spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)spectrum_poll_us, v);
+              fprintf(stderr, "%s: set sp->spectrum_poll_us to %u us (from %ld ms)\n", __FUNCTION__, (unsigned)sp->spectrum_poll_us, v);
           }
         }
         break;
@@ -1333,6 +1336,8 @@ onion_connection_status home(void *data, onion_request * req,
   strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
+  /* initialize per-session poll interval from global default */
+  sp->spectrum_poll_us = spectrum_poll_us;
   add_session(sp);
   init_control(sp);
   //fprintf(stderr,"%s: onion_websocket_set_callback: websocket_cb\n",__FUNCTION__);
@@ -2377,8 +2382,8 @@ void *spectrum_thread(void *arg) {
     control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
     pthread_mutex_unlock(&sp->spectrum_mutex);
     control_poll(sp);
-    if(usleep(spectrum_poll_us) != 0) {
-      perror("spectrum_thread: usleep(spectrum_poll_us)");
+    if(usleep(sp->spectrum_poll_us) != 0) {
+      perror("spectrum_thread: usleep(sp->spectrum_poll_us)");
     }
   }
   return NULL;
