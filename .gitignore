@@ -2,6 +2,7 @@ ka9q-web
 *.o
 private
 .vscode/
+.claude/settings.local.json
 \#*\#
 ._*
 .apdisk
