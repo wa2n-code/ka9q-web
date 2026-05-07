@@ -8,6 +8,7 @@
     <script src="colormap.js"></script>
     <script src="spectrum.js"></script>
     <script src="pcm-player.js"></script>
+    <script src="opus-decoder.min.js"></script>
     <script src="radio.js"></script>
     <script src="smeter.js" defer></script>
     <style>
@@ -286,6 +287,8 @@
                     </td>
                     <td align="center">
                         <button id="audio_button" style="color:DarkViolet; border: solid; width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
+                        &nbsp;&nbsp;
+                        <label title="Use Opus codec to reduce audio bandwidth (takes effect on next audio start)"><input type="checkbox" id="opus_checkbox" onchange="onOpusCheckboxChange(this.checked)" />&nbsp;Opus</label>
                         &nbsp;&nbsp;
                         <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording. Do not change frequency while recording." style="margin-right: 10px;">Record</button>
                     </td>

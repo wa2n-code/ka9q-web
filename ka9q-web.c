@@ -120,6 +120,7 @@ struct session {
     int cw_flip_pending;
     unsigned long cw_flip_time_ms;
     char cw_flip_prev_preset[8];
+    bool opus_active; /* true when client has requested Opus encoding */
   /* uint32_t last_poll_tag; */
 };
 
@@ -134,6 +135,7 @@ extern void control_set_filter_edges(struct session *sp, char *low_str, char *hi
 extern void control_set_spectrum_average(struct session *sp, char *val_str);
 extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
 extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
+extern void control_set_encoding(struct session *sp, bool use_opus);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
 void stop_spectrum_stream(struct session *sp);
@@ -529,6 +531,17 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           sp->audio_active=true;
         } else if(token && strcmp(&tmp[2],"STOP")==0) {
           sp->audio_active=false;
+        }
+        break;
+      case 'O':
+      case 'o':
+        token = strtok_r(NULL, ":", &saveptr);
+        if(token && strcasecmp(token,"OPUS")==0) {
+          sp->opus_active=true;
+          control_set_encoding(sp,true);
+        } else if(token && strcasecmp(token,"PCM")==0) {
+          sp->opus_active=false;
+          control_set_encoding(sp,false);
         }
         break;
       case 'e':
@@ -1962,6 +1975,27 @@ potential packet loss or network issues. The use of mutex locking ensures that m
 with each other when accessing the control socket. The function is robust and suitable for use in a concurrent,
 networked environment.
 */
+void control_set_encoding(struct session *sp, bool use_opus) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  *bp++ = CMD;
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  encode_int(&bp, OUTPUT_ENCODING, use_opus ? OPUS : S16BE);
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    fprintf(stderr, "command send error: %s\n", strerror(errno));
+  } else {
+    if (verbose)
+      fprintf(stderr, "%s: set encoding to %s for ssrc=%u\n", __FUNCTION__,
+              use_opus ? "OPUS" : "PCM", (unsigned)sp->ssrc);
+    usleep(CONTROL_USLEEP_US);
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
 void stop_spectrum_stream(struct session *sp) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
