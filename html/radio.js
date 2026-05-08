@@ -2750,6 +2750,7 @@ function applyQuickBW() {
     }
 
     function onOpusCheckboxChange(checked) {
+        try { if (window.localStorage) localStorage.setItem('useOpus', checked ? 'true' : 'false'); } catch (e) {}
         if (checked) {
           initOpusDecoder();
         } else {
@@ -3361,6 +3362,7 @@ function saveSettings() {
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
+  try { localStorage.setItem("useOpus", (document.getElementById("opus_checkbox") && document.getElementById("opus_checkbox").checked) ? "true" : "false"); } catch (e) {}
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -3580,6 +3582,16 @@ function loadSettings() {
   window.keepFreqCentered = kfcVal;
   try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.checked = kfcVal; } catch (e) {}
   try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.addEventListener('change', function() { window.keepFreqCentered = this.checked; saveSettings(); }); } catch (e) {}
+  // Restore Opus checkbox state and initialize decoder if enabled
+  const useOpus = getLS("useOpus", v => (v === "true"), false);
+  try { const opel = document.getElementById('opus_checkbox'); if (opel) opel.checked = useOpus; } catch (e) {}
+  try {
+    if (useOpus) {
+      try { initOpusDecoder(); } catch (e) {}
+    } else {
+      try { destroyOpusDecoder(); } catch (e) {}
+    }
+  } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
     spectrum.updateAxes();
