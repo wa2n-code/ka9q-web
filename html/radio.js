@@ -2775,6 +2775,8 @@ function applyQuickBW() {
             sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
           } else {
             destroyOpusDecoder();
+            // Ensure backend is using PCM when user starts audio with Opus unchecked
+            sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
           }
           sendControl('audio', "A:START:"+ssrc.toString(), 50);
           // If player or its AudioContext is gone, recreate it using current mode
@@ -2784,16 +2786,26 @@ function applyQuickBW() {
             let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
             let newChannels = (currentMode === 'iq') ? 2 : 1;
             if (!useOpus) {
-              if (!player || !player.audioCtx) {
-                try { player.destroy(); } catch (e) {}
+              // If the existing player is still configured for Opus (32bitFloat)
+              // or has different channels/sampleRate, recreate it for 16-bit PCM.
+              const needRecreate = (!player || !player.audioCtx) ||
+                                   (player && player.option && player.option.encoding !== '16bitInt') ||
+                                   (player && player.option && Number(player.option.channels) !== Number(newChannels)) ||
+                                   (player && player.option && Number(player.option.sampleRate) !== Number(newSampleRate));
+              if (needRecreate) {
+                try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
                 player = new PCMPlayer({
                   encoding: '16bitInt',
                   channels: newChannels,
                   sampleRate: newSampleRate,
                   flushingTime: 250
                 });
+              } else {
+                try { player.resume(); } catch (e) {
+                  try { player.destroy(); } catch (ee) {}
+                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
+                }
               }
-              try { player.resume(); } catch (e) { player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 }); }
             }
             // diagnostics disabled
           } catch (e) {}
