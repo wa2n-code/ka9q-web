@@ -1702,18 +1702,81 @@ function applyQuickBW() {
             spectrum.radio_pointer = window;
             page_title = "";
 
-            // Create websocket with reconnect support
+            // Create websocket with reconnect support + UI popup for status/cancel
             (function() {
               let reconnectTimer = null;
               let reconnectDelayMs = 1000;
               const reconnectMaxDelayMs = 30000;
+              let reconnectCancelled = false;
+              let reconnectCountdownInterval = null;
+
+              function createReconnectPopup() {
+                if (document.getElementById('ws-reconnect-popup')) return;
+                const wrapper = document.createElement('div');
+                wrapper.id = 'ws-reconnect-popup';
+                wrapper.style.position = 'fixed';
+                wrapper.style.left = '50%';
+                wrapper.style.top = '20%';
+                wrapper.style.transform = 'translateX(-50%)';
+                wrapper.style.background = 'rgba(0,0,0,0.85)';
+                wrapper.style.color = '#fff';
+                wrapper.style.padding = '16px';
+                wrapper.style.border = '2px solid #444';
+                wrapper.style.borderRadius = '8px';
+                wrapper.style.zIndex = 9999;
+                wrapper.style.minWidth = '300px';
+                wrapper.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">Connection failed — retrying</div>' +
+                  '<div id="ws-reconnect-info" style="margin-bottom:8px;">Retrying in <span id="ws-retry-seconds">0</span>s (backoff)</div>' +
+                  '<div style="text-align:right;"><button id="ws-reconnect-cancel" style="padding:6px 10px;">Cancel</button></div>';
+                document.body.appendChild(wrapper);
+                document.getElementById('ws-reconnect-cancel').addEventListener('click', cancelReconnecting);
+              }
+
+              function showReconnectPopup(delayMs) {
+                try {
+                  if (reconnectCancelled) return;
+                  createReconnectPopup();
+                  const secondsEl = document.getElementById('ws-retry-seconds');
+                  if (!secondsEl) return;
+                  const start = Date.now();
+                  const end = start + delayMs;
+                  if (reconnectCountdownInterval) clearInterval(reconnectCountdownInterval);
+                  function update() {
+                    const rem = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+                    secondsEl.textContent = rem.toString();
+                  }
+                  update();
+                  reconnectCountdownInterval = setInterval(update, 250);
+                } catch (e) { console.warn('showReconnectPopup error', e); }
+              }
+
+              function hideReconnectPopup() {
+                try {
+                  if (reconnectCountdownInterval) { clearInterval(reconnectCountdownInterval); reconnectCountdownInterval = null; }
+                  const el = document.getElementById('ws-reconnect-popup');
+                  if (el && el.parentNode) el.parentNode.removeChild(el);
+                } catch (e) { console.warn('hideReconnectPopup error', e); }
+              }
+
+              function cancelReconnecting() {
+                try {
+                  reconnectCancelled = true;
+                  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                  hideReconnectPopup();
+                  console.info('[radio.js] websocket reconnecting cancelled by user');
+                } catch (e) { console.warn('cancelReconnecting error', e); }
+              }
 
               function scheduleReconnect() {
                 try {
+                  if (reconnectCancelled) return;
                   if (reconnectTimer) return; // already scheduled
+                  showReconnectPopup(reconnectDelayMs);
                   reconnectTimer = setTimeout(() => {
                     reconnectTimer = null;
+                    if (reconnectCancelled) return;
                     reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxDelayMs);
+                    hideReconnectPopup();
                     connectWebSocket();
                   }, reconnectDelayMs);
                   console.info('[radio.js] scheduling websocket reconnect in', reconnectDelayMs, 'ms');
@@ -1722,18 +1785,20 @@ function applyQuickBW() {
 
               function connectWebSocket() {
                 try {
+                  if (reconnectCancelled) return;
                   if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
                   ws = new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
                   ws.onmessage = on_ws_message;
                   ws.onopen = function(evt) {
                     try { reconnectDelayMs = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } } catch (e) {}
                     try { console.info('[radio.js] WebSocket opened/reconnected; readyState=', ws && ws.readyState); } catch (e) {}
+                    try { hideReconnectPopup(); reconnectCancelled = false; } catch (e) {}
                     try { on_ws_open(evt); } catch (e) { console.warn('on_ws_open threw', e); }
                   };
                   ws.onclose = function(evt) {
                     try { on_ws_close(evt); } catch (e) { console.warn('on_ws_close threw', e); }
                     // Attempt reconnect automatically
-                    scheduleReconnect();
+                    if (!reconnectCancelled) scheduleReconnect();
                   };
                   ws.binaryType = "arraybuffer";
                   ws.onerror = on_ws_error;
