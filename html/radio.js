@@ -1702,12 +1702,50 @@ function applyQuickBW() {
             spectrum.radio_pointer = window;
             page_title = "";
 
-            ws=new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
-            ws.onmessage=on_ws_message;
-            ws.onopen=on_ws_open;
-            ws.onclose=on_ws_close;
-            ws.binaryType = "arraybuffer";
-            ws.onerror = on_ws_error;
+            // Create websocket with reconnect support
+            (function() {
+              let reconnectTimer = null;
+              let reconnectDelayMs = 1000;
+              const reconnectMaxDelayMs = 30000;
+
+              function scheduleReconnect() {
+                try {
+                  if (reconnectTimer) return; // already scheduled
+                  reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxDelayMs);
+                    connectWebSocket();
+                  }, reconnectDelayMs);
+                  console.info('[radio.js] scheduling websocket reconnect in', reconnectDelayMs, 'ms');
+                } catch (e) { console.warn('scheduleReconnect error', e); }
+              }
+
+              function connectWebSocket() {
+                try {
+                  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+                  ws = new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
+                  ws.onmessage = on_ws_message;
+                  ws.onopen = function(evt) {
+                    try { reconnectDelayMs = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } } catch (e) {}
+                    try { console.info('[radio.js] WebSocket opened/reconnected; readyState=', ws && ws.readyState); } catch (e) {}
+                    try { on_ws_open(evt); } catch (e) { console.warn('on_ws_open threw', e); }
+                  };
+                  ws.onclose = function(evt) {
+                    try { on_ws_close(evt); } catch (e) { console.warn('on_ws_close threw', e); }
+                    // Attempt reconnect automatically
+                    scheduleReconnect();
+                  };
+                  ws.binaryType = "arraybuffer";
+                  ws.onerror = on_ws_error;
+                } catch (e) {
+                  console.warn('connectWebSocket failed', e);
+                  scheduleReconnect();
+                }
+              }
+
+              // Kick off initial connection
+              connectWebSocket();
+            })();
             // Attach input handlers now that DOM may be ready
             try { document.getElementById('waterfall').addEventListener("wheel", onWheel, false); } catch (e) {}
             try { document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false); } catch (e) {}
