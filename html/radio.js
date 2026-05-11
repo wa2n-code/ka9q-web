@@ -1710,9 +1710,11 @@ function applyQuickBW() {
               let reconnectCancelled = false;
               let reconnectCountdownInterval = null;
               let isAttemptingConnect = false;
+              let hasEverConnected = false;
 
               function createReconnectPopup() {
                 if (document.getElementById('ws-reconnect-popup')) return;
+                const header = hasEverConnected ? 'Connection lost — retrying' : 'Unable to connect — retrying';
                 const wrapper = document.createElement('div');
                 wrapper.id = 'ws-reconnect-popup';
                 wrapper.style.position = 'fixed';
@@ -1726,7 +1728,7 @@ function applyQuickBW() {
                 wrapper.style.borderRadius = '8px';
                 wrapper.style.zIndex = 9999;
                 wrapper.style.minWidth = '300px';
-                wrapper.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">Connection failed — retrying</div>' +
+                wrapper.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">' + header + '</div>' +
                   '<div id="ws-reconnect-info" style="margin-bottom:8px;">Retrying in <span id="ws-retry-seconds">0</span>s (backoff)</div>' +
                   '<div style="text-align:right;">' +
                     '<button id="ws-reconnect-retry" style="padding:6px 10px;margin-right:8px;">Retry Now</button>' +
@@ -1741,7 +1743,6 @@ function applyQuickBW() {
                 try {
                   if (reconnectCancelled) return;
                   createReconnectPopup();
-                  // Always show the countdown message when scheduling a reconnect
                   const infoEl = document.getElementById('ws-reconnect-info');
                   if (infoEl) {
                     infoEl.innerHTML = 'Retrying in <span id="ws-retry-seconds">0</span>s (backoff)';
@@ -1802,14 +1803,14 @@ function applyQuickBW() {
               function scheduleReconnect() {
                 try {
                   if (reconnectCancelled) return;
-                  if (reconnectTimer) return; // already scheduled
+                  if (reconnectTimer || isAttemptingConnect) return; // already scheduled or mid-connect
                   showReconnectPopup(reconnectDelayMs);
                   reconnectTimer = setTimeout(() => {
                     reconnectTimer = null;
                     if (reconnectCancelled) return;
                     reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxDelayMs);
-                      // Actual connection attempt will update popup to 'Retrying now...'
-                      connectWebSocket();
+                    // Actual connection attempt will update popup to 'Retrying now...'
+                    connectWebSocket();
                   }, reconnectDelayMs);
                   console.info('[radio.js] scheduling websocket reconnect in', reconnectDelayMs, 'ms');
                 } catch (e) { console.warn('scheduleReconnect error', e); }
@@ -1819,28 +1820,29 @@ function applyQuickBW() {
                 try {
                   if (reconnectCancelled) return;
                   if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
-                  // Mark that we're attempting a connection and update popup accordingly
                   isAttemptingConnect = true;
                   setPopupRetryingNow();
                   ws = new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
                   ws.onmessage = on_ws_message;
                   ws.onopen = function(evt) {
-                    try { reconnectDelayMs = 1000; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } } catch (e) {}
-                    try { console.info('[radio.js] WebSocket opened/reconnected; readyState=', ws && ws.readyState); } catch (e) {}
-                    try { isAttemptingConnect = false; hideReconnectPopup(); reconnectCancelled = false; } catch (e) {}
+                    reconnectDelayMs = 1000;
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                    console.info('[radio.js] WebSocket opened/reconnected; readyState=', ws.readyState);
+                    isAttemptingConnect = false;
+                    hasEverConnected = true;
+                    hideReconnectPopup();
+                    reconnectCancelled = false;
                     try { on_ws_open(evt); } catch (e) { console.warn('on_ws_open threw', e); }
                   };
                   ws.onclose = function(evt) {
+                    isAttemptingConnect = false;
                     try { on_ws_close(evt); } catch (e) { console.warn('on_ws_close threw', e); }
-                    // mark that no connection attempt is active
-                    try { isAttemptingConnect = false; } catch (e) {}
-                    // Attempt reconnect automatically
                     if (!reconnectCancelled) scheduleReconnect();
                   };
                   ws.binaryType = "arraybuffer";
                   ws.onerror = on_ws_error;
                 } catch (e) {
-                  try { isAttemptingConnect = false; } catch (err) {}
+                  isAttemptingConnect = false;
                   console.warn('connectWebSocket failed', e);
                   scheduleReconnect();
                 }
