@@ -1504,7 +1504,15 @@ onion_connection_status home(void *data, onion_request * req,
   struct session *existing = sessions;
   while (existing != NULL) {
     if (client_desc && strcmp(existing->client, client_desc) == 0) {
-      // Reattach websocket to existing session to preserve SSRC and state
+      /* Only reattach if the previous websocket is gone. This prevents a
+         new websocket from the same IP/host (e.g. a second browser tab)
+         from clobbering an active session and stealing its SSRC. */
+      if (existing->ws != NULL) {
+        /* Active session already present for this client description; skip reattach. */
+        existing = existing->next;
+        continue;
+      }
+      /* Reattach websocket to existing session to preserve SSRC and state */
       existing->ws = ws;
       /* Attempt to set underlying websocket socket non-blocking so writes
          return EAGAIN instead of blocking the server. This uses the
