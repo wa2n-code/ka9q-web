@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <dlfcn.h>
 //#include <stdlib.h>
 #include <bsd/stdlib.h>
 #include <stdint.h>
@@ -60,6 +61,7 @@ pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
 pthread_t audio_task;
 pthread_t ws_ping_task;
+pthread_t ws_watchdog_task;
 /* Monitor task and started flag (optional) */
 #ifdef ENABLE_MONITOR
 pthread_t monitor_task;
@@ -76,6 +78,8 @@ struct session {
   onion_websocket *ws;
   pthread_mutex_t ws_mutex;
   uint32_t ssrc;
+  bool write_in_progress;
+  unsigned long last_write_start_ms;
   pthread_t poll_task;
   pthread_t spectrum_task;
   pthread_mutex_t spectrum_mutex;
@@ -149,12 +153,93 @@ void *ctrl_thread(void *arg);
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size);
 static void send_ws_text_to_session(struct session *sp, const char *msg);
 static void *ws_ping_thread(void *arg);
+/* Forward declarations used by watchdog (defined later) */
+static unsigned long now_ms(void);
+extern pthread_mutex_t session_mutex;
+/* Helper to obtain request fd from libonion if available at runtime. Uses dlsym
+   to avoid link-time dependency on a particular libonion version. */
+static int get_request_fd(void *req) {
+  typedef int (*getfd_fn_t)(void *);
+  static getfd_fn_t fn = NULL;
+  if (fn == NULL) {
+    fn = (getfd_fn_t)dlsym(RTLD_DEFAULT, "onion_request_get_fd");
+    if (fn == NULL)
+      return -1;
+  }
+  return fn(req);
+}
+/* Tentative declarations so watchdog can reference them before the real defs */
+static int nsessions;
+static struct session *sessions;
 
 struct frontend Frontend;
 struct sockaddr Metadata_source_socket;       // Source of metadata
 struct sockaddr Metadata_dest_socket;         // Dest of metadata (typically multicast)
 
 static int const DEFAULT_IP_TOS = 48;
+
+/* watchdog: detect websocket write operations that have blocked for too long
+   and recover by cleaning up the session (similar to a write failure). */
+static void *ws_watchdog_thread(void *arg) {
+  (void)arg;
+  const unsigned long threshold_ms = 500; /* consider write stuck after 500ms */
+  for (;;) {
+    usleep(100 * 1000); /* 100 ms */
+    unsigned long now = now_ms();
+    /* Collect sessions snapshot */
+    pthread_mutex_lock(&session_mutex);
+    int n = nsessions;
+    struct session **list = NULL;
+    if (n > 0) {
+      list = calloc(n, sizeof(*list));
+      int i = 0;
+      struct session *sp = sessions;
+      while (sp != NULL && i < n) {
+        list[i++] = sp;
+        sp = sp->next;
+      }
+      n = i;
+    }
+    pthread_mutex_unlock(&session_mutex);
+
+    for (int i = 0; i < n; ++i) {
+      struct session *sp = list[i];
+      pthread_t spectrum_join = 0;
+      /* Read write flags without taking ws_mutex to avoid blocking if a writer
+         thread is stuck holding that mutex. This is racy but acceptable for
+         watchdog recovery: detection only needs to be approximate. */
+      if (sp->write_in_progress) {
+        unsigned long age = now - sp->last_write_start_ms;
+        if (age > threshold_ms) {
+          fprintf(stderr, "ws_watchdog: write stuck for %lums on ssrc=%u, cleaning session\n", age, sp->ssrc);
+          /* Perform recovery while holding session_mutex so we do not race
+             with session list operations. We intentionally avoid locking
+             sp->ws_mutex here to prevent deadlock against the blocked writer. */
+          pthread_mutex_lock(&session_mutex);
+          control_set_frequency(sp, "0");
+          sp->audio_active = false;
+          if (sp->spectrum_active) {
+            pthread_mutex_lock(&sp->spectrum_mutex);
+            sp->spectrum_active = false;
+            stop_spectrum_stream(sp);
+            spectrum_join = sp->spectrum_task;
+            pthread_mutex_unlock(&sp->spectrum_mutex);
+          }
+          sp->spectrum_requested_by_client = false;
+          sp->spectrum_restart_attempts = 0;
+          sp->last_spectrum_restart_ms = 0;
+          sp->write_in_progress = false;
+          /* Prevent further writes by nulling out websocket pointer. */
+          sp->ws = NULL;
+          pthread_mutex_unlock(&session_mutex);
+          if (spectrum_join) pthread_join(spectrum_join, NULL);
+        }
+      }
+    }
+    free(list);
+  }
+  return NULL;
+}
 static int const DEFAULT_MCAST_TTL = 1;
 
 uint64_t Metadata_packets;
@@ -769,6 +854,8 @@ void add_session(struct session *sp) {
   sp->spectrum_requested_by_client = false;
   sp->spectrum_restart_attempts = 0;
   sp->last_spectrum_restart_ms = 0;
+  sp->write_in_progress = false;
+  sp->last_write_start_ms = 0;
 
   pthread_mutex_lock(&session_mutex);
   if(sessions==NULL) {
@@ -1208,6 +1295,10 @@ int main(int argc,char **argv) {
   if (pthread_create(&ws_ping_task, NULL, ws_ping_thread, NULL) != 0) {
     fprintf(stderr, "Failed to start ws_ping_thread\n");
   }
+  /* Start websocket watchdog thread to detect stuck writes */
+  if (pthread_create(&ws_watchdog_task, NULL, ws_watchdog_thread, NULL) != 0) {
+    fprintf(stderr, "Failed to start ws_watchdog_thread\n");
+  }
 
   onion_listen(o);
 
@@ -1377,6 +1468,32 @@ onion_connection_status home(void *data, onion_request * req,
     if (client_desc && strcmp(existing->client, client_desc) == 0) {
       // Reattach websocket to existing session to preserve SSRC and state
       existing->ws = ws;
+      /* Attempt to set underlying websocket socket non-blocking so writes
+         return EAGAIN instead of blocking the server. This uses the
+         request-level fd exposed by libonion (if available). */
+      do {
+        int wsfd = -1;
+        /* Many libonion builds expose an accessor `onion_request_get_fd`.
+           Try to retrieve the fd and set O_NONBLOCK. If the symbol is not
+           available in the libonion version used to build, this call will
+           generate a link error at build time and should be adjusted to
+           the appropriate accessor for that version. */
+        wsfd = get_request_fd(req);
+        if (wsfd >= 0) {
+          int flags = fcntl(wsfd, F_GETFL, 0);
+          if (flags != -1) {
+            if (!(flags & O_NONBLOCK)) {
+              if (fcntl(wsfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+                perror("fcntl F_SETFL O_NONBLOCK (websocket reattach)");
+              } else if (debug_send) {
+                fprintf(stderr, "home: set websocket fd %d non-blocking (reattach) for ws=%p\n", wsfd, (void *)ws);
+              }
+            }
+          } else {
+            perror("fcntl F_GETFL (websocket reattach)");
+          }
+        }
+      } while(0);
       pthread_mutex_unlock(&session_mutex);
       fprintf(stderr, "%s: reattaching websocket ws=%p to existing SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, existing->ssrc, existing->client);
       onion_websocket_set_callback(ws, websocket_cb);
@@ -1410,6 +1527,30 @@ onion_connection_status home(void *data, onion_request * req,
     sp->ssrc=START_SESSION_ID+(i*2);
   }
   sp->ws=ws;
+  /* Try to set the underlying websocket socket to non-blocking so slow
+     clients do not block server threads. As with the reattach path above,
+     this attempts to use `onion_request_get_fd(req)` if available in the
+     libonion build used. */
+  do {
+    int wsfd = -1;
+    wsfd = get_request_fd(req);
+    if (wsfd >= 0) {
+      int flags = fcntl(wsfd, F_GETFL, 0);
+      if (flags != -1) {
+        if (!(flags & O_NONBLOCK)) {
+          if (fcntl(wsfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+            perror("fcntl F_SETFL O_NONBLOCK (websocket)");
+          } else if (debug_send) {
+            fprintf(stderr, "home: set websocket fd %d non-blocking for ws=%p\n", wsfd, (void *)ws);
+          }
+        }
+      } else {
+        perror("fcntl F_GETFL (websocket)");
+      }
+    } else if (debug_send) {
+      fprintf(stderr, "home: unable to obtain websocket fd to set non-blocking for ws=%p\n", (void *)ws);
+    }
+  } while(0);
   fprintf(stderr, "%s: new websocket ws=%p assigned SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, sp->ssrc, sp->client);
   sp->spectrum_active=true;
   sp->audio_active=false;
@@ -2729,7 +2870,11 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
   onion_websocket_set_opcode(sp->ws, OWS_BINARY);
   unsigned long write_start = now_ms();
   if (debug_send) fprintf(stderr, "send_ws_binary_to_session: before write ssrc=%u size=%d t=%lu\n", sp->ssrc, size, write_start);
+  /* mark write in progress for watchdog */
+  sp->write_in_progress = true;
+  sp->last_write_start_ms = write_start;
   int r = onion_websocket_write(sp->ws, (char *)buf, size);
+  sp->write_in_progress = false;
   if (r <= 0) {
     unsigned long write_end = now_ms();
     if (debugSSRC) fprintf(stderr, "send_ws_binary_to_session: write failed: %d (size=%d) ssrc=%u duration=%lums\n", r, size, sp->ssrc, write_end - write_start);
@@ -2787,7 +2932,11 @@ static void send_ws_text_to_session(struct session *sp, const char *msg)
   onion_websocket_set_opcode(sp->ws, OWS_TEXT);
   unsigned long write_start = now_ms();
   if (debug_send) fprintf(stderr, "send_ws_text_to_session: before write ssrc=%u msglen=%zu t=%lu msg=%.16s\n", sp->ssrc, strlen(msg), write_start, msg);
+  /* mark write in progress for watchdog */
+  sp->write_in_progress = true;
+  sp->last_write_start_ms = write_start;
   int r = onion_websocket_write(sp->ws, msg, strlen(msg));
+  sp->write_in_progress = false;
   if (r <= 0) {
     unsigned long write_end = now_ms();
     if (msg != NULL && strcmp(msg, "PING") == 0) {

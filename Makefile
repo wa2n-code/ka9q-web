@@ -23,7 +23,7 @@ KA9Q_RADIO_OBJS=$(KA9Q_RADIO_DIR)/multicast.o $(KA9Q_RADIO_DIR)/status.o $(KA9Q_
 all: ka9q-web
 
 ka9q-web: ka9q-web.o $(KA9Q_RADIO_OBJS)
-	$(CC) -o $@ $^ -lonion -lbsd -lm
+	$(CC) -o $@ $^ -lonion -lbsd -lm -ldl
 
 install: ka9q-web
 	install -m 755 $^ $(PREFIX)/sbin
