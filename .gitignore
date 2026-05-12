@@ -23,3 +23,5 @@ private
 Icon
 Network Trash Folder
 Temporary Items
+# Ignore analysis / tooling outputs
+tools/
