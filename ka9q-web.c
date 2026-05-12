@@ -126,6 +126,13 @@ struct session {
     unsigned long cw_flip_time_ms;
     char cw_flip_prev_preset[8];
     bool opus_active; /* true when client has requested Opus encoding */
+    /* Outgoing websocket queue and writer thread */
+    struct ws_msg *out_head;
+    struct ws_msg *out_tail;
+    pthread_mutex_t out_mutex;
+    pthread_cond_t out_cond;
+    pthread_t writer_task;
+    bool writer_running;
   /* uint32_t last_poll_tag; */
 };
 
@@ -153,6 +160,18 @@ void *ctrl_thread(void *arg);
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size);
 static void send_ws_text_to_session(struct session *sp, const char *msg);
 static void *ws_ping_thread(void *arg);
+/* Outgoing message node for per-session queue */
+struct ws_msg {
+  uint8_t *data;
+  int size;
+  int is_text; /* 1 => text, 0 => binary */
+  struct ws_msg *next;
+};
+
+/* Per-session writer helpers (defined below) */
+static void enqueue_ws_message(struct session *sp, const uint8_t *buf, int size, int is_text);
+static void free_out_queue(struct session *sp);
+static void *session_writer_thread(void *arg);
 /* Forward declarations used by watchdog (defined later) */
 static unsigned long now_ms(void);
 extern pthread_mutex_t session_mutex;
@@ -257,8 +276,7 @@ int debugSSRC = 0;
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 1;
 int debug_send_poll = 0;
-/* Low-volume global send-success counter for temporary debugging */
-static unsigned long send_ok_count = 0;
+/* Low-volume global send-success counter for temporary debugging (removed) */
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
 static unsigned long poll_start_ms = 0;
 /* Monotonic ms timestamp of last successful status packet recv */
@@ -866,6 +884,15 @@ void add_session(struct session *sp) {
     sessions=sp;
   }
   nsessions++;
+  /* Initialize outgoing queue and start writer thread for this session */
+  sp->out_head = sp->out_tail = NULL;
+  pthread_mutex_init(&sp->out_mutex, NULL);
+  pthread_cond_init(&sp->out_cond, NULL);
+  sp->writer_running = true;
+  if (pthread_create(&sp->writer_task, NULL, session_writer_thread, sp) == -1) {
+    perror("pthread_create: session_writer_thread");
+    sp->writer_running = false;
+  }
   pthread_mutex_unlock(&session_mutex);
 //fprintf(stderr,"%s: ssrc=%d first=%p ws=%p nsessions=%d\n",__FUNCTION__,sp->ssrc,sessions,sp->ws,nsessions);
 }
@@ -882,6 +909,17 @@ void delete_session(struct session *sp) {
     sessions=sp->next;
   }
   nsessions--;
+  /* Stop and join writer thread, drain queue */
+  if (sp->writer_running) {
+    pthread_mutex_lock(&sp->out_mutex);
+    sp->writer_running = false;
+    pthread_cond_signal(&sp->out_cond);
+    pthread_mutex_unlock(&sp->out_mutex);
+    pthread_join(sp->writer_task, NULL);
+  }
+  free_out_queue(sp);
+  pthread_mutex_destroy(&sp->out_mutex);
+  pthread_cond_destroy(&sp->out_cond);
 //fprintf(stderr,"%s: sp=%p ssrc=%d first=%p ws=%p nsessions=%d\n",__FUNCTION__,sp,sp->ssrc,sessions,sp->ws,nsessions);
   free(sp);
   pthread_mutex_unlock(&session_mutex);
@@ -2862,53 +2900,10 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
 */
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size)
 {
-  pthread_mutex_lock(&sp->ws_mutex);
-  if (sp->ws == NULL) {
-    pthread_mutex_unlock(&sp->ws_mutex);
-    return;
-  }
-  onion_websocket_set_opcode(sp->ws, OWS_BINARY);
-  unsigned long write_start = now_ms();
-  if (debug_send) fprintf(stderr, "send_ws_binary_to_session: before write ssrc=%u size=%d t=%lu\n", sp->ssrc, size, write_start);
-  /* mark write in progress for watchdog */
-  sp->write_in_progress = true;
-  sp->last_write_start_ms = write_start;
-  int r = onion_websocket_write(sp->ws, (char *)buf, size);
-  sp->write_in_progress = false;
-  if (r <= 0) {
-    unsigned long write_end = now_ms();
-    if (debugSSRC) fprintf(stderr, "send_ws_binary_to_session: write failed: %d (size=%d) ssrc=%u duration=%lums\n", r, size, sp->ssrc, write_end - write_start);
-    /* Perform session-level cleanup similar to websocket_closed(), but do
-       not free the session here (delete_session is called from websocket
-       lifecycle paths). We already hold sp->ws_mutex so avoid re-locking. */
-    control_set_frequency(sp, "0");
-    sp->audio_active = false;
-    pthread_t spectrum_join = 0;
-    if (sp->spectrum_active) {
-      pthread_mutex_lock(&sp->spectrum_mutex);
-      sp->spectrum_active = false;
-      stop_spectrum_stream(sp);
-      spectrum_join = sp->spectrum_task;
-      pthread_mutex_unlock(&sp->spectrum_mutex);
-    }
-    sp->spectrum_requested_by_client = false;
-    sp->spectrum_restart_attempts = 0;
-    sp->last_spectrum_restart_ms = 0;
-    /* Prevent further writes by nulling out websocket pointer. */
-    sp->ws = NULL;
-    pthread_mutex_unlock(&sp->ws_mutex);
-    if (spectrum_join) pthread_join(spectrum_join, NULL);
-    return;
-  }
-  /* Successful send: increment low-volume counter and optionally print a trace. */
-  if (debug_send) {
-    unsigned long write_end = now_ms();
-    send_ok_count++;
-    if ((send_ok_count % 10) == 0) {
-      fprintf(stderr, "send_ws_binary_to_session: send_ok cnt=%lu ssrc=%u size=%d duration=%lums\n", send_ok_count, sp->ssrc, size, write_end - write_start);
-    }
-  }
-  pthread_mutex_unlock(&sp->ws_mutex);
+  /* Enqueue binary payload for the per-session writer thread. */
+  if (sp == NULL) return;
+  if (size <= 0 || buf == NULL) return;
+  enqueue_ws_message(sp, buf, size, 0);
 }
 
 /*
@@ -2924,59 +2919,112 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
 */
 static void send_ws_text_to_session(struct session *sp, const char *msg)
 {
-  pthread_mutex_lock(&sp->ws_mutex);
-  if (sp->ws == NULL) {
+  if (sp == NULL || msg == NULL) return;
+  enqueue_ws_message(sp, (const uint8_t *)msg, (int)strlen(msg), 1);
+}
+
+/* Enqueue a message onto the session outgoing queue. Caller may be any thread. */
+static void enqueue_ws_message(struct session *sp, const uint8_t *buf, int size, int is_text)
+{
+  struct ws_msg *m = calloc(1, sizeof(*m));
+  if (!m) return;
+  m->data = malloc(size);
+  if (!m->data) { free(m); return; }
+  memcpy(m->data, buf, size);
+  m->size = size;
+  m->is_text = is_text;
+  m->next = NULL;
+
+  pthread_mutex_lock(&sp->out_mutex);
+  if (sp->out_tail == NULL) {
+    sp->out_head = sp->out_tail = m;
+  } else {
+    sp->out_tail->next = m;
+    sp->out_tail = m;
+  }
+  pthread_cond_signal(&sp->out_cond);
+  pthread_mutex_unlock(&sp->out_mutex);
+}
+
+/* Free any queued outgoing messages (caller must ensure writer not running). */
+static void free_out_queue(struct session *sp)
+{
+  pthread_mutex_lock(&sp->out_mutex);
+  struct ws_msg *m = sp->out_head;
+  sp->out_head = sp->out_tail = NULL;
+  pthread_mutex_unlock(&sp->out_mutex);
+  while (m) {
+    struct ws_msg *n = m->next;
+    if (m->data) free(m->data);
+    free(m);
+    m = n;
+  }
+}
+
+/* Writer thread: pop messages and perform websocket writes. */
+static void *session_writer_thread(void *arg)
+{
+  struct session *sp = (struct session *)arg;
+  while (1) {
+    pthread_mutex_lock(&sp->out_mutex);
+    while (sp->out_head == NULL && sp->writer_running) {
+      pthread_cond_wait(&sp->out_cond, &sp->out_mutex);
+    }
+    struct ws_msg *m = sp->out_head;
+    if (m) {
+      sp->out_head = m->next;
+      if (sp->out_head == NULL) sp->out_tail = NULL;
+    }
+    int running = sp->writer_running;
+    pthread_mutex_unlock(&sp->out_mutex);
+
+    if (!m) {
+      if (!running) break;
+      continue;
+    }
+
+    /* Perform the write under ws_mutex to serialize with other ws ops. */
+    pthread_mutex_lock(&sp->ws_mutex);
+    if (sp->ws == NULL) {
+      pthread_mutex_unlock(&sp->ws_mutex);
+      free(m->data); free(m);
+      continue;
+    }
+    if (m->is_text)
+      onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+    else
+      onion_websocket_set_opcode(sp->ws, OWS_BINARY);
+
+    sp->write_in_progress = true;
+    sp->last_write_start_ms = now_ms();
+    int r = onion_websocket_write(sp->ws, (char *)m->data, m->size);
+    sp->write_in_progress = false;
+    if (r <= 0) {
+      /* On failure, perform cleanup similar to prior helpers. */
+      control_set_frequency(sp, "0");
+      sp->audio_active = false;
+      pthread_t spectrum_join = 0;
+      if (sp->spectrum_active) {
+        pthread_mutex_lock(&sp->spectrum_mutex);
+        sp->spectrum_active = false;
+        stop_spectrum_stream(sp);
+        spectrum_join = sp->spectrum_task;
+        pthread_mutex_unlock(&sp->spectrum_mutex);
+      }
+      sp->spectrum_requested_by_client = false;
+      sp->spectrum_restart_attempts = 0;
+      sp->last_spectrum_restart_ms = 0;
+      sp->ws = NULL;
+      pthread_mutex_unlock(&sp->ws_mutex);
+      if (spectrum_join) pthread_join(spectrum_join, NULL);
+      free(m->data); free(m);
+      /* After a failed write we break out and allow deletion to proceed */
+      break;
+    }
     pthread_mutex_unlock(&sp->ws_mutex);
-    return;
+    free(m->data); free(m);
   }
-  onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-  unsigned long write_start = now_ms();
-  if (debug_send) fprintf(stderr, "send_ws_text_to_session: before write ssrc=%u msglen=%zu t=%lu msg=%.16s\n", sp->ssrc, strlen(msg), write_start, msg);
-  /* mark write in progress for watchdog */
-  sp->write_in_progress = true;
-  sp->last_write_start_ms = write_start;
-  int r = onion_websocket_write(sp->ws, msg, strlen(msg));
-  sp->write_in_progress = false;
-  if (r <= 0) {
-    unsigned long write_end = now_ms();
-    if (msg != NULL && strcmp(msg, "PING") == 0) {
-      fprintf(stderr, "ws_ping: write failed for ssrc=%u rc=%d duration=%lums msg=%.16s\n", sp->ssrc, r, write_end - write_start, msg);
-    } else {
-      fprintf(stderr, "send_ws_text_to_session: write failed: %d duration=%lums msg=%.64s\n", r, write_end - write_start, msg);
-    }
-    /* Cleanup similar to websocket_closed() but do not free session here. */
-    control_set_frequency(sp, "0");
-    sp->audio_active = false;
-    pthread_t spectrum_join = 0;
-    if (sp->spectrum_active) {
-      pthread_mutex_lock(&sp->spectrum_mutex);
-      sp->spectrum_active = false;
-      stop_spectrum_stream(sp);
-      spectrum_join = sp->spectrum_task;
-      pthread_mutex_unlock(&sp->spectrum_mutex);
-    }
-    sp->spectrum_requested_by_client = false;
-    sp->spectrum_restart_attempts = 0;
-    sp->last_spectrum_restart_ms = 0;
-    sp->ws = NULL;
-    pthread_mutex_unlock(&sp->ws_mutex);
-    if (spectrum_join) pthread_join(spectrum_join, NULL);
-    return;
-  }
-  if (debug_send) {
-    unsigned long write_end = now_ms();
-    if (strcmp(msg, "PING") != 0) {
-      /* print infrequent trace for non-ping messages */
-      fprintf(stderr, "send_ws_text_to_session: send_ok ssrc=%u msglen=%zu duration=%lums\n", sp->ssrc, strlen(msg), write_end - write_start);
-    }
-  }
-  if (debug_send) {
-    send_ok_count++;
-    if ((send_ok_count % 10) == 0) {
-      fprintf(stderr, "send_ws_text_to_session: send_ok cnt=%lu ssrc=%u len=%zu\n", send_ok_count, sp->ssrc, strlen(msg));
-    }
-  }
-  pthread_mutex_unlock(&sp->ws_mutex);
+  return NULL;
 }
 
 /* Helper: scan TLV buffer for presence of a type without fully decoding */
