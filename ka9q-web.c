@@ -199,6 +199,7 @@ static int const DEFAULT_IP_TOS = 48;
 
 /* watchdog: detect websocket write operations that have blocked for too long
    and recover by cleaning up the session (similar to a write failure). */
+extern int debug_send;
 static void *ws_watchdog_thread(void *arg) {
   (void)arg;
   const unsigned long threshold_ms = 500; /* consider write stuck after 500ms */
@@ -228,6 +229,16 @@ static void *ws_watchdog_thread(void *arg) {
          thread is stuck holding that mutex. This is racy but acceptable for
          watchdog recovery: detection only needs to be approximate. */
       if (sp->write_in_progress) {
+        /* Sanity-check timestamp to avoid unsigned wrap when clocks/domain
+           mismatches or uninitialized values occur. If `last_write_start_ms`
+           is zero or appears to be in the future relative to `now`, skip
+           age calculation and wait for a sane value. */
+        if (sp->last_write_start_ms == 0 || sp->last_write_start_ms > now) {
+          if (debug_send) {
+            fprintf(stderr, "ws_watchdog: skipping age calc for ssrc=%u last_write_start_ms=%lu now=%lu\n", sp->ssrc, sp->last_write_start_ms, now);
+          }
+          continue;
+        }
         unsigned long age = now - sp->last_write_start_ms;
         if (age > threshold_ms) {
           fprintf(stderr, "ws_watchdog: write stuck for %lums on ssrc=%u, cleaning session\n", age, sp->ssrc);
