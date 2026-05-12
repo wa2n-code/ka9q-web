@@ -839,7 +839,7 @@ static struct session *find_session_from_ssrc(int ssrc) {
 void websocket_closed(struct session *sp) {
   if (verbose)
     fprintf(stderr,"%s(): SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
-
+  pthread_t spectrum_join = 0;
   pthread_mutex_lock(&sp->ws_mutex);
   control_set_frequency(sp,"0");
   sp->audio_active=false;
@@ -847,14 +847,15 @@ void websocket_closed(struct session *sp) {
     pthread_mutex_lock(&sp->spectrum_mutex);
     sp->spectrum_active=false;
     stop_spectrum_stream(sp);
+    spectrum_join = sp->spectrum_task;
     pthread_mutex_unlock(&sp->spectrum_mutex);
-    pthread_join(sp->spectrum_task,NULL);
   }
   /* Client disconnected: mark that client no longer requests spectrum */
   sp->spectrum_requested_by_client = false;
   sp->spectrum_restart_attempts = 0;
   sp->last_spectrum_restart_ms = 0;
   pthread_mutex_unlock(&sp->ws_mutex);
+  if (spectrum_join) pthread_join(spectrum_join, NULL);
 }
 
 static void check_frequency(struct session *sp) {
@@ -1367,7 +1368,24 @@ onion_connection_status home(void *data, onion_request * req,
     return OCS_PROCESSED;
   }
 
-  // create session
+  // create session (or attempt to reattach to an existing one for this client)
+  const char *client_desc = onion_request_get_client_description(req);
+  // Try to find an existing session with the same client description and attach to it.
+  pthread_mutex_lock(&session_mutex);
+  struct session *existing = sessions;
+  while (existing != NULL) {
+    if (client_desc && strcmp(existing->client, client_desc) == 0) {
+      // Reattach websocket to existing session to preserve SSRC and state
+      existing->ws = ws;
+      pthread_mutex_unlock(&session_mutex);
+      fprintf(stderr, "%s: reattaching websocket ws=%p to existing SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, existing->ssrc, existing->client);
+      onion_websocket_set_callback(ws, websocket_cb);
+      return OCS_WEBSOCKET;
+    }
+    existing = existing->next;
+  }
+  pthread_mutex_unlock(&session_mutex);
+
   int i;
   struct session *sp=calloc(1,sizeof(*sp));
   /*
@@ -1421,7 +1439,8 @@ onion_connection_status home(void *data, onion_request * req,
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
   strlcpy(sp->requested_preset,"am",sizeof(sp->requested_preset));
-  strlcpy(sp->client,onion_request_get_client_description(req),sizeof(sp->client));
+  if (client_desc)
+    strlcpy(sp->client, client_desc, sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
   pthread_mutex_init(&sp->spectrum_mutex,NULL);
   /* initialize per-session poll interval from global default */
@@ -2708,21 +2727,24 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
     return;
   }
   onion_websocket_set_opcode(sp->ws, OWS_BINARY);
+  unsigned long write_start = now_ms();
+  if (debug_send) fprintf(stderr, "send_ws_binary_to_session: before write ssrc=%u size=%d t=%lu\n", sp->ssrc, size, write_start);
   int r = onion_websocket_write(sp->ws, (char *)buf, size);
   if (r <= 0) {
-    if (debugSSRC)
-      fprintf(stderr, "send_ws_binary_to_session: write failed: %d (size=%d) ssrc=%u\n", r, size, sp->ssrc);
+    unsigned long write_end = now_ms();
+    if (debugSSRC) fprintf(stderr, "send_ws_binary_to_session: write failed: %d (size=%d) ssrc=%u duration=%lums\n", r, size, sp->ssrc, write_end - write_start);
     /* Perform session-level cleanup similar to websocket_closed(), but do
        not free the session here (delete_session is called from websocket
        lifecycle paths). We already hold sp->ws_mutex so avoid re-locking. */
     control_set_frequency(sp, "0");
     sp->audio_active = false;
+    pthread_t spectrum_join = 0;
     if (sp->spectrum_active) {
       pthread_mutex_lock(&sp->spectrum_mutex);
       sp->spectrum_active = false;
       stop_spectrum_stream(sp);
+      spectrum_join = sp->spectrum_task;
       pthread_mutex_unlock(&sp->spectrum_mutex);
-      pthread_join(sp->spectrum_task, NULL);
     }
     sp->spectrum_requested_by_client = false;
     sp->spectrum_restart_attempts = 0;
@@ -2730,13 +2752,15 @@ static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size
     /* Prevent further writes by nulling out websocket pointer. */
     sp->ws = NULL;
     pthread_mutex_unlock(&sp->ws_mutex);
+    if (spectrum_join) pthread_join(spectrum_join, NULL);
     return;
   }
   /* Successful send: increment low-volume counter and optionally print a trace. */
   if (debug_send) {
+    unsigned long write_end = now_ms();
     send_ok_count++;
     if ((send_ok_count % 10) == 0) {
-      fprintf(stderr, "send_ws_binary_to_session: send_ok cnt=%lu ssrc=%u size=%d\n", send_ok_count, sp->ssrc, size);
+      fprintf(stderr, "send_ws_binary_to_session: send_ok cnt=%lu ssrc=%u size=%d duration=%lums\n", send_ok_count, sp->ssrc, size, write_end - write_start);
     }
   }
   pthread_mutex_unlock(&sp->ws_mutex);
@@ -2761,29 +2785,41 @@ static void send_ws_text_to_session(struct session *sp, const char *msg)
     return;
   }
   onion_websocket_set_opcode(sp->ws, OWS_TEXT);
+  unsigned long write_start = now_ms();
+  if (debug_send) fprintf(stderr, "send_ws_text_to_session: before write ssrc=%u msglen=%zu t=%lu msg=%.16s\n", sp->ssrc, strlen(msg), write_start, msg);
   int r = onion_websocket_write(sp->ws, msg, strlen(msg));
   if (r <= 0) {
+    unsigned long write_end = now_ms();
     if (msg != NULL && strcmp(msg, "PING") == 0) {
-      fprintf(stderr, "ws_ping: write failed for ssrc=%u rc=%d msg=%s\n", sp->ssrc, r, msg);
+      fprintf(stderr, "ws_ping: write failed for ssrc=%u rc=%d duration=%lums msg=%.16s\n", sp->ssrc, r, write_end - write_start, msg);
     } else {
-      fprintf(stderr, "send_ws_text_to_session: write failed: %d msg=%s\n", r, msg);
+      fprintf(stderr, "send_ws_text_to_session: write failed: %d duration=%lums msg=%.64s\n", r, write_end - write_start, msg);
     }
     /* Cleanup similar to websocket_closed() but do not free session here. */
     control_set_frequency(sp, "0");
     sp->audio_active = false;
+    pthread_t spectrum_join = 0;
     if (sp->spectrum_active) {
       pthread_mutex_lock(&sp->spectrum_mutex);
       sp->spectrum_active = false;
       stop_spectrum_stream(sp);
+      spectrum_join = sp->spectrum_task;
       pthread_mutex_unlock(&sp->spectrum_mutex);
-      pthread_join(sp->spectrum_task, NULL);
     }
     sp->spectrum_requested_by_client = false;
     sp->spectrum_restart_attempts = 0;
     sp->last_spectrum_restart_ms = 0;
     sp->ws = NULL;
     pthread_mutex_unlock(&sp->ws_mutex);
+    if (spectrum_join) pthread_join(spectrum_join, NULL);
     return;
+  }
+  if (debug_send) {
+    unsigned long write_end = now_ms();
+    if (strcmp(msg, "PING") != 0) {
+      /* print infrequent trace for non-ping messages */
+      fprintf(stderr, "send_ws_text_to_session: send_ok ssrc=%u msglen=%zu duration=%lums\n", sp->ssrc, strlen(msg), write_end - write_start);
+    }
   }
   if (debug_send) {
     send_ok_count++;
