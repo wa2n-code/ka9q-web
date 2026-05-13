@@ -8,6 +8,10 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // Heartbeat/watchdog for detecting silent-but-open websocket (server stuck)
+      let _lastWsMsgTs = 0;
+      let _wsHeartbeatWatchdog = null;
+      const WS_HEARTBEAT_TIMEOUT_MS = 3000; // force reconnect if no messages for 3s
       // Client identifier and per-client sequence for reliable client->server control acks
       // Backend must be updated to accept wrapped messages in the form:
       //   C:<clientId>:<seq>:<payload>
@@ -397,6 +401,7 @@
         sampleRate: 12000,
         flushingTime: 250
         });
+      try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
 
       // Opus decoder state
       let opusDecoder = null;
@@ -429,6 +434,8 @@
           setPlayerVolume(volumeSliderInit.value);
         }
       }
+
+      
 
       var pending_range_update = false;
       var target_frequency = frequencyHz;
@@ -606,20 +613,66 @@ function applyQuickBW() {
           // while we force-send stored settings so the UI doesn't flash defaults.
           try { blockProgrammaticUpdates(1500); } catch (e) {}
         // get the SSRC
+        _lastWsMsgTs = Date.now();
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
+        // Send mode immediately to reduce race with server status/defaults
+        try { sendControl('mode','M:' + target_preset); } catch (e) { console.warn('Immediate mode send failed', e); }
         // default to 20 Mtr band
-        //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         updateCWMarker();
-        // Stagger initial control messages slightly to avoid overwhelming backend
-        // Send initial mode and frequency on open, but do NOT bypass programmatic
-        // UI suppression so we don't overwrite a server-driven state.
-        setTimeout(() => { try { sendControl('mode','M:' + target_preset); } catch (e) {} }, 30);
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 90);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 150);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 210);
+        // Stagger remaining initial control messages slightly to avoid overwhelming backend
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 60);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 120);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 180);
+        // Resend tuned frequency and, if audio was running prior to reconnect,
+        // perform a short stop/start to force the backend audio channel to
+        // match the UI-displayed tuned frequency.
+        try {
+          setTimeout(() => {
+            try {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {}
+                try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {}
+              }
+              const btn = document.getElementById("audio_button");
+              if (btn && btn.value === "STOP") {
+                // audio was running before reconnect — restart it to ensure
+                // backend audio channel follows the tuned frequency
+                try { sendControl('audio', "A:STOP:" + ssrc.toString(), 50); } catch (e) {}
+                const useOpus = document.getElementById('opus_checkbox') && document.getElementById('opus_checkbox').checked;
+                setTimeout(() => {
+                  try {
+                    if (useOpus) {
+                      // ensure decoder ready then request Opus + start
+                      try { initOpusDecoder(); } catch (e) {}
+                      try { sendControl('audio', "O:OPUS:" + ssrc.toString(), 50); } catch (e) {}
+                    } else {
+                      try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
+                    }
+                    try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
+                  } catch (e) {}
+                }, 150);
+              }
+            } catch (e) {}
+          }, 420);
+        } catch (e) {}
+        // start heartbeat watchdog to detect silent-but-open websocket (server stuck)
+        try {
+          if (_wsHeartbeatWatchdog) clearInterval(_wsHeartbeatWatchdog);
+          _wsHeartbeatWatchdog = setInterval(() => {
+            try {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                const age = Date.now() - _lastWsMsgTs;
+                if (age > WS_HEARTBEAT_TIMEOUT_MS) {
+                  console.warn('[radio.js] websocket silent for', age, 'ms — forcing reconnect');
+                  try { ws.close(); } catch (e) {}
+                }
+              }
+            } catch (e) {}
+          }, 1000);
+        } catch (e) {}
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
@@ -999,10 +1052,12 @@ function applyQuickBW() {
       }
 
       function on_ws_close(evt) {
-         console.log("WebSocket closed:", evt);
+        console.log("WebSocket closed:", evt);
+        if (_wsHeartbeatWatchdog) { clearInterval(_wsHeartbeatWatchdog); _wsHeartbeatWatchdog = null; }
       }
 
       async function on_ws_message(evt) {
+        _lastWsMsgTs = Date.now();
         if(typeof evt.data === 'string') {
           // text data
           //console.log(evt.data);
@@ -1558,6 +1613,7 @@ function applyQuickBW() {
                   try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
                   player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                   try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                 } else if (player.audioCtx && player.audioCtx.state === 'closed') {
                   try { console.warn('radio: audioCtx closed — recreating player'); } catch (e) {}
                   let modeEl = document.getElementById('mode');
@@ -1567,6 +1623,7 @@ function applyQuickBW() {
                   try { player.destroy(); } catch (e) {}
                   player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                   try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                 } else if (player.audioCtx && player.audioCtx.state === 'suspended') {
                   try { player.audioCtx.resume(); } catch (e) {}
                   // If resume does not succeed, recreate after short delay
@@ -1582,6 +1639,7 @@ function applyQuickBW() {
                           try { if (p && typeof p.destroy === 'function') p.destroy(); } catch (e) {}
                           p = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                           try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                          try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                           player = p;
                         }
                       } catch (ee) {}
@@ -1610,6 +1668,7 @@ function applyQuickBW() {
                         sampleRate: result.sampleRate,
                         flushingTime: 250
                       });
+                      try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                       try {
                         const vs = document.getElementById('volume_control');
                         if (vs) setPlayerVolume(vs.value);
@@ -1702,12 +1761,155 @@ function applyQuickBW() {
             spectrum.radio_pointer = window;
             page_title = "";
 
-            ws=new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
-            ws.onmessage=on_ws_message;
-            ws.onopen=on_ws_open;
-            ws.onclose=on_ws_close;
-            ws.binaryType = "arraybuffer";
-            ws.onerror = on_ws_error;
+            // Create websocket with reconnect support + UI popup for status/cancel
+            (function() {
+              let reconnectTimer = null;
+              let reconnectDelayMs = 1000;
+              const reconnectMaxDelayMs = 30000;
+              let reconnectCancelled = false;
+              let reconnectCountdownInterval = null;
+              let isAttemptingConnect = false;
+              let hasEverConnected = false;
+
+              function createReconnectPopup() {
+                if (document.getElementById('ws-reconnect-popup')) return;
+                const header = hasEverConnected ? 'Connection lost — retrying' : 'Unable to connect — retrying';
+                const wrapper = document.createElement('div');
+                wrapper.id = 'ws-reconnect-popup';
+                wrapper.style.position = 'fixed';
+                wrapper.style.left = '50%';
+                wrapper.style.top = '20%';
+                wrapper.style.transform = 'translateX(-50%)';
+                wrapper.style.background = 'rgba(0,0,0,0.85)';
+                wrapper.style.color = '#fff';
+                wrapper.style.padding = '16px';
+                wrapper.style.border = '2px solid #444';
+                wrapper.style.borderRadius = '8px';
+                wrapper.style.zIndex = 9999;
+                wrapper.style.minWidth = '300px';
+                wrapper.innerHTML = '<div style="font-weight:600;margin-bottom:8px;">' + header + '</div>' +
+                  '<div id="ws-reconnect-info" style="margin-bottom:8px;">Retrying in <span id="ws-retry-seconds">0</span>s (backoff)</div>' +
+                  '<div style="text-align:right;">' +
+                    '<button id="ws-reconnect-retry" style="padding:6px 10px;margin-right:8px;">Retry Now</button>' +
+                    '<button id="ws-reconnect-cancel" style="padding:6px 10px;">Cancel</button>' +
+                  '</div>';
+                document.body.appendChild(wrapper);
+                document.getElementById('ws-reconnect-cancel').addEventListener('click', cancelReconnecting);
+                document.getElementById('ws-reconnect-retry').addEventListener('click', retryNow);
+              }
+
+              function showReconnectPopup(delayMs) {
+                try {
+                  if (reconnectCancelled) return;
+                  createReconnectPopup();
+                  const infoEl = document.getElementById('ws-reconnect-info');
+                  if (infoEl) {
+                    infoEl.innerHTML = 'Retrying in <span id="ws-retry-seconds">0</span>s (backoff)';
+                  }
+                  const secondsEl = document.getElementById('ws-retry-seconds');
+                  if (!secondsEl) return;
+                  const start = Date.now();
+                  const end = start + delayMs;
+                  if (reconnectCountdownInterval) clearInterval(reconnectCountdownInterval);
+                  function update() {
+                    const rem = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+                    secondsEl.textContent = rem.toString();
+                  }
+                  update();
+                  reconnectCountdownInterval = setInterval(update, 250);
+                } catch (e) { console.warn('showReconnectPopup error', e); }
+              }
+
+              function hideReconnectPopup() {
+                try {
+                  if (reconnectCountdownInterval) { clearInterval(reconnectCountdownInterval); reconnectCountdownInterval = null; }
+                  const el = document.getElementById('ws-reconnect-popup');
+                  if (el && el.parentNode) el.parentNode.removeChild(el);
+                } catch (e) { console.warn('hideReconnectPopup error', e); }
+              }
+
+              function setPopupRetryingNow() {
+                try {
+                  if (reconnectCountdownInterval) { clearInterval(reconnectCountdownInterval); reconnectCountdownInterval = null; }
+                  const infoEl = document.getElementById('ws-reconnect-info');
+                  if (infoEl) {
+                    // Preserve the retry-seconds span so future countdowns can reuse it
+                    infoEl.innerHTML = 'Retrying now... <span id="ws-retry-seconds" style="display:none">0</span>';
+                  }
+                } catch (e) { console.warn('setPopupRetryingNow error', e); }
+              }
+
+              function cancelReconnecting() {
+                try {
+                  reconnectCancelled = true;
+                  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                  hideReconnectPopup();
+                  console.info('[radio.js] websocket reconnecting cancelled by user');
+                } catch (e) { console.warn('cancelReconnecting error', e); }
+              }
+
+              function retryNow() {
+                try {
+                  // Reset backoff to 1s for subsequent failures and attempt immediate reconnect
+                  reconnectDelayMs = 1000;
+                  reconnectCancelled = false;
+                  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                  console.info('[radio.js] websocket retry requested by user');
+                  connectWebSocket();
+                } catch (e) { console.warn('retryNow error', e); }
+              }
+
+              function scheduleReconnect() {
+                try {
+                  if (reconnectCancelled) return;
+                  if (reconnectTimer || isAttemptingConnect) return; // already scheduled or mid-connect
+                  showReconnectPopup(reconnectDelayMs);
+                  reconnectTimer = setTimeout(() => {
+                    reconnectTimer = null;
+                    if (reconnectCancelled) return;
+                    reconnectDelayMs = Math.min(reconnectDelayMs * 2, reconnectMaxDelayMs);
+                    // Actual connection attempt will update popup to 'Retrying now...'
+                    connectWebSocket();
+                  }, reconnectDelayMs);
+                  console.info('[radio.js] scheduling websocket reconnect in', reconnectDelayMs, 'ms');
+                } catch (e) { console.warn('scheduleReconnect error', e); }
+              }
+
+              function connectWebSocket() {
+                try {
+                  if (reconnectCancelled) return;
+                  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+                  isAttemptingConnect = true;
+                  setPopupRetryingNow();
+                  ws = new WebSocket((window.location.protocol == 'https:' ? 'wss://' : 'ws://') + window.location.host);
+                  ws.onmessage = on_ws_message;
+                  ws.onopen = function(evt) {
+                    reconnectDelayMs = 1000;
+                    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                    console.info('[radio.js] WebSocket opened/reconnected; readyState=', ws.readyState);
+                    isAttemptingConnect = false;
+                    hasEverConnected = true;
+                    hideReconnectPopup();
+                    reconnectCancelled = false;
+                    try { on_ws_open(evt); } catch (e) { console.warn('on_ws_open threw', e); }
+                  };
+                  ws.onclose = function(evt) {
+                    isAttemptingConnect = false;
+                    try { on_ws_close(evt); } catch (e) { console.warn('on_ws_close threw', e); }
+                    if (!reconnectCancelled) scheduleReconnect();
+                  };
+                  ws.binaryType = "arraybuffer";
+                  ws.onerror = on_ws_error;
+                } catch (e) {
+                  isAttemptingConnect = false;
+                  console.warn('connectWebSocket failed', e);
+                  scheduleReconnect();
+                }
+              }
+
+              // Kick off initial connection
+              connectWebSocket();
+            })();
             // Attach input handlers now that DOM may be ready
             try { document.getElementById('waterfall').addEventListener("wheel", onWheel, false); } catch (e) {}
             try { document.getElementById('waterfall').addEventListener("keydown", (event) => { spectrum.onKeypress(event); }, false); } catch (e) {}
@@ -1720,6 +1922,13 @@ function applyQuickBW() {
             try { document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on"); } catch (e) {}
             try { const sb = document.getElementById('sendShiftButton'); if (sb) sb.addEventListener('click', () => sendShift(true), false); } catch (e) {}
             try { const si = document.getElementById('shiftInput'); if (si) si.addEventListener('keypress', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); sendShift(true); } }); } catch (e) {}
+            try {
+              const pEl = document.getElementById('panner_control');
+              if (pEl && !pEl.dataset.pannerBound) {
+                pEl.addEventListener('input', function() { try { setPanner(this.value); saveSettings(); } catch (e) {} });
+                pEl.dataset.pannerBound = '1';
+              }
+            } catch (e) {}
 
             // set zoom, preset, spectrum percentage?
             try { spectrum.setAveraging(spectrum.averaging); } catch (e) {}
@@ -2418,6 +2627,7 @@ function applyQuickBW() {
           sampleRate: newSampleRate,
           flushingTime: 250
       });
+        try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
       // Set the player volume to match the slider after reinitializing
       const volumeSlider = document.getElementById('volume_control');
       if (volumeSlider) {
@@ -2801,6 +3011,7 @@ function applyQuickBW() {
                   sampleRate: newSampleRate,
                   flushingTime: 250
                 });
+                try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
               } else {
                 try { player.resume(); } catch (e) {
                   try { player.destroy(); } catch (ee) {}
@@ -3362,7 +3573,67 @@ function saveSettings() {
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
+  try {
+    const pEl = document.getElementById('panner_control');
+    if (pEl) {
+      const pval = Number(pEl.value);
+      if (!Number.isNaN(pval)) localStorage.setItem('panner_value', pval);
+    }
+  } catch (e) {}
   try { localStorage.setItem("useOpus", (document.getElementById("opus_checkbox") && document.getElementById("opus_checkbox").checked) ? "true" : "false"); } catch (e) {}
+}
+
+// Set panner value for audio output and persist it. Best-effort only —
+// some players may not expose an API for panning; this function stores
+// the preference and calls into the player if possible.
+function setPanner(value) {
+  try {
+    const v = Number(value);
+    if (typeof player !== 'undefined' && player) {
+      // Prefer a built-in pan API if present
+      try { if (typeof player.pan === 'function') { player.pan(v); } } catch (e) {}
+      // If WebAudio is available, attempt to create/apply a StereoPannerNode
+      try {
+        const ac = player.audioCtx || (player && player._audioCtx) || null;
+        if (ac && typeof ac.createStereoPanner === 'function') {
+          if (!window.__ka9q_stereo_panner) {
+            window.__ka9q_stereo_panner = ac.createStereoPanner();
+            // Best-effort hookup: connect panner to destination if possible
+            try { window.__ka9q_stereo_panner.connect(ac.destination); } catch (e) {}
+          }
+          try { window.__ka9q_stereo_panner.pan.value = v; } catch (e) {}
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  try { if (window.localStorage) localStorage.setItem('panner_value', String(value)); } catch (e) {}
+}
+
+// Global delegation fallback: ensure panner changes are handled even if the
+// element's direct listener wasn't bound yet (applies immediately).
+try {
+  document.addEventListener('input', function (e) {
+    try {
+      if (!e || !e.target) return;
+      if (e.target.id === 'panner_control') {
+        try { setPanner(e.target.value); } catch (err) {}
+        try { if (window.localStorage) localStorage.setItem('panner_value', String(e.target.value)); } catch (err) {}
+      }
+    } catch (ee) {}
+  });
+} catch (e) {}
+
+// Apply saved panner value (best-effort). Reads from localStorage and calls
+// `setPanner()` so the panner is applied after any newly-created player.
+function applySavedPanner() {
+  try {
+    if (!window.localStorage) return;
+    const v = localStorage.getItem('panner_value');
+    if (v === null) return;
+    const pv = Number(v);
+    if (Number.isNaN(pv)) return;
+    try { setPanner(pv); } catch (e) {}
+  } catch (e) {}
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -3604,6 +3875,33 @@ function loadSettings() {
     try { document.getElementById("volume_control").value = vc; } catch (e) {}
     setPlayerVolume(vc);
   }
+
+  // Restore panner if stored. Retry a few times in case the element
+  // hasn't been attached to the DOM yet (options dialog or late load).
+  try {
+    const pv = getLS('panner_value', v => parseFloat(v), null);
+    if (pv !== null && !isNaN(pv)) {
+      const tryRestore = (attempts) => {
+        try {
+          const pel = document.getElementById('panner_control');
+          if (pel) {
+            try { pel.value = pv; } catch (e) {}
+            try { setPanner(pv); } catch (e) {}
+            // ensure input listener is bound so subsequent changes persist
+            try {
+              if (!pel.dataset.pannerBound) {
+                pel.addEventListener('input', function() { try { setPanner(this.value); saveSettings(); } catch (e) {} });
+                pel.dataset.pannerBound = '1';
+              }
+            } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        if (attempts > 0) setTimeout(() => tryRestore(attempts - 1), 200);
+      };
+      tryRestore(10);
+    }
+  } catch (e) {}
 
   // Ensure frequency memories exist in localStorage; create defaults if missing
   try {
@@ -4062,13 +4360,6 @@ function setPlayerVolume(value) {
     //console.log(`Volume set to: ${gain} (slider: ${slider})`);
   }
 
-  function setPanner(value) {
-    if (typeof player !== 'undefined' && typeof player.pan === 'function') {
-        player.pan(parseFloat(value)); // Update the panner value
-    } else {
-        console.error('Player or pan function is not defined.');
-    }
-}
 
 let isRecording = false;
 function toggleAudioRecording() {
