@@ -626,6 +626,38 @@ function applyQuickBW() {
         setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 60);
         setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 120);
         setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 180);
+        // Resend tuned frequency and, if audio was running prior to reconnect,
+        // perform a short stop/start to force the backend audio channel to
+        // match the UI-displayed tuned frequency.
+        try {
+          setTimeout(() => {
+            try {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {}
+                try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {}
+              }
+              const btn = document.getElementById("audio_button");
+              if (btn && btn.value === "STOP") {
+                // audio was running before reconnect — restart it to ensure
+                // backend audio channel follows the tuned frequency
+                try { sendControl('audio', "A:STOP:" + ssrc.toString(), 50); } catch (e) {}
+                const useOpus = document.getElementById('opus_checkbox') && document.getElementById('opus_checkbox').checked;
+                setTimeout(() => {
+                  try {
+                    if (useOpus) {
+                      // ensure decoder ready then request Opus + start
+                      try { initOpusDecoder(); } catch (e) {}
+                      try { sendControl('audio', "O:OPUS:" + ssrc.toString(), 50); } catch (e) {}
+                    } else {
+                      try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
+                    }
+                    try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
+                  } catch (e) {}
+                }, 150);
+              }
+            } catch (e) {}
+          }, 420);
+        } catch (e) {}
         // start heartbeat watchdog to detect silent-but-open websocket (server stuck)
         try {
           if (_wsHeartbeatWatchdog) clearInterval(_wsHeartbeatWatchdog);
