@@ -932,20 +932,29 @@ void delete_session(struct session *sp) {
     sessions=sp->next;
   }
   nsessions--;
-  /* Stop and join writer thread, drain queue */
+  /* Stop writer thread without holding session_mutex while joining it.
+     Holding session_mutex during pthread_join can deadlock if the writer
+     thread attempts to acquire session_mutex while cleaning up a blocked
+     write. To avoid that, signal the writer to stop, release
+     session_mutex, then join the writer. */
+  bool need_join = false;
   if (sp->writer_running) {
+    need_join = true;
     pthread_mutex_lock(&sp->out_mutex);
     sp->writer_running = false;
     pthread_cond_signal(&sp->out_cond);
     pthread_mutex_unlock(&sp->out_mutex);
-    pthread_join(sp->writer_task, NULL);
   }
+  /* Release session list lock before waiting for writer to exit. */
+  pthread_mutex_unlock(&session_mutex);
+
+  if (need_join)
+    pthread_join(sp->writer_task, NULL);
+
   free_out_queue(sp);
   pthread_mutex_destroy(&sp->out_mutex);
   pthread_cond_destroy(&sp->out_cond);
-//fprintf(stderr,"%s: sp=%p ssrc=%d first=%p ws=%p nsessions=%d\n",__FUNCTION__,sp,sp->ssrc,sessions,sp->ws,nsessions);
   free(sp);
-  pthread_mutex_unlock(&session_mutex);
 }
 
 // Note that this locks the session_mutex *if* it finds a session
