@@ -40,6 +40,7 @@
 #include <math.h>
 #include <sys/time.h>
 #include <syslog.h>
+#include <poll.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -76,6 +77,7 @@ struct session {
   bool spectrum_active;
   bool audio_active;
   onion_websocket *ws;
+  int ws_fd; /* underlying websocket socket fd, or -1 if unknown */
   pthread_mutex_t ws_mutex;
   uint32_t ssrc;
   bool write_in_progress;
@@ -192,6 +194,8 @@ static int get_request_fd(void *req) {
 /* Tentative declarations so watchdog can reference them before the real defs */
 static int nsessions;
 static struct session *sessions;
+/* Forward declaration so ws_watchdog_thread can call delete_session without implicit declaration warning */
+void delete_session(struct session *sp);
 
 struct frontend Frontend;
 struct sockaddr Metadata_source_socket;       // Source of metadata
@@ -245,26 +249,28 @@ static void *ws_watchdog_thread(void *arg) {
         if (age > threshold_ms) {
           fprintf(stderr, "ws_watchdog: write stuck for %lums on ssrc=%u, cleaning session\n", age, sp->ssrc);
           /* Perform recovery while holding session_mutex so we do not race
-             with session list operations. We intentionally avoid locking
-             sp->ws_mutex here to prevent deadlock against the blocked writer. */
-          pthread_mutex_lock(&session_mutex);
-          control_set_frequency(sp, "0");
-          sp->audio_active = false;
-          if (sp->spectrum_active) {
-            pthread_mutex_lock(&sp->spectrum_mutex);
-            sp->spectrum_active = false;
-            stop_spectrum_stream(sp);
-            spectrum_join = sp->spectrum_task;
-            pthread_mutex_unlock(&sp->spectrum_mutex);
-          }
-          sp->spectrum_requested_by_client = false;
-          sp->spectrum_restart_attempts = 0;
-          sp->last_spectrum_restart_ms = 0;
-          sp->write_in_progress = false;
-          /* Prevent further writes by nulling out websocket pointer. */
-          sp->ws = NULL;
-          pthread_mutex_unlock(&session_mutex);
-          if (spectrum_join) pthread_join(spectrum_join, NULL);
+               with session list operations. We intentionally avoid locking
+               sp->ws_mutex here to prevent deadlock against the blocked writer. */
+            pthread_mutex_lock(&session_mutex);
+            control_set_frequency(sp, "0");
+            sp->audio_active = false;
+            if (sp->spectrum_active) {
+              pthread_mutex_lock(&sp->spectrum_mutex);
+              sp->spectrum_active = false;
+              stop_spectrum_stream(sp);
+              spectrum_join = sp->spectrum_task;
+              pthread_mutex_unlock(&sp->spectrum_mutex);
+            }
+            sp->spectrum_requested_by_client = false;
+            sp->spectrum_restart_attempts = 0;
+            sp->last_spectrum_restart_ms = 0;
+            sp->write_in_progress = false;
+            /* Remove the stuck session entirely so reconnects create a fresh
+               session and spectrum can be restarted cleanly. `delete_session`
+               expects `session_mutex` to be held and will release it before
+               joining the writer thread. */
+            delete_session(sp);
+            if (spectrum_join) pthread_join(spectrum_join, NULL);
         }
       }
     }
@@ -892,6 +898,7 @@ bool run_with_realtime = false;
 void add_session(struct session *sp) {
   /* Ensure per-session spectrum/restart fields are deterministic */
   sp->last_spectrum_recv_ms = 0;
+  sp->ws_fd = -1;
   sp->spectrum_requested_by_client = false;
   sp->spectrum_restart_attempts = 0;
   sp->last_spectrum_restart_ms = 0;
@@ -1578,6 +1585,8 @@ onion_connection_status home(void *data, onion_request * req,
           } else {
             perror("fcntl F_GETFL (websocket reattach)");
           }
+          /* record fd on reattach so writer thread can poll it */
+          existing->ws_fd = wsfd;
         }
       } while(0);
       pthread_mutex_unlock(&session_mutex);
@@ -1645,6 +1654,8 @@ onion_connection_status home(void *data, onion_request * req,
     } else if (debug_send) {
       fprintf(stderr, "home: unable to obtain websocket fd to set non-blocking for ws=%p\n", (void *)ws);
     }
+    /* Record underlying fd (or -1 if not available) for use by writer thread */
+    sp->ws_fd = wsfd;
   } while(0);
   fprintf(stderr, "%s: new websocket ws=%p assigned SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, sp->ssrc, sp->client);
   sp->spectrum_active=true;
@@ -3075,11 +3086,48 @@ static void *session_writer_thread(void *arg)
     else
       onion_websocket_set_opcode(sp->ws, OWS_BINARY);
 
+    /* Before performing a blocking write, poll the underlying socket for
+       writability with a short timeout. This avoids blocking indefinitely
+       inside `onion_websocket_write()` when the network is stalled. If we
+       cannot obtain the fd or poll reports an error/timeout, treat as a
+       write failure and clean up the session. */
+    if (sp->ws_fd >= 0) {
+      struct pollfd pfd;
+      pfd.fd = sp->ws_fd;
+      pfd.events = POLLOUT;
+      int const timeout_ms = 500; /* match watchdog threshold */
+      int pres = poll(&pfd, 1, timeout_ms);
+      if (pres <= 0) {
+        /* timeout or error: consider write stuck and clean session */
+        fprintf(stderr, "%s: poll timeout/error (%d) on ssrc=%u, cleaning session\n", __FUNCTION__, pres, sp->ssrc);
+        control_set_frequency(sp, "0");
+        sp->audio_active = false;
+        pthread_t spectrum_join = 0;
+        if (sp->spectrum_active) {
+          pthread_mutex_lock(&sp->spectrum_mutex);
+          sp->spectrum_active = false;
+          stop_spectrum_stream(sp);
+          spectrum_join = sp->spectrum_task;
+          pthread_mutex_unlock(&sp->spectrum_mutex);
+        }
+        sp->spectrum_requested_by_client = false;
+        sp->spectrum_restart_attempts = 0;
+        sp->last_spectrum_restart_ms = 0;
+        sp->ws = NULL;
+        sp->ws_fd = -1;
+        pthread_mutex_unlock(&sp->ws_mutex);
+        if (spectrum_join) pthread_join(spectrum_join, NULL);
+        free(m->data); free(m);
+        break;
+      }
+    }
+
     sp->write_in_progress = true;
     sp->last_write_start_ms = now_ms();
     int r = onion_websocket_write(sp->ws, (char *)m->data, m->size);
     sp->write_in_progress = false;
     if (r <= 0) {
+      fprintf(stderr, "%s: onion_websocket_write returned %d for ssrc=%u, cleaning session\n", __FUNCTION__, r, sp->ssrc);
       /* On failure, perform cleanup similar to prior helpers. */
       control_set_frequency(sp, "0");
       sp->audio_active = false;
@@ -3095,6 +3143,7 @@ static void *session_writer_thread(void *arg)
       sp->spectrum_restart_attempts = 0;
       sp->last_spectrum_restart_ms = 0;
       sp->ws = NULL;
+      sp->ws_fd = -1;
       pthread_mutex_unlock(&sp->ws_mutex);
       if (spectrum_join) pthread_join(spectrum_join, NULL);
       free(m->data); free(m);
