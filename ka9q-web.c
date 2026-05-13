@@ -94,8 +94,8 @@ struct session {
   struct session *next;
   struct session *previous;
   bool once;
-  float if_power;
   float noise_density_audio;
+  float if_power;
   int zoom_index;
   char requested_preset[32];
   float bins_min_db;
@@ -106,6 +106,7 @@ struct session {
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+  unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
     unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
     bool spectrum_requested_by_client; /* true if client requested spectrum */
     int spectrum_restart_attempts;    /* number of restart attempts made */
@@ -284,6 +285,7 @@ uint16_t rtp_seq=0;
 int verbose = 0;
 /* Gate extra SSRC/session debug prints to avoid console flooding */
 int debugSSRC = 0;
+int debug_ws_ping = 0; /* gate for ws_ping verbose prints */
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 1;
 int debug_send_poll = 0;
@@ -304,6 +306,9 @@ static unsigned long last_audio_recv_ms = 0;
 /* Restart policy */
 #define RESTART_MAX_ATTEMPTS 3
 #define RESTART_INITIAL_DELAY_MS 5000
+/* After giving up `RESTART_MAX_ATTEMPTS` attempts, wait this long before
+  trying the restart sequence again for the same session (ms). */
+#define RESTART_COOLDOWN_MS (5 * 60 * 1000UL) /* 5 minutes */
 #endif
 
 /* Forward declaration: monotonic time in milliseconds helper */
@@ -452,19 +457,34 @@ static void *monitor_thread(void *arg) {
           int attempts = ssp->spectrum_restart_attempts;
           unsigned long since_last = now - ssp->last_spectrum_restart_ms;
           unsigned long delay = RESTART_INITIAL_DELAY_MS * (1UL << (attempts > 0 ? attempts - 0 : 0));
+          /* If we've previously exhausted restart attempts, use a cooldown
+             window before trying again. If cooldown expired, reset attempts
+             and allow a fresh restart sequence. */
           if (attempts >= RESTART_MAX_ATTEMPTS) {
-            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, max restarts reached -> stopping\n", ssp->ssrc, spec_ago);
-            pthread_mutex_lock(&ssp->spectrum_mutex);
-            if (ssp->spectrum_active) {
-              stop_spectrum_stream(ssp);
-              ssp->spectrum_active = false;
-              pthread_mutex_unlock(&ssp->spectrum_mutex);
-              pthread_join(ssp->spectrum_task, NULL);
+            if (ssp->spectrum_restart_quiet_until_ms != 0 && now < ssp->spectrum_restart_quiet_until_ms) {
+              unsigned long remaining = ssp->spectrum_restart_quiet_until_ms - now;
+              fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, max restarts reached, cooldown %lu ms -> stopping\n", ssp->ssrc, spec_ago, remaining);
+              pthread_mutex_lock(&ssp->spectrum_mutex);
+              if (ssp->spectrum_active) {
+                stop_spectrum_stream(ssp);
+                ssp->spectrum_active = false;
+                pthread_mutex_unlock(&ssp->spectrum_mutex);
+                pthread_join(ssp->spectrum_task, NULL);
+              } else {
+                pthread_mutex_unlock(&ssp->spectrum_mutex);
+              }
+              /* still in cooldown; skip restart */
             } else {
-              pthread_mutex_unlock(&ssp->spectrum_mutex);
+              /* Cooldown expired (or never set): reset counters and attempt restart now */
+              fprintf(stderr, "monitor: cooldown expired for ssrc %u, resetting restart attempts and trying again\n", ssp->ssrc);
+              ssp->spectrum_restart_attempts = 0;
+              ssp->spectrum_restart_quiet_until_ms = 0;
+              attempts = 0;
+              since_last = now - ssp->last_spectrum_restart_ms;
             }
-          } else if (attempts == 0 || since_last >= delay) {
-            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, attempting restart #%d\n", ssp->ssrc, spec_ago, attempts + 1);
+          }
+          if (ssp->spectrum_restart_attempts < RESTART_MAX_ATTEMPTS && (ssp->spectrum_restart_attempts == 0 || since_last >= delay)) {
+            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, attempting restart #%d\n", ssp->ssrc, spec_ago, ssp->spectrum_restart_attempts + 1);
             /* Clean up any existing spectrum thread */
             pthread_mutex_lock(&ssp->spectrum_mutex);
             if (ssp->spectrum_active) {
@@ -488,8 +508,11 @@ static void *monitor_thread(void *arg) {
             }
             ssp->spectrum_restart_attempts++;
             ssp->last_spectrum_restart_ms = now;
-          } else {
-            /* Not time yet for next restart attempt */
+            /* If we've just reached the max attempts, arm the cooldown window */
+            if (ssp->spectrum_restart_attempts >= RESTART_MAX_ATTEMPTS) {
+              ssp->spectrum_restart_quiet_until_ms = now + RESTART_COOLDOWN_MS;
+              fprintf(stderr, "monitor: reached max restarts for ssrc %u, entering cooldown until %lu\n", ssp->ssrc, ssp->spectrum_restart_quiet_until_ms);
+            }
           }
         } else {
           fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, sending stop\n", ssp->ssrc, spec_ago);
@@ -624,16 +647,10 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
       case 'S':
       case 's':
         {
-          char *temp = malloc(16);
-          sprintf(temp, "S:%d", sp->ssrc);
-          pthread_mutex_lock(&sp->ws_mutex);
-          onion_websocket_set_opcode(sp->ws,OWS_TEXT);
-          int r=onion_websocket_write(sp->ws,temp,strlen(temp));
-          if(r!=strlen(temp)) {
-            fprintf(stderr,"%s: S: response failed: %d\n",__FUNCTION__,r);
-          }
-          pthread_mutex_unlock(&sp->ws_mutex);
-          free(temp);
+          char temp[16];
+          snprintf(temp, sizeof(temp), "S:%d", sp->ssrc);
+          send_ws_text_to_session(sp, temp);
+          if (debugSSRC) fprintf(stderr, "ws: S: request from ssrc %u\n", sp->ssrc);
           sp->spectrum_requested_by_client = true;
           sp->spectrum_restart_attempts = 0;
           sp->last_spectrum_restart_ms = 0;
@@ -814,10 +831,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
             int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
             char response[16];
             snprintf(response, sizeof(response), "ZSIZE:%d", table_size);
-            pthread_mutex_lock(&sp->ws_mutex);
-            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-            onion_websocket_write(sp->ws, response, strlen(response));
-            pthread_mutex_unlock(&sp->ws_mutex);
+            send_ws_text_to_session(sp, response);
         } else {
           char *end_ptr;
           long int zoom_level = strtol(&tmp[2],&end_ptr,10);
@@ -846,10 +860,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
             /* Send ACK back to the originating websocket */
             char ackbuf[256];
             snprintf(ackbuf, sizeof(ackbuf), "ACK:%s:%s", client, seq);
-            pthread_mutex_lock(&sp->ws_mutex);
-            onion_websocket_set_opcode(sp->ws, OWS_TEXT);
-            onion_websocket_write(sp->ws, ackbuf, strlen(ackbuf));
-            pthread_mutex_unlock(&sp->ws_mutex);
+            send_ws_text_to_session(sp, ackbuf);
           }
         }
         break;
@@ -1095,7 +1106,7 @@ static void adjust_center_within_bounds(struct session *sp) {
 static void *ws_ping_thread(void *arg) {
   (void)arg;
   unsigned long iter = 0;
-  fprintf(stderr, "ws_ping: started\n");
+  if (debug_ws_ping) fprintf(stderr, "ws_ping: started\n");
   for (;;) {
     usleep(500000); /* 0.5s */
     pthread_mutex_lock(&session_mutex);
@@ -1113,7 +1124,7 @@ static void *ws_ping_thread(void *arg) {
       send_ws_text_to_session(ssp, "PING");
     }
 
-    fprintf(stderr, "ws_ping: iter=%lu sessions=%d\n", iter, n);
+    if (debug_ws_ping) fprintf(stderr, "ws_ping: iter=%lu sessions=%d\n", iter, n);
     iter++;
   }
   return NULL;
@@ -1302,6 +1313,10 @@ int main(int argc,char **argv) {
       debug_send = 1;
       fprintf(stderr, "Debug: KA9Q_DEBUGSEND enabled\n");
     }
+    if ((e = getenv("KA9Q_DEBUG_WSPING")) && atoi(e)) {
+      debug_ws_ping = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
+    }
   }
 
   /* Allow enabling extra debug via environment variables to avoid recompiles:
@@ -1317,6 +1332,10 @@ int main(int argc,char **argv) {
     if ((e = getenv("KA9Q_DEBUGSEND")) && atoi(e)) {
       debug_send = 1;
       fprintf(stderr, "Debug: KA9Q_DEBUGSEND enabled\n");
+    }
+    if ((e = getenv("KA9Q_DEBUG_WSPING")) && atoi(e)) {
+      debug_ws_ping = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
     }
   }
 
@@ -1552,6 +1571,11 @@ onion_connection_status home(void *data, onion_request * req,
         }
       } while(0);
       pthread_mutex_unlock(&session_mutex);
+      /* Mark this session as having a recent client interaction so the
+        server will not immediately adopt backend-reported presets on
+        reconnect. This prevents unwanted mode switches when clients
+        briefly disconnect and reconnect. */
+      existing->last_client_command_ms = now_ms();
       fprintf(stderr, "%s: reattaching websocket ws=%p to existing SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, existing->ssrc, existing->client);
       onion_websocket_set_callback(ws, websocket_cb);
       return OCS_WEBSOCKET;
@@ -1636,7 +1660,27 @@ onion_connection_status home(void *data, onion_request * req,
 
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
-  strlcpy(sp->requested_preset,"am",sizeof(sp->requested_preset));
+  /* Preserve requested_preset from any existing session with the same
+     client description if present. This helps a reconnecting client keep
+     its previously-selected mode instead of reverting to the backend's
+     default (commonly AM). */
+  strlcpy(sp->requested_preset, "am", sizeof(sp->requested_preset));
+  if (client_desc) {
+    pthread_mutex_lock(&session_mutex);
+    struct session *prev = sessions;
+    while (prev != NULL) {
+      if (prev != sp && prev->client[0] != '\0' && strcmp(prev->client, client_desc) == 0) {
+        /* Found another session for this client; copy its requested preset */
+        if (prev->requested_preset[0] != '\0') {
+          strlcpy(sp->requested_preset, prev->requested_preset, sizeof(sp->requested_preset));
+          if (debug_send) fprintf(stderr, "%s: preserving requested_preset '%s' from existing session ssrc=%u for client=%s\n", __FUNCTION__, sp->requested_preset, prev->ssrc, client_desc);
+        }
+        break;
+      }
+      prev = prev->next;
+    }
+    pthread_mutex_unlock(&session_mutex);
+  }
   if (client_desc)
     strlcpy(sp->client, client_desc, sizeof(sp->client));
   pthread_mutex_init(&sp->ws_mutex,NULL);
@@ -1780,6 +1824,7 @@ static void *audio_thread(void *arg) {
 
     /* record last successful audio packet recv for watchdog */
     last_audio_recv_ms = now_ms();
+    if (debugSSRC) fprintf(stderr, "monitor: audio recv ssrc=%u at %lu\n", pkt->rtp.ssrc, last_audio_recv_ms);
 
 
     sp = find_session_from_ssrc(pkt->rtp.ssrc);
@@ -2903,6 +2948,8 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
   } else {
     *out_ssrc = 0;
   }
+  if (debugSSRC && *out_ssrc)
+    fprintf(stderr, "monitor: status recv ssrc=%u at %lu\n", *out_ssrc, last_status_recv_ms);
   return rx_length;
 }
 
@@ -3287,6 +3334,9 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
         fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s (no recent local command)\n",
                 __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset);
+      }
+      if (debug_send) {
+        fprintf(stderr, "%s: preset_adopt: SSRC %u adopting backend preset '%s' -> sending M_FORCE to client\n", __FUNCTION__, sp->ssrc, Channel.preset);
       }
       strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
       sp->preset_mismatch_count = 0;
