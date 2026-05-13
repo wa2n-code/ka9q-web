@@ -8,6 +8,10 @@
       var band;
       let arr_low;
       let ws = null; // Declare WebSocket as a global variable
+      // Heartbeat/watchdog for detecting silent-but-open websocket (server stuck)
+      let _lastWsMsgTs = 0;
+      let _wsHeartbeatWatchdog = null;
+      const WS_HEARTBEAT_TIMEOUT_MS = 3000; // force reconnect if no messages for 3s
       // Client identifier and per-client sequence for reliable client->server control acks
       // Backend must be updated to accept wrapped messages in the form:
       //   C:<clientId>:<seq>:<payload>
@@ -397,6 +401,7 @@
         sampleRate: 12000,
         flushingTime: 250
         });
+      try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
 
       // Opus decoder state
       let opusDecoder = null;
@@ -429,6 +434,8 @@
           setPlayerVolume(volumeSliderInit.value);
         }
       }
+
+      
 
       var pending_range_update = false;
       var target_frequency = frequencyHz;
@@ -606,20 +613,34 @@ function applyQuickBW() {
           // while we force-send stored settings so the UI doesn't flash defaults.
           try { blockProgrammaticUpdates(1500); } catch (e) {}
         // get the SSRC
+        _lastWsMsgTs = Date.now();
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
+        // Send mode immediately to reduce race with server status/defaults
+        try { sendControl('mode','M:' + target_preset); } catch (e) { console.warn('Immediate mode send failed', e); }
         // default to 20 Mtr band
-        //document.getElementById('20').click()
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         updateCWMarker();
-        // Stagger initial control messages slightly to avoid overwhelming backend
-        // Send initial mode and frequency on open, but do NOT bypass programmatic
-        // UI suppression so we don't overwrite a server-driven state.
-        setTimeout(() => { try { sendControl('mode','M:' + target_preset); } catch (e) {} }, 30);
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 90);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 150);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 210);
+        // Stagger remaining initial control messages slightly to avoid overwhelming backend
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 60);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 120);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 180);
+        // start heartbeat watchdog to detect silent-but-open websocket (server stuck)
+        try {
+          if (_wsHeartbeatWatchdog) clearInterval(_wsHeartbeatWatchdog);
+          _wsHeartbeatWatchdog = setInterval(() => {
+            try {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                const age = Date.now() - _lastWsMsgTs;
+                if (age > WS_HEARTBEAT_TIMEOUT_MS) {
+                  console.warn('[radio.js] websocket silent for', age, 'ms — forcing reconnect');
+                  try { ws.close(); } catch (e) {}
+                }
+              }
+            } catch (e) {}
+          }, 1000);
+        } catch (e) {}
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
@@ -999,10 +1020,12 @@ function applyQuickBW() {
       }
 
       function on_ws_close(evt) {
-         console.log("WebSocket closed:", evt);
+        console.log("WebSocket closed:", evt);
+        if (_wsHeartbeatWatchdog) { clearInterval(_wsHeartbeatWatchdog); _wsHeartbeatWatchdog = null; }
       }
 
       async function on_ws_message(evt) {
+        _lastWsMsgTs = Date.now();
         if(typeof evt.data === 'string') {
           // text data
           //console.log(evt.data);
@@ -1558,6 +1581,7 @@ function applyQuickBW() {
                   try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
                   player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                   try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                 } else if (player.audioCtx && player.audioCtx.state === 'closed') {
                   try { console.warn('radio: audioCtx closed — recreating player'); } catch (e) {}
                   let modeEl = document.getElementById('mode');
@@ -1567,6 +1591,7 @@ function applyQuickBW() {
                   try { player.destroy(); } catch (e) {}
                   player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                   try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                 } else if (player.audioCtx && player.audioCtx.state === 'suspended') {
                   try { player.audioCtx.resume(); } catch (e) {}
                   // If resume does not succeed, recreate after short delay
@@ -1582,6 +1607,7 @@ function applyQuickBW() {
                           try { if (p && typeof p.destroy === 'function') p.destroy(); } catch (e) {}
                           p = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
                           try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
+                          try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                           player = p;
                         }
                       } catch (ee) {}
@@ -1610,6 +1636,7 @@ function applyQuickBW() {
                         sampleRate: result.sampleRate,
                         flushingTime: 250
                       });
+                      try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
                       try {
                         const vs = document.getElementById('volume_control');
                         if (vs) setPlayerVolume(vs.value);
@@ -1863,6 +1890,13 @@ function applyQuickBW() {
             try { document.getElementById('max_hold').textContent = (spectrum.maxHold ? "Turn hold off" : "Turn hold on"); } catch (e) {}
             try { const sb = document.getElementById('sendShiftButton'); if (sb) sb.addEventListener('click', () => sendShift(true), false); } catch (e) {}
             try { const si = document.getElementById('shiftInput'); if (si) si.addEventListener('keypress', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); sendShift(true); } }); } catch (e) {}
+            try {
+              const pEl = document.getElementById('panner_control');
+              if (pEl && !pEl.dataset.pannerBound) {
+                pEl.addEventListener('input', function() { try { setPanner(this.value); saveSettings(); } catch (e) {} });
+                pEl.dataset.pannerBound = '1';
+              }
+            } catch (e) {}
 
             // set zoom, preset, spectrum percentage?
             try { spectrum.setAveraging(spectrum.averaging); } catch (e) {}
@@ -2561,6 +2595,7 @@ function applyQuickBW() {
           sampleRate: newSampleRate,
           flushingTime: 250
       });
+        try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
       // Set the player volume to match the slider after reinitializing
       const volumeSlider = document.getElementById('volume_control');
       if (volumeSlider) {
@@ -2944,6 +2979,7 @@ function applyQuickBW() {
                   sampleRate: newSampleRate,
                   flushingTime: 250
                 });
+                try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
               } else {
                 try { player.resume(); } catch (e) {
                   try { player.destroy(); } catch (ee) {}
@@ -3505,7 +3541,67 @@ function saveSettings() {
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
   localStorage.setItem("volume_control", volumeControlNumber);
+  try {
+    const pEl = document.getElementById('panner_control');
+    if (pEl) {
+      const pval = Number(pEl.value);
+      if (!Number.isNaN(pval)) localStorage.setItem('panner_value', pval);
+    }
+  } catch (e) {}
   try { localStorage.setItem("useOpus", (document.getElementById("opus_checkbox") && document.getElementById("opus_checkbox").checked) ? "true" : "false"); } catch (e) {}
+}
+
+// Set panner value for audio output and persist it. Best-effort only —
+// some players may not expose an API for panning; this function stores
+// the preference and calls into the player if possible.
+function setPanner(value) {
+  try {
+    const v = Number(value);
+    if (typeof player !== 'undefined' && player) {
+      // Prefer a built-in pan API if present
+      try { if (typeof player.pan === 'function') { player.pan(v); } } catch (e) {}
+      // If WebAudio is available, attempt to create/apply a StereoPannerNode
+      try {
+        const ac = player.audioCtx || (player && player._audioCtx) || null;
+        if (ac && typeof ac.createStereoPanner === 'function') {
+          if (!window.__ka9q_stereo_panner) {
+            window.__ka9q_stereo_panner = ac.createStereoPanner();
+            // Best-effort hookup: connect panner to destination if possible
+            try { window.__ka9q_stereo_panner.connect(ac.destination); } catch (e) {}
+          }
+          try { window.__ka9q_stereo_panner.pan.value = v; } catch (e) {}
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  try { if (window.localStorage) localStorage.setItem('panner_value', String(value)); } catch (e) {}
+}
+
+// Global delegation fallback: ensure panner changes are handled even if the
+// element's direct listener wasn't bound yet (applies immediately).
+try {
+  document.addEventListener('input', function (e) {
+    try {
+      if (!e || !e.target) return;
+      if (e.target.id === 'panner_control') {
+        try { setPanner(e.target.value); } catch (err) {}
+        try { if (window.localStorage) localStorage.setItem('panner_value', String(e.target.value)); } catch (err) {}
+      }
+    } catch (ee) {}
+  });
+} catch (e) {}
+
+// Apply saved panner value (best-effort). Reads from localStorage and calls
+// `setPanner()` so the panner is applied after any newly-created player.
+function applySavedPanner() {
+  try {
+    if (!window.localStorage) return;
+    const v = localStorage.getItem('panner_value');
+    if (v === null) return;
+    const pv = Number(v);
+    if (Number.isNaN(pv)) return;
+    try { setPanner(pv); } catch (e) {}
+  } catch (e) {}
 }
 
 function checkMaxMinChanged(){  // Save the check boxes for show max and min
@@ -3747,6 +3843,33 @@ function loadSettings() {
     try { document.getElementById("volume_control").value = vc; } catch (e) {}
     setPlayerVolume(vc);
   }
+
+  // Restore panner if stored. Retry a few times in case the element
+  // hasn't been attached to the DOM yet (options dialog or late load).
+  try {
+    const pv = getLS('panner_value', v => parseFloat(v), null);
+    if (pv !== null && !isNaN(pv)) {
+      const tryRestore = (attempts) => {
+        try {
+          const pel = document.getElementById('panner_control');
+          if (pel) {
+            try { pel.value = pv; } catch (e) {}
+            try { setPanner(pv); } catch (e) {}
+            // ensure input listener is bound so subsequent changes persist
+            try {
+              if (!pel.dataset.pannerBound) {
+                pel.addEventListener('input', function() { try { setPanner(this.value); saveSettings(); } catch (e) {} });
+                pel.dataset.pannerBound = '1';
+              }
+            } catch (e) {}
+            return;
+          }
+        } catch (e) {}
+        if (attempts > 0) setTimeout(() => tryRestore(attempts - 1), 200);
+      };
+      tryRestore(10);
+    }
+  } catch (e) {}
 
   // Ensure frequency memories exist in localStorage; create defaults if missing
   try {
@@ -4205,13 +4328,6 @@ function setPlayerVolume(value) {
     //console.log(`Volume set to: ${gain} (slider: ${slider})`);
   }
 
-  function setPanner(value) {
-    if (typeof player !== 'undefined' && typeof player.pan === 'function') {
-        player.pan(parseFloat(value)); // Update the panner value
-    } else {
-        console.error('Player or pan function is not defined.');
-    }
-}
 
 let isRecording = false;
 function toggleAudioRecording() {
