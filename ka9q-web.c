@@ -106,6 +106,7 @@ struct session {
   float spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+  unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
     unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
     bool spectrum_requested_by_client; /* true if client requested spectrum */
@@ -1576,6 +1577,10 @@ onion_connection_status home(void *data, onion_request * req,
         reconnect. This prevents unwanted mode switches when clients
         briefly disconnect and reconnect. */
       existing->last_client_command_ms = now_ms();
+      /* Also record explicit reattach time so adoption logic can treat
+         recent reattaches as recent client activity even if other
+         timestamps are stale. */
+      existing->reattach_time_ms = now_ms();
       fprintf(stderr, "%s: reattaching websocket ws=%p to existing SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, existing->ssrc, existing->client);
       onion_websocket_set_callback(ws, websocket_cb);
       return OCS_WEBSOCKET;
@@ -3326,7 +3331,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     const int MAX_PRESET_MISMATCH = 5;
     const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
     unsigned long now = now_ms();
-    bool client_recent = (sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS);
+    bool client_recent = ((sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS))
+               || ((sp->reattach_time_ms != 0) && (now - sp->reattach_time_ms <= CLIENT_CMD_WINDOW_MS));
 
     if (!client_recent) {
       /* No recent local client command: adopt backend-reported preset and notify client. */
@@ -3435,7 +3441,8 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
       } else {
         const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
         unsigned long now = now_ms();
-        bool client_recent = (sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS);
+        bool client_recent = ((sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS))
+                 || ((sp->reattach_time_ms != 0) && (now - sp->reattach_time_ms <= CLIENT_CMD_WINDOW_MS));
 
         if (!client_recent) {
           /* No recent local client command: adopt backend frequency and notify client. */
