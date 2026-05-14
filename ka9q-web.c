@@ -63,11 +63,7 @@ pthread_t ctrl_task;
 pthread_t audio_task;
 pthread_t ws_ping_task;
 pthread_t ws_watchdog_task;
-/* Monitor task and started flag (optional) */
-#ifdef ENABLE_MONITOR
-pthread_t monitor_task;
-static int monitor_started = 0;
-#endif
+/* monitor removed: previously guarded by ENABLE_MONITOR */
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
@@ -304,20 +300,6 @@ static unsigned long last_status_recv_ms = 0;
 /* Monotonic ms timestamp of last successful audio packet recv */
 static unsigned long last_audio_recv_ms = 0;
 
-/* Monitor parameters (optional) */
-#ifdef ENABLE_MONITOR
-#define STALL_MS 2000 /* consider stalled if no packets for 2s */
-#define MONITOR_SLEEP_MS 1000
-/* Grace period after start during which monitor will not attempt recovery */
-#define MONITOR_STARTUP_GRACE_MS 15000
-/* Restart policy */
-#define RESTART_MAX_ATTEMPTS 3
-#define RESTART_INITIAL_DELAY_MS 5000
-/* After giving up `RESTART_MAX_ATTEMPTS` attempts, wait this long before
-  trying the restart sequence again for the same session (ms). */
-#define RESTART_COOLDOWN_MS (5 * 60 * 1000UL) /* 5 minutes */
-#endif
-
 /* Forward declaration: monotonic time in milliseconds helper */
 static unsigned long now_ms(void);
 
@@ -326,220 +308,7 @@ static int nsessions; /* defined later with initializer */
 static struct session *sessions; /* defined later with initializer */
 extern pthread_mutex_t session_mutex;
 
-/* monitor_thread: optional background watchdog for stalled inputs */
-#ifdef ENABLE_MONITOR
-/*
-  monitor_thread
-  ----------------
-  Background watchdog that periodically checks for stalled multicast
-  inputs and attempts server-side recovery. Actions performed:
-    - Monitors `Status_fd` and reopens the multicast status socket if no
-      status packets have been received for `STALL_MS` (reapplies socket
-      options after reopen).
-    - Monitors `Input_fd` (audio) and forces a close so `audio_thread`
-      will reopen the socket and resume audio when audio packets stall.
-    - Iterates all `struct session` entries and checks `last_spectrum_recv_ms`.
-      For sessions that requested spectrum, it attempts automatic restart
-      with exponential backoff (configured by `RESTART_INITIAL_DELAY_MS` and
-      `RESTART_MAX_ATTEMPTS`). If restart attempts are exhausted the
-      monitor falls back to stopping the spectrum stream and cleaning up the
-      session's spectrum thread. For sessions that did not request spectrum,
-      the monitor simply stops the spectrum stream to clean up resources.
-
-  Notes:
-    - Recovery is performed server-side only; the monitor does not emit
-      additional websocket messages to clients (no extra client traffic).
-    - A startup grace period (`MONITOR_STARTUP_GRACE_MS`) prevents false
-      positives during initialization.
-    - Uses monotonic time via `now_ms()` to measure staleness.
-*/
-static void *monitor_thread(void *arg) {
-  (void)arg;
-  unsigned long started_ms = now_ms();
-  for (;;) {
-    usleep(MONITOR_SLEEP_MS * 1000);
-    unsigned long now = now_ms();
-
-    /* During initial startup grace period, do not attempt recovery. */
-    if ((now - started_ms) < MONITOR_STARTUP_GRACE_MS)
-      continue;
-
-    /* If socket not open or we've never received a packet, treat as not stalled
-       to avoid false positives during startup. */
-    unsigned long status_ago = 0;
-    if (Status_fd != -1 && last_status_recv_ms != 0)
-      status_ago = now - last_status_recv_ms;
-
-    unsigned long audio_ago = 0;
-    if (Input_fd != -1 && last_audio_recv_ms != 0)
-      audio_ago = now - last_audio_recv_ms;
-
-    /* Only attempt recovery if there are active client sessions */
-    int active_sessions = 0;
-    pthread_mutex_lock(&session_mutex);
-    active_sessions = nsessions;
-    pthread_mutex_unlock(&session_mutex);
-
-    /* Status socket stalled -> try to reopen (only when clients exist) */
-    if (active_sessions > 0 && status_ago > STALL_MS) {
-      fprintf(stderr, "monitor: status stalled %lu ms, attempting reopen\n", status_ago);
-      if (Status_fd != -1) {
-        close(Status_fd);
-        Status_fd = -1;
-      }
-      int newfd = listen_mcast(NULL, &Metadata_dest_socket, NULL);
-      if (newfd != -1) {
-        Status_fd = newfd;
-        /* Reapply an increased receive buffer on reopen to help absorb
-           short bursts of UDP/multicast packets and reduce packet loss.
-           This is a kernel hint (may be adjusted by the OS). Also set
-           a 1s recv timeout so monitor/control code can make progress. */
-        int rcv = 256 * 1024; /* 256 KiB */
-        if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv)) < 0) {
-          perror("setsockopt SO_RCVBUF Status_fd (monitor)");
-        }
-        struct timeval tv;
-        tv.tv_sec = 1; tv.tv_usec = 0;
-        if (setsockopt(Status_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-          perror("setsockopt SO_RCVTIMEO Status_fd (monitor)");
-        }
-        /* Prevent immediate re-detection by seeding last_status_recv_ms
-           with the reopen time. This avoids tight reopen loops when the
-           multicast source is temporarily silent. */
-        last_status_recv_ms = now_ms();
-        fprintf(stderr, "monitor: status socket reopened\n");
-      } else {
-        fprintf(stderr, "monitor: failed to reopen status socket\n");
-      }
-    }
-
-    /* Audio stalled -> close Input_fd so audio_thread re-opens it (only when clients exist) */
-    if (active_sessions > 0 && audio_ago > STALL_MS) {
-      fprintf(stderr, "monitor: audio stalled %lu ms, forcing reopen\n", audio_ago);
-      pthread_mutex_lock(&output_dest_socket_mutex);
-      if (Input_fd != -1) {
-        close(Input_fd);
-        Input_fd = -1;
-      }
-      pthread_mutex_unlock(&output_dest_socket_mutex);
-      /* audio_thread will detect Input_fd == -1 and re-open it */
-    }
-
-    /* Per-session spectrum stall checking: collect stalled sessions, then recover */
-    if (nsessions > 0) {
-      struct session **stalled = calloc(nsessions, sizeof(*stalled));
-      int stalled_n = 0;
-      pthread_mutex_lock(&session_mutex);
-      struct session *sp = sessions;
-      while (sp != NULL) {
-        if (sp->spectrum_active && sp->last_spectrum_recv_ms != 0) {
-          unsigned long spec_ago;
-          if (sp->last_spectrum_recv_ms > now) {
-            /* Bad/future timestamp — treat as zero age to avoid underflow */
-            spec_ago = 0;
-          } else {
-            spec_ago = now - sp->last_spectrum_recv_ms;
-          }
-          if (spec_ago > STALL_MS) {
-            stalled[stalled_n++] = sp;
-          }
-        }
-        sp = sp->next;
-      }
-      pthread_mutex_unlock(&session_mutex);
-
-      for (int i = 0; i < stalled_n; ++i) {
-        struct session *ssp = stalled[i];
-        unsigned long spec_ago;
-        if (ssp->last_spectrum_recv_ms == 0 || ssp->last_spectrum_recv_ms > now) {
-          spec_ago = 0;
-        } else {
-          spec_ago = now - ssp->last_spectrum_recv_ms;
-        }
-        /* Clamp displayed age to a reasonable maximum (24h) to avoid absurd numbers */
-        const unsigned long MAX_DISPLAY_AGE_MS = 24UL * 60UL * 60UL * 1000UL;
-        if (spec_ago > MAX_DISPLAY_AGE_MS) spec_ago = MAX_DISPLAY_AGE_MS;
-        /* If client requested spectrum, attempt automatic restart with backoff; otherwise stop */
-        if (ssp->spectrum_requested_by_client) {
-          int attempts = ssp->spectrum_restart_attempts;
-          unsigned long since_last = now - ssp->last_spectrum_restart_ms;
-          unsigned long delay = RESTART_INITIAL_DELAY_MS * (1UL << (attempts > 0 ? attempts - 0 : 0));
-          /* If we've previously exhausted restart attempts, use a cooldown
-             window before trying again. If cooldown expired, reset attempts
-             and allow a fresh restart sequence. */
-          if (attempts >= RESTART_MAX_ATTEMPTS) {
-            if (ssp->spectrum_restart_quiet_until_ms != 0 && now < ssp->spectrum_restart_quiet_until_ms) {
-              unsigned long remaining = ssp->spectrum_restart_quiet_until_ms - now;
-              fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, max restarts reached, cooldown %lu ms -> stopping\n", ssp->ssrc, spec_ago, remaining);
-              pthread_mutex_lock(&ssp->spectrum_mutex);
-              if (ssp->spectrum_active) {
-                stop_spectrum_stream(ssp);
-                ssp->spectrum_active = false;
-                pthread_mutex_unlock(&ssp->spectrum_mutex);
-                pthread_join(ssp->spectrum_task, NULL);
-              } else {
-                pthread_mutex_unlock(&ssp->spectrum_mutex);
-              }
-              /* still in cooldown; skip restart */
-            } else {
-              /* Cooldown expired (or never set): reset counters and attempt restart now */
-              fprintf(stderr, "monitor: cooldown expired for ssrc %u, resetting restart attempts and trying again\n", ssp->ssrc);
-              ssp->spectrum_restart_attempts = 0;
-              ssp->spectrum_restart_quiet_until_ms = 0;
-              attempts = 0;
-              since_last = now - ssp->last_spectrum_restart_ms;
-            }
-          }
-          if (ssp->spectrum_restart_attempts < RESTART_MAX_ATTEMPTS && (ssp->spectrum_restart_attempts == 0 || since_last >= delay)) {
-            fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, attempting restart #%d\n", ssp->ssrc, spec_ago, ssp->spectrum_restart_attempts + 1);
-            /* Clean up any existing spectrum thread */
-            pthread_mutex_lock(&ssp->spectrum_mutex);
-            if (ssp->spectrum_active) {
-              stop_spectrum_stream(ssp);
-              ssp->spectrum_active = false;
-              pthread_mutex_unlock(&ssp->spectrum_mutex);
-              pthread_join(ssp->spectrum_task, NULL);
-            } else {
-              pthread_mutex_unlock(&ssp->spectrum_mutex);
-            }
-            /* Request backend to start spectrum demod again */
-            control_get_powers(ssp, (float)ssp->center_frequency, ssp->bins, (float)ssp->bin_width);
-            /* Start the spectrum thread */
-            if(pthread_create(&ssp->spectrum_task, NULL, spectrum_thread, ssp) == -1) {
-              perror("pthread_create: spectrum_thread (restart)");
-            } else {
-              char buff[16];
-              snprintf(buff, 16, "spec_%u", ssp->ssrc+1);
-              pthread_setname_np(ssp->spectrum_task, buff);
-              ssp->spectrum_active = true;
-            }
-            ssp->spectrum_restart_attempts++;
-            ssp->last_spectrum_restart_ms = now;
-            /* If we've just reached the max attempts, arm the cooldown window */
-            if (ssp->spectrum_restart_attempts >= RESTART_MAX_ATTEMPTS) {
-              ssp->spectrum_restart_quiet_until_ms = now + RESTART_COOLDOWN_MS;
-              fprintf(stderr, "monitor: reached max restarts for ssrc %u, entering cooldown until %lu\n", ssp->ssrc, ssp->spectrum_restart_quiet_until_ms);
-            }
-          }
-        } else {
-          fprintf(stderr, "monitor: spectrum stalled for ssrc %u: %lu ms, sending stop\n", ssp->ssrc, spec_ago);
-          pthread_mutex_lock(&ssp->spectrum_mutex);
-          if (ssp->spectrum_active) {
-            stop_spectrum_stream(ssp);
-            ssp->spectrum_active = false;
-            pthread_mutex_unlock(&ssp->spectrum_mutex);
-            pthread_join(ssp->spectrum_task, NULL);
-          } else {
-            pthread_mutex_unlock(&ssp->spectrum_mutex);
-          }
-        }
-      }
-      free(stalled);
-    }
-  }
-  return NULL;
-}
-#endif /* ENABLE_MONITOR */
+/* monitor removed */
 
 /* Helper: monotonic time in milliseconds */
 static unsigned long now_ms(void) {
@@ -1717,19 +1486,7 @@ onion_connection_status home(void *data, onion_request * req,
   //fprintf(stderr,"%s: onion_websocket_set_callback: websocket_cb\n",__FUNCTION__);
   onion_websocket_set_callback(ws, websocket_cb);
 
-  /* Start monitor thread on first client connect to avoid console noise */
-#ifdef ENABLE_MONITOR
-  if (!monitor_started) {
-    if (pthread_create(&monitor_task, NULL, monitor_thread, NULL) == -1) {
-      perror("pthread_create: monitor_thread");
-    } else {
-      char mbuf[16];
-      snprintf(mbuf, sizeof(mbuf), "monitor");
-      pthread_setname_np(monitor_task, mbuf);
-      monitor_started = 1;
-    }
-  }
-#endif
+  /* monitor start removed */
 
   return OCS_WEBSOCKET;
 }
