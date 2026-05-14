@@ -618,14 +618,16 @@ function applyQuickBW() {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
         // Send mode immediately to reduce race with server status/defaults
-        try { sendControl('mode','M:' + target_preset); } catch (e) { console.warn('Immediate mode send failed', e); }
+        // Pass bypass flag so programmatic-UI guards do not suppress this reconnect send
+        try { sendControl('mode','M:' + target_preset, undefined, true); } catch (e) { console.warn('Immediate mode send failed', e); }
         // default to 20 Mtr band
         spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
         updateCWMarker();
         // Stagger remaining initial control messages slightly to avoid overwhelming backend
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString()); } catch (e) {} }, 60);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {} }, 120);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {} }, 180);
+        // Force these reconnect-sends to bypass programmatic suppression so backend receives them
+        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString(), undefined, true); } catch (e) {} }, 60);
+        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), undefined, true); } catch (e) {} }, 120);
+        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), undefined, true); } catch (e) {} }, 180);
         // Resend tuned frequency and, if audio was running prior to reconnect,
         // perform a short stop/start to force the backend audio channel to
         // match the UI-displayed tuned frequency.
@@ -633,8 +635,9 @@ function applyQuickBW() {
           setTimeout(() => {
             try {
               if (ws && ws.readyState === WebSocket.OPEN) {
-                try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3)); } catch (e) {}
-                try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3)); } catch (e) {}
+                // Bypass programmatic-UI guard on these reconnect sends
+                try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), undefined, true); } catch (e) {}
+                try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), undefined, true); } catch (e) {}
               }
               const btn = document.getElementById("audio_button");
               if (btn && btn.value === "STOP") {
