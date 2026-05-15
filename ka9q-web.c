@@ -49,7 +49,7 @@
 #include "config.h"
 
 #ifndef RESOURCES_BASE_DIR
-#define RESOURCES_BASE_DIR "/usr/local/share/ka9q-web"
+#define RESOURCES_BASE_DIR /usr/local/share/ka9q-web
 #endif
 
 const char *webserver_version = "2.83";
