@@ -1421,7 +1421,12 @@ onion_connection_status home(void *data, onion_request * req,
         perror("fcntl F_GETFL (websocket)");
       }
     } else if (debug_send) {
-      fprintf(stderr, "home: unable to obtain websocket fd to set non-blocking for ws=%p\n", (void *)ws);
+      /* Suppressed noisy debug: some libonion builds do not expose the
+         underlying request FD via `onion_request_get_fd()`. The server
+         already handles ws_fd == -1 by falling back to direct writes
+         and the watchdog will clean stuck sessions, so this per-connection
+         diagnostic is commented out to reduce log noise during testing. */
+      /* fprintf(stderr, "home: unable to obtain websocket fd to set non-blocking for ws=%p\\n", (void *)ws); */
     }
     /* Record underlying fd (or -1 if not available) for use by writer thread */
     sp->ws_fd = wsfd;
