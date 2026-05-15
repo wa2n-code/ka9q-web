@@ -326,6 +326,9 @@ static unsigned long now_ms(void) {
    reads the short commit from the local git metadata. This helper is omitted
    when `GIT_COMMIT` is defined to avoid unused-function warnings. */
 #ifndef GIT_COMMIT
+/* Keep this helper available for optional future startup logging, but avoid
+  -Wunused-function warnings when no call site is compiled. */
+__attribute__((unused))
 static void log_git_commit_runtime(void) {
   char buf[128];
   FILE *f = popen("git rev-parse --short HEAD 2>/dev/null", "r");
