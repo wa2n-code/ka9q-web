@@ -614,6 +614,7 @@ function applyQuickBW() {
           try { blockProgrammaticUpdates(1500); } catch (e) {}
         // get the SSRC
         _lastWsMsgTs = Date.now();
+        _lastWsOpenTs = Date.now();
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
@@ -1082,6 +1083,16 @@ function applyQuickBW() {
           // text data
           //console.log(evt.data);
           let temp=evt.data.toString();
+          try {
+            if (temp.startsWith('BUSY:')) {
+              const reason = temp.substring(5).trim();
+              reconnectCancelled = true;
+              try { if (_wsHeartbeatWatchdog) { clearInterval(_wsHeartbeatWatchdog); _wsHeartbeatWatchdog = null; } } catch (e) {}
+              try { if (ws) ws.close(); } catch (e) {}
+              createBusyPopup(reason);
+              return;
+            }
+          } catch (e) {}
           let args=temp.split(":");
           // Handle server ACKs for clientId/seq protocol: ACK:<clientId>:<seq>
           try {
@@ -1790,6 +1801,10 @@ function applyQuickBW() {
               let reconnectCountdownInterval = null;
               let isAttemptingConnect = false;
               let hasEverConnected = false;
+              let _lastWsOpenTs = 0;
+              const CLOSE_WINDOW_MS = 5000; // sliding window for close events
+              const CLOSE_THRESHOLD = 3;    // number of closes in window to trigger busy
+              let _closeTimestamps = [];
 
               function createReconnectPopup() {
                 if (document.getElementById('ws-reconnect-popup')) return;
@@ -1816,6 +1831,32 @@ function applyQuickBW() {
                 document.body.appendChild(wrapper);
                 document.getElementById('ws-reconnect-cancel').addEventListener('click', cancelReconnecting);
                 document.getElementById('ws-reconnect-retry').addEventListener('click', retryNow);
+              }
+
+              function createBusyPopup(msg) {
+                if (document.getElementById('ws-busy-popup')) return;
+                const wrapper = document.createElement('div');
+                wrapper.id = 'ws-busy-popup';
+                wrapper.style.position = 'fixed';
+                wrapper.style.left = '50%';
+                wrapper.style.top = '20%';
+                wrapper.style.transform = 'translateX(-50%)';
+                wrapper.style.background = 'rgba(0,0,0,0.95)';
+                wrapper.style.color = '#fff';
+                wrapper.style.padding = '16px';
+                wrapper.style.border = '2px solid #444';
+                wrapper.style.borderRadius = '8px';
+                wrapper.style.zIndex = 10000;
+                wrapper.style.minWidth = '300px';
+                wrapper.innerHTML = '<div style="font-weight:700;margin-bottom:8px;">Server busy</div>' +
+                  '<div id="ws-busy-info" style="margin-bottom:8px;">' + (msg || 'Server at capacity; try again later') + '</div>' +
+                  '<div style="text-align:right;">' +
+                    '<button id="ws-busy-close" style="padding:6px 10px;">Close</button>' +
+                  '</div>';
+                document.body.appendChild(wrapper);
+                document.getElementById('ws-busy-close').addEventListener('click', function() {
+                  try { document.body.removeChild(wrapper); } catch (e) {}
+                });
               }
 
               function showReconnectPopup(delayMs) {
@@ -1916,6 +1957,18 @@ function applyQuickBW() {
                   ws.onclose = function(evt) {
                     isAttemptingConnect = false;
                     try { on_ws_close(evt); } catch (e) { console.warn('on_ws_close threw', e); }
+                    // Detect repeated rapid failures (server rejecting connections)
+                    try {
+                      const now = Date.now();
+                      _closeTimestamps.push(now);
+                      const cutoff = now - CLOSE_WINDOW_MS;
+                      _closeTimestamps = _closeTimestamps.filter(ts => ts >= cutoff);
+                      if (_closeTimestamps.length >= CLOSE_THRESHOLD) {
+                        reconnectCancelled = true;
+                        createBusyPopup('Server not accepting new websocket connections (detected repeated failures)');
+                        if (ws && ws.readyState !== WebSocket.CLOSED) try { ws.close(); } catch (e) {}
+                      }
+                    } catch (e) { console.warn('close detection failed', e); }
                     if (!reconnectCancelled) scheduleReconnect();
                   };
                   ws.binaryType = "arraybuffer";
