@@ -41,6 +41,9 @@
 #include <sys/time.h>
 #include <syslog.h>
 #include <poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "misc.h"
 #include "multicast.h"
@@ -53,6 +56,12 @@
 #endif
 
 const char *webserver_version = "2.83";
+
+/* Set to 1 to avoid performing hostname lookups for incoming clients.
+  When enabled the server will record numeric IP addresses instead of
+  using libonion's client description (which may perform reverse DNS).
+  Toggle this constant in source to change behavior. */
+const int NO_HOSTNAMES = 1;
 
 
 // no handlers in /usr/local/include??
@@ -190,6 +199,40 @@ static int get_request_fd(void *req) {
       return -1;
   }
   return fn(req);
+}
+
+/* Helper: obtain a short client description. When `NO_HOSTNAMES` is set
+   prefer a numeric IP string (avoids reverse DNS lookups). Returns a
+   pointer to `buf` when a numeric address is produced, otherwise falls
+   back to libonion's `onion_request_get_client_description()` result. */
+static const char *client_desc_from_request(void *req, char *buf, size_t buflen) {
+  if (!NO_HOSTNAMES) {
+    return onion_request_get_client_description((onion_request*)req);
+  }
+  int fd = get_request_fd(req);
+  if (fd >= 0) {
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    if (getpeername(fd, (struct sockaddr *)&addr, &len) == 0) {
+      if (addr.ss_family == AF_INET) {
+        struct sockaddr_in *a = (struct sockaddr_in *)&addr;
+        if (inet_ntop(AF_INET, &a->sin_addr, buf, buflen)) {
+          return buf;
+        }
+      } else if (addr.ss_family == AF_INET6) {
+        struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)&addr;
+        if (inet_ntop(AF_INET6, &a6->sin6_addr, buf, buflen)) {
+          return buf;
+        }
+      }
+    }
+  }
+  /* Fallback to libonion description if numeric form unavailable */
+  const char *desc = onion_request_get_client_description((onion_request*)req);
+  if (desc && desc[0] != '\0') return desc;
+  strncpy(buf, "unknown", buflen);
+  buf[buflen-1] = '\0';
+  return buf;
 }
 /* Tentative declarations so watchdog can reference them before the real defs */
 static int nsessions;
@@ -1305,7 +1348,9 @@ onion_connection_status home(void *data, onion_request * req,
   onion_websocket *ws = onion_websocket_new(req, res);
   //fprintf(stderr,"%s: ws=%p\n",__FUNCTION__,ws);
   if(ws==NULL) {
-    fprintf(stderr, "%s: HTTP request (no websocket upgrade) from %s - serving redirect\n", __FUNCTION__, onion_request_get_client_description(req));
+    char _cdesc[128];
+    const char *_c = client_desc_from_request(req, _cdesc, sizeof(_cdesc));
+    fprintf(stderr, "%s: HTTP request (no websocket upgrade) from %s - serving redirect\n", __FUNCTION__, _c);
     onion_response_write0(res,
       "<!DOCTYPE html>"
       "<html>"
@@ -1321,7 +1366,8 @@ onion_connection_status home(void *data, onion_request * req,
   }
 
   // create session (or attempt to reattach to an existing one for this client)
-  const char *client_desc = onion_request_get_client_description(req);
+  char client_desc_buf[128];
+  const char *client_desc = client_desc_from_request(req, client_desc_buf, sizeof(client_desc_buf));
   // Try to find an existing session with the same client description and attach to it.
   pthread_mutex_lock(&session_mutex);
   struct session *existing = sessions;
