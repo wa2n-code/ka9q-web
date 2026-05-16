@@ -55,6 +55,38 @@
 #define RESOURCES_BASE_DIR /usr/local/share/ka9q-web
 #endif
 
+/* Maximum number of concurrent websocket client sessions. Set conservatively. */
+#define MAX_SESSIONS 5
+
+/*
+  Notes on recent changes (also applied to ka9q-web1/ka9q-web.c):
+
+  - Enforce a conservative maximum concurrent websocket sessions via
+    `MAX_SESSIONS`. When the server reaches capacity we now attach a
+    reject callback that attempts to send a short text frame of the form
+    "BUSY: <message>" and then closes the connection. This avoids creating
+    a full session when resources are exhausted.
+
+  - The rejection path (`reject_ws_cb`) writes a BUSY text frame and
+    briefly sleeps (50 ms) to improve the chance the frame is flushed
+    before closing. Sending a text frame then closing a websocket can be
+    racey in some browser/network stacks; therefore the client-side
+    JavaScript was also updated to detect "BUSY:" messages and, as a
+    fallback, detect repeated short-lived open/close cycles and present a
+    modal instead of continuously reconnecting.
+
+  - Changes were mirrored in the `ka9q-web1` tree to keep behavior
+    consistent across deployments. Only this file (`ka9q-web.c`) is
+    documented/committed here; the `ka9q-web1` edits exist in the
+    workspace but were intentionally not pushed in this commit.
+
+  - Rationale: rejecting at the websocket handling point avoids creating
+    writer threads and per-session resources for clients that cannot be
+    serviced. A future improvement would be to reject at HTTP upgrade
+    time with a 503/429 response to avoid the websocket upgrade/close
+    race entirely.
+*/
+
 const char *webserver_version = "2.83";
 
 /* Set to 1 to avoid performing hostname lookups for incoming clients.
@@ -173,6 +205,16 @@ void *ctrl_thread(void *arg);
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size);
 static void send_ws_text_to_session(struct session *sp, const char *msg);
 static void *ws_ping_thread(void *arg);
+/* Reject-callback for new websockets when the server is at capacity. */
+static onion_connection_status reject_ws_cb(void *data, onion_websocket *ws, long int unused) {
+  (void)unused;
+  const char *msg = "BUSY: server at capacity; try again later";
+  onion_websocket_set_opcode(ws, OWS_TEXT);
+  onion_websocket_write(ws, msg, strlen(msg));
+  /* allow a short time for the frame to flush to the socket before closing */
+  usleep(50000); /* 50 ms */
+  return OCS_CLOSE_CONNECTION;
+}
 /* Outgoing message node for per-session queue */
 struct ws_msg {
   uint8_t *data;
@@ -1364,6 +1406,17 @@ onion_connection_status home(void *data, onion_request * req,
         "</html>");
     return OCS_PROCESSED;
   }
+
+  /* Enforce server-wide concurrent websocket limit. If at capacity,
+     attach a short-lived reject callback that sends a BUSY message. */
+  pthread_mutex_lock(&session_mutex);
+  if (nsessions >= MAX_SESSIONS) {
+    pthread_mutex_unlock(&session_mutex);
+    fprintf(stderr, "home: rejecting websocket — max clients %d reached\n", MAX_SESSIONS);
+    onion_websocket_set_callback(ws, reject_ws_cb);
+    return OCS_WEBSOCKET;
+  }
+  pthread_mutex_unlock(&session_mutex);
 
   // create session (or attempt to reattach to an existing one for this client)
   char client_desc_buf[128];
