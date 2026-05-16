@@ -617,17 +617,34 @@ function applyQuickBW() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
-        // Send mode immediately to reduce race with server status/defaults
-        // Pass bypass flag so programmatic-UI guards do not suppress this reconnect send
-        try { sendControl('mode','M:' + target_preset, undefined, true); } catch (e) { console.warn('Immediate mode send failed', e); }
-        // default to 20 Mtr band
-        spectrum.setFrequency(1000.0 * parseFloat(document.getElementById("freq").value,10));
+        // Send current UI state (mode, frequency, zoom) to reduce race with server status/defaults
+        // Read directly from DOM controls so reconnect restores what the user actually sees
+        try {
+          const modeEl = document.getElementById('mode');
+          const freqEl = document.getElementById('freq');
+          const zoomEl = document.getElementById('zoom_level');
+          const modeToSend = (modeEl && modeEl.value) ? modeEl.value : (target_preset || 'am');
+          const freqToSend = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
+          const zoomToSend = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
+          try { sendControl('mode', 'M:' + modeToSend, undefined, true); } catch (e) { console.warn('Immediate mode send failed', e); }
+          // default spectrum display to current UI freq
+          if (!isNaN(freqToSend)) {
+            spectrum.setFrequency(1000.0 * Number(freqToSend));
+          }
+        } catch (e) { console.warn('Failed to read UI state for reconnect sends', e); }
         updateCWMarker();
         // Stagger remaining initial control messages slightly to avoid overwhelming backend
         // Force these reconnect-sends to bypass programmatic suppression so backend receives them
-        setTimeout(() => { try { sendControl('zoom','Z:' + (target_zoom_level).toString(), undefined, true); } catch (e) {} }, 60);
-        setTimeout(() => { try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), undefined, true); } catch (e) {} }, 120);
-        setTimeout(() => { try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), undefined, true); } catch (e) {} }, 180);
+        // Stagger reconnect sends: zoom, optional center, then frequency
+        try {
+          const zoomEl = document.getElementById('zoom_level');
+          const freqEl = document.getElementById('freq');
+          const zoomVal = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
+          const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
+          setTimeout(() => { try { sendControl('zoom','Z:' + String(zoomVal), undefined, true); } catch (e) {} }, 60);
+          setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('zoom_center','Z:c:' + (Number(freqVal)).toFixed(3), undefined, true); } catch (e) {} }, 120);
+          setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('freq','F:' + (Number(freqVal) / 1.0).toFixed(3), undefined, true); } catch (e) {} }, 180);
+        } catch (e) {}
         // Resend tuned frequency and, if audio was running prior to reconnect,
         // perform a short stop/start to force the backend audio channel to
         // match the UI-displayed tuned frequency.
@@ -636,8 +653,8 @@ function applyQuickBW() {
             try {
               if (ws && ws.readyState === WebSocket.OPEN) {
                 // Bypass programmatic-UI guard on these reconnect sends
-                try { sendControl('freq','F:' + (target_frequency / 1000.0).toFixed(3), undefined, true); } catch (e) {}
-                try { sendControl('zoom_center','Z:c:' + (target_center / 1000.0).toFixed(3), undefined, true); } catch (e) {}
+                try { const freqEl = document.getElementById('freq'); const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0); if (!isNaN(freqVal)) sendControl('freq','F:' + (Number(freqVal) / 1.0).toFixed(3), undefined, true); } catch (e) {}
+                try { const freqEl2 = document.getElementById('freq'); const freqVal2 = (freqEl2 && freqEl2.value) ? parseFloat(freqEl2.value) : (target_frequency/1000.0); if (!isNaN(freqVal2)) sendControl('zoom_center','Z:c:' + (Number(freqVal2)).toFixed(3), undefined, true); } catch (e) {}
               }
               const btn = document.getElementById("audio_button");
               if (btn && btn.value === "STOP") {
