@@ -644,15 +644,15 @@ function applyQuickBW() {
                 // audio was running before reconnect — restart it to ensure
                 // backend audio channel follows the tuned frequency
                 try { sendControl('audio', "A:STOP:" + ssrc.toString(), 50); } catch (e) {}
-                const useOpus = document.getElementById('opus_checkbox') && document.getElementById('opus_checkbox').checked;
+                const usePcm = document.getElementById('pcm_checkbox') && document.getElementById('pcm_checkbox').checked;
                 setTimeout(() => {
                   try {
-                    if (useOpus) {
+                    if (usePcm) {
+                      try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
+                    } else {
                       // ensure decoder ready then request Opus + start
                       try { initOpusDecoder(); } catch (e) {}
                       try { sendControl('audio', "O:OPUS:" + ssrc.toString(), 50); } catch (e) {}
-                    } else {
-                      try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
                     }
                     try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
                   } catch (e) {}
@@ -2962,16 +2962,21 @@ function applyQuickBW() {
         //console.log("Zoom control is inactive");
     }
 
-    function onOpusCheckboxChange(checked) {
-        try { if (window.localStorage) localStorage.setItem('useOpus', checked ? 'true' : 'false'); } catch (e) {}
+    function onPcmCheckboxChange(checked) {
+        try { if (window.localStorage) localStorage.setItem('usePCM', checked ? '1' : '0'); } catch (e) {}
         if (checked) {
-          initOpusDecoder();
-        } else {
           destroyOpusDecoder();
           // If audio is running, switch back to PCM immediately
           const btn = document.getElementById("audio_button");
           if (btn && btn.value === "STOP") {
             sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
+          }
+        } else {
+          initOpusDecoder();
+          // If audio is running, switch to Opus immediately
+          const btn = document.getElementById("audio_button");
+          if (btn && btn.value === "STOP") {
+            sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
           }
         }
     }
@@ -2982,15 +2987,14 @@ function applyQuickBW() {
         if(btn.value==="START") {
           btn.value = "STOP";
           btn.innerHTML = "Stop Audio";
-          const useOpus = document.getElementById('opus_checkbox') &&
-                          document.getElementById('opus_checkbox').checked;
-          if (useOpus) {
+          const usePcm = document.getElementById('pcm_checkbox') &&
+                         document.getElementById('pcm_checkbox').checked;
+          if (usePcm) {
+            destroyOpusDecoder();
+            sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
+          } else {
             await initOpusDecoder();
             sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
-          } else {
-            destroyOpusDecoder();
-            // Ensure backend is using PCM when user starts audio with Opus unchecked
-            sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
           }
           sendControl('audio', "A:START:"+ssrc.toString(), 50);
           // If player or its AudioContext is gone, recreate it using current mode
@@ -2999,8 +3003,8 @@ function applyQuickBW() {
             let currentMode = modeEl ? modeEl.value : 'am';
             let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
             let newChannels = (currentMode === 'iq') ? 2 : 1;
-            if (!useOpus) {
-              // If the existing player is still configured for Opus (32bitFloat)
+            if (usePcm) {
+              // If the existing player is configured for Opus (32bitFloat)
               // or has different channels/sampleRate, recreate it for 16-bit PCM.
               const needRecreate = (!player || !player.audioCtx) ||
                                    (player && player.option && player.option.encoding !== '16bitInt') ||
@@ -3030,8 +3034,10 @@ function applyQuickBW() {
           btn.value = "START";
           btn.innerHTML = "Start Audio";
           sendControl('audio', "A:STOP:"+ssrc.toString(), 50);
-          // Always revert to PCM encoding when audio is stopped
-          sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
+          // Keep backend encoding selection aligned with the checkbox state.
+          const usePcm = document.getElementById('pcm_checkbox') &&
+                         document.getElementById('pcm_checkbox').checked;
+          sendControl('audio', usePcm ? ("O:PCM:" + ssrc.toString()) : ("O:OPUS:" + ssrc.toString()), 50);
           destroyOpusDecoder();
         }
     }
@@ -3583,7 +3589,7 @@ function saveSettings() {
       if (!Number.isNaN(pval)) localStorage.setItem('panner_value', pval);
     }
   } catch (e) {}
-  try { localStorage.setItem("useOpus", (document.getElementById("opus_checkbox") && document.getElementById("opus_checkbox").checked) ? "true" : "false"); } catch (e) {}
+  try { localStorage.setItem("usePCM", (document.getElementById("pcm_checkbox") && document.getElementById("pcm_checkbox").checked) ? "1" : "0"); } catch (e) {}
 }
 
 // Set panner value for audio output and persist it. Best-effort only —
@@ -3856,14 +3862,19 @@ function loadSettings() {
   window.keepFreqCentered = kfcVal;
   try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.checked = kfcVal; } catch (e) {}
   try { const kfcel = document.getElementById('ckKeepFreqCentered'); if (kfcel) kfcel.addEventListener('change', function() { window.keepFreqCentered = this.checked; saveSettings(); }); } catch (e) {}
-  // Restore Opus checkbox state and initialize decoder if enabled
-  const useOpus = getLS("useOpus", v => (v === "true"), false);
-  try { const opel = document.getElementById('opus_checkbox'); if (opel) opel.checked = useOpus; } catch (e) {}
+  // Restore PCM checkbox state. If unset, default to Opus (usePCM=0).
+  let usePcm = getLS("usePCM", v => (v === "1" || v === "true"), null);
+  if (usePcm === null) {
+    const legacyUseOpus = getLS("useOpus", v => (v === "true" || v === "1"), null);
+    usePcm = (legacyUseOpus === null) ? false : !legacyUseOpus;
+    try { localStorage.setItem("usePCM", usePcm ? "1" : "0"); } catch (e) {}
+  }
+  try { const pcel = document.getElementById('pcm_checkbox'); if (pcel) pcel.checked = usePcm; } catch (e) {}
   try {
-    if (useOpus) {
-      try { initOpusDecoder(); } catch (e) {}
-    } else {
+    if (usePcm) {
       try { destroyOpusDecoder(); } catch (e) {}
+    } else {
+      try { initOpusDecoder(); } catch (e) {}
     }
   } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {

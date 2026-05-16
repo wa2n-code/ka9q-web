@@ -288,7 +288,7 @@
                     <td align="center">
                         <button id="audio_button" style="color:DarkViolet; border: solid; width:90px" onclick="audio_start_stop()" value="START" title="Start or stop audio">Start Audio</button>
                         &nbsp;&nbsp;
-                        <label title="Use Opus codec to reduce audio bandwidth (takes effect on next audio start)"><input type="checkbox" id="opus_checkbox" onchange="onOpusCheckboxChange(this.checked)" />&nbsp;Opus</label>
+                        <label title="Use PCM audio (unchecked uses Opus; takes effect on next audio start)"><input type="checkbox" id="pcm_checkbox" onchange="onPcmCheckboxChange(this.checked)" />&nbsp;PCM</label>
                         &nbsp;&nbsp;
                         <button id="toggleRecording" style="width:110px" onclick="toggleAudioRecording()" title="Start/Stop Audio Recording. Do not change frequency while recording." style="margin-right: 10px;">Record</button>
                     </td>
