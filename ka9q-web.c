@@ -181,7 +181,7 @@ struct session {
   /* uint32_t last_poll_tag; */
 };
 
-#define START_SESSION_ID 1000
+#define START_SESSION_ID 1000000
 
 int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
@@ -1430,9 +1430,28 @@ onion_connection_status home(void *data, onion_request * req,
          new websocket from the same IP/host (e.g. a second browser tab)
          from clobbering an active session and stealing its SSRC. */
       if (existing->ws != NULL) {
-        /* Active session already present for this client description; skip reattach. */
-        existing = existing->next;
-        continue;
+        /* Only skip reattach if the previous websocket is genuinely active.
+           A non-NULL `ws` is not enough — when a client browser closes its
+           WS the server may not yet have noticed (the ws pointer remains
+           until a write fails or the watchdog cleans it). For tunnel/frpc
+           clients all sharing client_desc=127.0.0.1, blindly skipping when
+           ws!=NULL prevents a reconnecting client from ever reattaching.
+           Treat the session as active only if it had recent (within
+           REATTACH_GRACE_MS) client activity or server writes; otherwise
+           treat as stale and fall through to reattach. */
+        const unsigned long REATTACH_GRACE_MS = 2000;
+        unsigned long now = now_ms();
+        unsigned long recent = 0;
+        if (existing->last_client_command_ms > recent) recent = existing->last_client_command_ms;
+        if (existing->last_write_start_ms > recent && existing->last_write_start_ms <= now) recent = existing->last_write_start_ms;
+        if (recent > 0 && now > recent && (now - recent) < REATTACH_GRACE_MS) {
+          /* Recent activity — legitimate active session (e.g. second tab). Skip. */
+          existing = existing->next;
+          continue;
+        }
+        fprintf(stderr, "%s: reattach over stale ws=%p for client=%s ssrc=%u (no activity for %lums)\n",
+                __FUNCTION__, (void *)existing->ws, existing->client, existing->ssrc,
+                (now > recent) ? (now - recent) : 0UL);
       }
       /* Reattach websocket to existing session to preserve SSRC and state */
       existing->ws = ws;
