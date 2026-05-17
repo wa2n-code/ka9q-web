@@ -181,7 +181,7 @@ struct session {
   /* uint32_t last_poll_tag; */
 };
 
-#define START_SESSION_ID 1000
+#define START_SESSION_ID 1000000
 
 int init_connections(const char *multicast_group);
 extern int init_control(struct session *sp);
@@ -337,7 +337,12 @@ static void *ws_watchdog_thread(void *arg) {
                with session list operations. We intentionally avoid locking
                sp->ws_mutex here to prevent deadlock against the blocked writer. */
             pthread_mutex_lock(&session_mutex);
-            control_set_frequency(sp, "0");
+            /* Avoid forcing backend to tune to 0 on transient watchdog recovery.
+              Telling backend frequency=0 causes global BFREQ=0 notifications
+              which can break other active clients. Just clean the session
+              locally and remove it; backend tuning should be handled at a
+              higher level if desired. */
+            // control_set_frequency(sp, "0");
             sp->audio_active = false;
             if (sp->spectrum_active) {
               pthread_mutex_lock(&sp->spectrum_mutex);
@@ -865,8 +870,11 @@ void websocket_closed(struct session *sp) {
   if (verbose)
     fprintf(stderr,"%s(): SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
   pthread_t spectrum_join = 0;
-  pthread_mutex_lock(&sp->ws_mutex);
-  control_set_frequency(sp,"0");
+    pthread_mutex_lock(&sp->ws_mutex);
+    /* Do not command the backend to tune to 0 when a websocket closes.
+      This can result in BFREQ:0.000 being sent to other clients and
+      cause audio to disappear. */
+    // control_set_frequency(sp,"0");
   sp->audio_active=false;
   if(sp->spectrum_active) {
     pthread_mutex_lock(&sp->spectrum_mutex);
@@ -1430,9 +1438,28 @@ onion_connection_status home(void *data, onion_request * req,
          new websocket from the same IP/host (e.g. a second browser tab)
          from clobbering an active session and stealing its SSRC. */
       if (existing->ws != NULL) {
-        /* Active session already present for this client description; skip reattach. */
-        existing = existing->next;
-        continue;
+        /* Only skip reattach if the previous websocket is genuinely active.
+           A non-NULL `ws` is not enough — when a client browser closes its
+           WS the server may not yet have noticed (the ws pointer remains
+           until a write fails or the watchdog cleans it). For tunnel/frpc
+           clients all sharing client_desc=127.0.0.1, blindly skipping when
+           ws!=NULL prevents a reconnecting client from ever reattaching.
+           Treat the session as active only if it had recent (within
+           REATTACH_GRACE_MS) client activity or server writes; otherwise
+           treat as stale and fall through to reattach. */
+        const unsigned long REATTACH_GRACE_MS = 2000;
+        unsigned long now = now_ms();
+        unsigned long recent = 0;
+        if (existing->last_client_command_ms > recent) recent = existing->last_client_command_ms;
+        if (existing->last_write_start_ms > recent && existing->last_write_start_ms <= now) recent = existing->last_write_start_ms;
+        if (recent > 0 && now > recent && (now - recent) < REATTACH_GRACE_MS) {
+          /* Recent activity — legitimate active session (e.g. second tab). Skip. */
+          existing = existing->next;
+          continue;
+        }
+        fprintf(stderr, "%s: reattach over stale ws=%p for client=%s ssrc=%u (no activity for %lums)\n",
+                __FUNCTION__, (void *)existing->ws, existing->client, existing->ssrc,
+                (now > recent) ? (now - recent) : 0UL);
       }
       /* Reattach websocket to existing session to preserve SSRC and state */
       existing->ws = ws;
@@ -2968,7 +2995,9 @@ static void *session_writer_thread(void *arg)
       if (pres <= 0) {
         /* timeout or error: consider write stuck and clean session */
         fprintf(stderr, "%s: poll timeout/error (%d) on ssrc=%u, cleaning session\n", __FUNCTION__, pres, sp->ssrc);
-        control_set_frequency(sp, "0");
+        /* Do not tell the backend to tune to 0 here; that causes other
+           clients to receive BFREQ=0 and lose audio. */
+        // control_set_frequency(sp, "0");
         sp->audio_active = false;
         pthread_t spectrum_join = 0;
         if (sp->spectrum_active) {
@@ -2996,8 +3025,9 @@ static void *session_writer_thread(void *arg)
     sp->write_in_progress = false;
     if (r <= 0) {
       fprintf(stderr, "%s: onion_websocket_write returned %d for ssrc=%u, cleaning session\n", __FUNCTION__, r, sp->ssrc);
-      /* On failure, perform cleanup similar to prior helpers. */
-      control_set_frequency(sp, "0");
+      /* On failure, perform cleanup similar to prior helpers. Avoid sending
+         RADIO_FREQUENCY=0 which affects global backend state. */
+      // control_set_frequency(sp, "0");
       sp->audio_active = false;
       pthread_t spectrum_join = 0;
       if (sp->spectrum_active) {
