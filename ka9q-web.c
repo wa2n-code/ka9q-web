@@ -337,7 +337,12 @@ static void *ws_watchdog_thread(void *arg) {
                with session list operations. We intentionally avoid locking
                sp->ws_mutex here to prevent deadlock against the blocked writer. */
             pthread_mutex_lock(&session_mutex);
-            control_set_frequency(sp, "0");
+            /* Avoid forcing backend to tune to 0 on transient watchdog recovery.
+              Telling backend frequency=0 causes global BFREQ=0 notifications
+              which can break other active clients. Just clean the session
+              locally and remove it; backend tuning should be handled at a
+              higher level if desired. */
+            // control_set_frequency(sp, "0");
             sp->audio_active = false;
             if (sp->spectrum_active) {
               pthread_mutex_lock(&sp->spectrum_mutex);
@@ -865,8 +870,11 @@ void websocket_closed(struct session *sp) {
   if (verbose)
     fprintf(stderr,"%s(): SSRC=%d audio_active=%d spectrum_active=%d\n",__FUNCTION__,sp->ssrc,sp->audio_active,sp->spectrum_active);
   pthread_t spectrum_join = 0;
-  pthread_mutex_lock(&sp->ws_mutex);
-  control_set_frequency(sp,"0");
+    pthread_mutex_lock(&sp->ws_mutex);
+    /* Do not command the backend to tune to 0 when a websocket closes.
+      This can result in BFREQ:0.000 being sent to other clients and
+      cause audio to disappear. */
+    // control_set_frequency(sp,"0");
   sp->audio_active=false;
   if(sp->spectrum_active) {
     pthread_mutex_lock(&sp->spectrum_mutex);
@@ -2987,7 +2995,9 @@ static void *session_writer_thread(void *arg)
       if (pres <= 0) {
         /* timeout or error: consider write stuck and clean session */
         fprintf(stderr, "%s: poll timeout/error (%d) on ssrc=%u, cleaning session\n", __FUNCTION__, pres, sp->ssrc);
-        control_set_frequency(sp, "0");
+        /* Do not tell the backend to tune to 0 here; that causes other
+           clients to receive BFREQ=0 and lose audio. */
+        // control_set_frequency(sp, "0");
         sp->audio_active = false;
         pthread_t spectrum_join = 0;
         if (sp->spectrum_active) {
@@ -3015,8 +3025,9 @@ static void *session_writer_thread(void *arg)
     sp->write_in_progress = false;
     if (r <= 0) {
       fprintf(stderr, "%s: onion_websocket_write returned %d for ssrc=%u, cleaning session\n", __FUNCTION__, r, sp->ssrc);
-      /* On failure, perform cleanup similar to prior helpers. */
-      control_set_frequency(sp, "0");
+      /* On failure, perform cleanup similar to prior helpers. Avoid sending
+         RADIO_FREQUENCY=0 which affects global backend state. */
+      // control_set_frequency(sp, "0");
       sp->audio_active = false;
       pthread_t spectrum_join = 0;
       if (sp->spectrum_active) {
