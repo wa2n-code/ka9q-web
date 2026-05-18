@@ -51,10 +51,6 @@
 #include "radio.h"
 #include "config.h"
 
-#ifndef RESOURCES_BASE_DIR
-#define RESOURCES_BASE_DIR /usr/local/share/ka9q-web
-#endif
-
 /* Maximum number of concurrent websocket client sessions. Set conservatively. */
 #define MAX_SESSIONS 5
 
@@ -1116,7 +1112,7 @@ int main(int argc,char **argv) {
 #define xstr(s) str(s)
 #define str(s) #s
   char const *port="8081";
-  char const *dirname=xstr(RESOURCES_BASE_DIR) "/html";
+  char const *dirname=PKGDATADIR "/html";
   char const *mcast="hf.local";
   App_path=argv[0];
   /* Open syslog and record the current git commit index. Prefer the build-time
