@@ -619,12 +619,16 @@ function applyQuickBW() {
           try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
         // Send current UI state (mode, frequency, zoom) to reduce race with server status/defaults
-        // Read directly from DOM controls so reconnect restores what the user actually sees
+        // Prefer localStorage preset over DOM value: the DOM may already show an incorrect mode
+        // pushed by the server during a previous failed reconnect cycle.
         try {
           const modeEl = document.getElementById('mode');
           const freqEl = document.getElementById('freq');
           const zoomEl = document.getElementById('zoom_level');
-          const modeToSend = (modeEl && modeEl.value) ? modeEl.value : (target_preset || 'am');
+          const _savedPreset = window.localStorage ? localStorage.getItem('preset') : null;
+          const modeToSend = _savedPreset || (modeEl && modeEl.value) || target_preset || 'am';
+          // Also restore the DOM to the saved preset now so subsequent reconnect reads are correct
+          if (_savedPreset && modeEl && modeEl.value !== _savedPreset) { modeEl.value = _savedPreset; }
           const freqToSend = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
           const zoomToSend = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
           try { sendControl('mode', 'M:' + modeToSend, undefined, true); } catch (e) { console.warn('Immediate mode send failed', e); }
@@ -1271,6 +1275,36 @@ function applyQuickBW() {
                     console.info('[radio.js] applied server mode to UI:', modeVal);
                   } finally {
                     suppressProgrammaticUI = prevSuppress;
+                  }
+                  // If a mode message arrives during the reconnect stabilization window and conflicts
+                  // with our stored preferred mode, the server lost our preset (e.g., after a
+                  // stuck-write session clean-up and double-reconnect).  Re-assert our mode
+                  // after a short delay so both UI and server converge back to what the user
+                  // had before the disconnect.  This applies to both M_FORCE and plain M: because
+                  // adoptEnabled() (shiftHz > 1) can cause plain M: updates to overwrite the UI.
+                  if (Date.now() < suppressProgrammaticUpdatesUntil) {
+                    try {
+                      const storedMode = window.localStorage ? localStorage.getItem('preset') : null;
+                      if (storedMode && storedMode !== modeVal) {
+                        console.info('[radio.js] server mode conflicts with stored mode during reconnect window; will re-assert', storedMode, 'in 500ms');
+                        setTimeout(() => {
+                          try {
+                            if (ws && ws.readyState === WebSocket.OPEN) {
+                              try {
+                                const mEl = document.getElementById('mode');
+                                if (mEl) {
+                                  suppressProgrammaticUI = true;
+                                  mEl.value = storedMode;
+                                  setTimeout(() => { suppressProgrammaticUI = false; }, 200);
+                                }
+                              } catch (e) {}
+                              sendControl('mode', 'M:' + storedMode, undefined, true);
+                              console.info('[radio.js] re-asserted stored mode after server conflict:', storedMode);
+                            }
+                          } catch (e) { console.warn('[radio.js] mode re-assertion after server conflict failed', e); }
+                        }, 500);
+                      }
+                    } catch (e) { console.warn('[radio.js] M_FORCE reconnect re-assert check failed', e); }
                   }
                 } else {
                   // console.debug('[radio.js] adopt disabled; skipping server mode UI update', modeVal);
