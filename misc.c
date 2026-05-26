@@ -1,0 +1,1247 @@
+// Miscellaneous low-level routines for ka9q-radio
+// Copyright 2018, Phil Karn, KA9Q
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+
+#include <math.h>
+#include <assert.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sched.h>
+#include <errno.h>
+#include <locale.h>
+#include <fcntl.h>
+#include <stdatomic.h>
+#include <sys/timex.h>
+#include <stdbool.h>
+
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
+#include "misc.h"
+
+#ifndef PKGDATADIR
+#define PKGDATADIR "/usr/local/share/ka9q-web"
+#endif
+
+#ifndef CONFDIR
+#define CONFDIR "/etc/radio"
+#endif
+
+char const *Pkgdatadir = PKGDATADIR;
+char const *Confdir = CONFDIR;
+
+
+// Return path to file which is part of the application distribution.
+// This allows to run the program either from build directory or from
+// installation directory.
+int dist_path(char *path,int path_len,const char *fname){
+  if(path == NULL)
+    return -1;
+  struct stat st = {0};
+
+  if(fname[0] == '/') {
+    strlcpy(path, fname, path_len);
+    return 0;
+  }
+  // first look in /etc/radio for local override
+  snprintf(path,path_len,"%s/%s",Confdir,fname);
+  if(stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFREG)
+    return 0;
+
+  // Then look in packaged files /usr[/local]/share/ka9q-radio
+  snprintf(path,path_len,"%s/%s",Pkgdatadir,fname);
+  if(stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFREG)
+    return 0;
+
+  return -1;
+}
+
+// Fill buffer from pipe
+// Needed because reads from a pipe can be partial
+ssize_t pipefill(int const fd,void *buffer,size_t const cnt){
+  size_t i;
+  uint8_t *bp = buffer;
+  for(i=0;i<cnt;){
+    ssize_t n = read(fd,bp+i,cnt-i);
+    if(n < 0)
+      return n;
+    if(n == 0)
+      break;
+    i += n;
+  }
+  return i;
+
+}
+
+// Set realtime priority (if possible)
+static int Base_prio;
+static bool Message_shown;
+
+int default_prio(void){
+#ifdef __linux__
+  return 0; // ordinary scheduling
+#else
+  return 0;
+#endif
+}
+
+
+
+void realtime(int prio){
+  if(prio == 0)
+    return;
+
+#if defined(__linux__)
+  struct sched_param param = {0};
+
+  param.sched_priority = prio;
+  if(sched_setscheduler(0,SCHED_FIFO|SCHED_RESET_ON_FORK,&param) == 0)
+    return; // Successfully set realtime
+  {
+    char name[25];
+    int err = errno;
+    if(!Message_shown && pthread_getname_np(pthread_self(),name,sizeof(name)) == 0){
+      Message_shown = true;
+      fprintf(stderr,"%s: sched_setscheduler failed, %s (%d)\n",name,strerror(err),err);
+    }
+  }
+#endif
+  (void)prio;
+  // As backup, decrease our niceness by 10
+  Base_prio = getpriority(PRIO_PROCESS,0);
+  errno = 0; // setpriority can return -1
+  int niceness = setpriority(PRIO_PROCESS,0,Base_prio - 10);
+  if(niceness != 0){
+    int err = errno;
+    char name[25];
+    memset(name,0,sizeof(name));
+    if(!Message_shown && pthread_getname_np(pthread_self(),name,sizeof(name)-1) == 0){
+      Message_shown = true;
+      fprintf(stderr,"%s: setpriority failed, %s (%d)\n",name,strerror(err),err);
+    }
+  }
+}
+
+// Drop back to normal priority, to avoid blocking a core when doing something time-consuming, like a FFT plan
+// Return true if we had previously been running at realtime, false otherwise
+
+int norealtime(void){
+#ifdef __linux__
+  if(sched_getscheduler(0) == SCHED_OTHER)
+    return 0; // Already normal
+
+  struct sched_param param = {0};
+  sched_getparam(0,&param);
+  int old_priority = param.sched_priority;
+
+  param.sched_priority = 0;
+  if(sched_setscheduler(0,SCHED_OTHER,&param) == 0)
+    return old_priority; // Successfully returned to normal
+
+  {
+    int err = errno; // in case getname changes it
+    char name[25] = {0};
+    if(!Message_shown && pthread_getname_np(pthread_self(),name,sizeof(name)) == 0){
+      Message_shown = true;
+      fprintf(stderr,"%s: sched_setscheduler failed, %s (%d)\n",name,strerror(err),err);
+    }
+  }
+#endif
+  // Try renicing to our base prio
+  errno = 0; // setpriority can return -1
+  int prio = getpriority(PRIO_PROCESS,0);
+  if(prio == Base_prio)
+    return prio; // Already normal niceness
+
+  prio = setpriority(PRIO_PROCESS,0,Base_prio);
+  if(prio == 0)
+    return prio; // Successfully returned to normal niceness
+  // Can it really fail when we're lowering?
+  if(!Message_shown){
+    int err = errno;
+    char name[25] = {0};
+    if(pthread_getname_np(pthread_self(),name,sizeof(name)-1) == 0){
+      Message_shown = true;
+      fprintf(stderr,"%s: setpriority failed to lower, %s (%d)\n",name,strerror(err),err);
+    }
+  }
+  return prio;  // Don't really know our state
+}
+
+// Stay on this CPU core
+bool Affinity = false;
+void stick_core(void){
+  if(!Affinity)
+    return;
+
+#if __linux__ // Not supported on macos, etc
+  char name[25] = {0};
+  pthread_t self = pthread_self();
+  if(pthread_getname_np(self,name,sizeof(name)-1) != 0)
+    fprintf(stderr,"getname(%ud) failed: %s\n",(unsigned int)self,strerror(errno));
+
+  int cpu = sched_getcpu();
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(cpu,&cpuset);
+  fprintf(stderr,"%s sched_setaffinity(pid=%u,cores=",name,(unsigned int)self);
+  // Any hyperthreading siblings?
+  char sysname[PATH_MAX] = {0};
+  snprintf(sysname,sizeof sysname,"/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list",cpu);
+  FILE *fp = fopen(sysname,"r");
+  if(fp != NULL){
+    char corelist[128] = {0};
+    if(fgets(corelist,sizeof corelist,fp) != NULL){
+      char *string = corelist;
+      while(1){
+	char *ptr = NULL;
+	if((ptr = strsep(&string,",")) == NULL)
+	  break;
+	cpu = strtol(ptr,NULL,0);
+	CPU_SET(cpu,&cpuset);
+	fprintf(stderr," %d",cpu);
+      }
+    }
+    fclose(fp);
+    fp = NULL;
+  } else {
+    fprintf(stderr," %d",cpu);
+  }
+  fprintf(stderr,")\n");
+
+  if (sched_setaffinity(0, sizeof(cpuset), &cpuset) == -1) {
+    fprintf(stderr," failed: %s\n",strerror(errno));
+  } else {
+    fprintf(stderr,"\n");
+  }
+#endif
+}
+#ifdef __linux__
+#include <limits.h>
+#include <sched.h>
+#include <dirent.h>
+
+#ifndef CPU_SETSIZE
+#define CPU_SETSIZE 1024
+#endif
+
+static bool parse_cpu_list(const char *s, cpu_set_t *out) {
+  // Parses Linux cpu list syntax: "0", "0,2,4-7", "1-3,8,10-11"
+  CPU_ZERO(out);
+  const char *p = s;
+
+  while (*p) {
+    while (isspace((unsigned char)*p)) p++;
+    if (!*p) break;
+
+    if (!isdigit((unsigned char)*p)) return false;
+
+    char *end = NULL;
+    long a = strtol(p, &end, 10);
+    if (end == p || a < 0 || a >= CPU_SETSIZE) return false;
+    p = end;
+
+    long b = a;
+    if (*p == '-') {
+      p++;
+      if (!isdigit((unsigned char)*p)) return false;
+      long v = strtol(p, &end, 10);
+      if (end == p || v < 0 || v >= CPU_SETSIZE) return false;
+      b = v;
+      p = end;
+    }
+
+    if (a > b) {
+      long tmp = a; a = b; b = tmp;
+    }
+    for (long i = a; i <= b; i++) CPU_SET((int)i, out);
+
+    while (isspace((unsigned char)*p)) p++;
+    if (*p == ',') {
+      p++;
+      continue;
+    }
+    if (*p == '\0' || *p == '\n') break;
+    // Unexpected character
+    return false;
+  }
+  return true;
+}
+
+static int read_file_to_buf(const char *path, char *buf, size_t buflen) {
+  FILE *f = fopen(path, "r");
+  if (!f) return -1;
+  if (!fgets(buf, (int)buflen, f)) {
+    fclose(f);
+    errno = EIO;
+    return -1;
+  }
+  fclose(f);
+  // strip trailing newline
+  buf[strcspn(buf, "\r\n")] = 0;
+  return 0;
+}
+
+// Enumerate online CPUs by scanning /sys/devices/system/cpu/cpuN directories.
+static int enumerate_online_cpus(int *cpus, int max_cpus) {
+  DIR *d = opendir("/sys/devices/system/cpu");
+  if (!d) return -1;
+
+  int n = 0;
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL) {
+    if (strncmp(de->d_name, "cpu", 3) != 0) continue;
+    const char *p = de->d_name + 3;
+    if (!isdigit((unsigned char)*p)) continue;
+
+    char *end = NULL;
+    long cpu = strtol(p, &end, 10);
+    if (end == p || *end != '\0') continue;
+    if (cpu < 0 || cpu >= CPU_SETSIZE) continue;
+
+    // Check online status (cpu0 may not have "online"; treat as online).
+    char online_path[PATH_MAX];
+    snprintf(online_path, sizeof online_path,
+             "/sys/devices/system/cpu/cpu%ld/online", cpu);
+
+    char buf[32];
+    bool online = true;
+    if (access(online_path, R_OK) == 0) {
+      if (read_file_to_buf(online_path, buf, sizeof buf) == 0) {
+        online = (buf[0] == '1');
+      }
+    }
+    if (!online) continue;
+
+    if (n < max_cpus) cpus[n] = (int)cpu;
+    n++;
+  }
+  closedir(d);
+  return n; // may be > max_cpus
+}
+
+// Read SMT siblings for a given CPU into a cpu_set_t.
+static int get_thread_siblings(int cpu, cpu_set_t *siblings_out) {
+  char path[PATH_MAX];
+  snprintf(path, sizeof path,
+           "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+
+  char buf[256];
+  if (read_file_to_buf(path, buf, sizeof buf) < 0) return -1;
+  if (!parse_cpu_list(buf, siblings_out)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+// Example: build an array mapping each cpu -> its sibling mask.
+int build_sibling_map(cpu_set_t *map, int map_len) {
+  int cpus[CPU_SETSIZE];
+  int n = enumerate_online_cpus(cpus, CPU_SETSIZE);
+  if (n < 0) return -1;
+
+  for (int i = 0; i < n && i < CPU_SETSIZE; i++) {
+    int cpu = cpus[i];
+    if (cpu < map_len) {
+      if (get_thread_siblings(cpu, &map[cpu]) < 0) return -1;
+    }
+  }
+  return 0;
+}
+
+// Helpers
+static int cpu_first(const cpu_set_t *s) {
+  for (int i = 0; i < CPU_SETSIZE; i++)
+    if (CPU_ISSET(i, s)) return i;
+  return -1;
+}
+
+static int cpu_count(const cpu_set_t *s) {
+  int n = 0;
+  for (int i = 0; i < CPU_SETSIZE; i++)
+    if (CPU_ISSET(i, s)) n++;
+  return n;
+}
+
+static void cpu_intersect(cpu_set_t *dst, const cpu_set_t *a, const cpu_set_t *b) {
+  CPU_ZERO(dst);
+  for (int i = 0; i < CPU_SETSIZE; i++)
+    if (CPU_ISSET(i, a) && CPU_ISSET(i, b)) CPU_SET(i, dst);
+}
+
+static bool cpu_equal(const cpu_set_t *a, const cpu_set_t *b) {
+  for (int i = 0; i < CPU_SETSIZE; i++)
+    if (CPU_ISSET(i, a) != CPU_ISSET(i, b)) return false;
+  return true;
+}
+
+typedef struct {
+  cpu_set_t cpus;   // allowed logical CPUs for this physical core (often 2 CPUs)
+  int rep_cpu;      // representative CPU (lowest) inside cpus
+} core_group_t;
+
+typedef struct {
+  core_group_t *v;
+  size_t n, cap;
+} core_group_vec_t;
+
+static void vec_free(core_group_vec_t *cv) {
+  free(cv->v);
+  cv->v = NULL; cv->n = cv->cap = 0;
+}
+
+static int vec_push(core_group_vec_t *cv, const core_group_t *g) {
+  if (cv->n == cv->cap) {
+    size_t newcap = cv->cap ? cv->cap * 2 : 16;
+    void *p = realloc(cv->v, newcap * sizeof(core_group_t));
+    if (!p) return -1;
+    cv->v = (core_group_t*)p;
+    cv->cap = newcap;
+  }
+  cv->v[cv->n++] = *g;
+  return 0;
+}
+
+// Build physical-core groups constrained to the process' allowed cpuset.
+// Each group is (thread_siblings_list(cpu) ∩ allowed).
+int build_core_groups(core_group_vec_t *out_groups, cpu_set_t *out_allowed) {
+  memset(out_groups, 0, sizeof(*out_groups));
+  CPU_ZERO(out_allowed);
+
+  // Allowed CPUs from systemd/cpuset/CPUAffinity
+  if (sched_getaffinity(0, sizeof(cpu_set_t), out_allowed) != 0)
+    return -1;
+
+  // Walk allowed CPUs; for each, form its sibling-set intersect allowed; dedupe.
+  cpu_set_t seen_groups_mask[1]; // not used; we dedupe by comparing cpu_set_t
+
+  (void)seen_groups_mask;
+
+  for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+    if (!CPU_ISSET(cpu, out_allowed)) continue;
+
+    cpu_set_t sib;
+    if (get_thread_siblings(cpu, &sib) != 0) {
+      // If sysfs missing (rare), degrade gracefully: treat as singleton.
+      CPU_ZERO(&sib);
+      CPU_SET(cpu, &sib);
+    }
+
+    cpu_set_t gset;
+    cpu_intersect(&gset, &sib, out_allowed);
+    if (cpu_count(&gset) == 0) continue;
+
+    // Dedupe: don't add if an identical group already exists.
+    bool exists = false;
+    for (size_t i = 0; i < out_groups->n; i++) {
+      if (cpu_equal(&out_groups->v[i].cpus, &gset)) { exists = true; break; }
+    }
+    if (exists) continue;
+
+    core_group_t g;
+    g.cpus = gset;
+    g.rep_cpu = cpu_first(&gset);
+    if (g.rep_cpu < 0) continue;
+
+    if (vec_push(out_groups, &g) != 0) {
+      vec_free(out_groups);
+      return -1;
+    }
+  }
+  return 0;
+}
+
+// Set affinity for current thread.
+int set_this_thread_affinity(const cpu_set_t *mask) {
+  return pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), mask);
+}
+ssize_t pick_fft_group(const core_group_vec_t *g) {
+  if (g->n == 0) return -1;
+  size_t best = 0;
+  for (size_t i = 1; i < g->n; i++) {
+    if (g->v[i].rep_cpu > g->v[best].rep_cpu)
+      best = i;
+  }
+  return (ssize_t)best;
+}
+size_t map_channel_to_group(size_t chan_id, size_t n_groups, size_t fft_index) {
+  // Map into groups excluding fft_index.
+  size_t usable = (n_groups > 0) ? (n_groups - 1) : 0;
+  if (usable == 0) return fft_index; // degenerate
+  size_t k = chan_id % usable;
+  // Convert k into an index in [0..n_groups) skipping fft_index
+  if (k >= (size_t)fft_index) k++;
+  return k;
+}
+
+#if 0
+cpu_set_t allowed;
+core_group_vec_t groups;
+if (build_core_groups(&groups, &allowed) != 0) { /* handle */ }
+
+ssize_t fft_i = pick_fft_group(&groups);
+if (fft_i >= 0) {
+  // Pin FFT thread to BOTH SMT siblings of its core
+  set_this_thread_affinity(&groups.v[fft_i].cpus);
+}
+
+size_t gi = map_channel_to_group(channel_id, groups.n, (size_t)fft_i);
+
+// Option 1: allow SMT siblings (recommended if threads are short)
+set_this_thread_affinity(&groups.v[gi].cpus);
+
+// Option 2: avoid SMT, pick only rep_cpu
+// cpu_set_t one; CPU_ZERO(&one); CPU_SET(groups.v[gi].rep_cpu, &one);
+// set_this_thread_affinity(&one);
+
+#endif
+
+#endif
+
+
+
+// Remove return or newline, if any, from end of string
+void chomp(char *s){
+
+  if(s == NULL)
+    return;
+  char *cp;
+  if((cp = strchr(s,'\r')) != NULL)
+    *cp = '\0';
+  if((cp = strchr(s,'\n')) != NULL)
+    *cp = '\0';
+}
+// Return a duplicate of the string 'str', ensuring that it's terminated by 'suffix'
+char *ensure_suffix(char const *str, char const *suffix){
+  char const *cp = strstr(str,suffix);
+  if(cp != NULL && strlen(cp) == strlen(suffix))
+    return strdup(str);
+
+  char *result = NULL;
+  int len = asprintf(&result,"%s%s",str,suffix);
+  if(len < 0)
+    return NULL;
+  return result;
+}
+static atomic_flag Leap_second_warning_logged = ATOMIC_FLAG_INIT;
+
+int64_t gps_time_ns(void){
+  struct timespec ts = {0};
+#ifdef CLOCK_TAI
+  // Try CLOCK_TAI and also query TAI-UTC offset
+  struct timex tx = {0};
+  if (clock_gettime(CLOCK_TAI, &ts) == 0 && adjtimex(&tx) != -1 && tx.tai >= 10) {
+    /* If CLOCK_TAI is supported, make sure it actually knows what the TAI-UTC offset is (it was never 0)
+       Strictly speaking this isn't TAI, which is defined from the epoch of 1 Jan 1958.
+       CLOCK_TAI counts seconds from the fictitious UNIX/POSIX epoch of 1 Jan 1970 00:00:00 UTC. (Fictitious because leap seconds
+       didn't start until 1972, and POSIX doesn't count them anyway.)
+       Since the system time is kept in pseudo-UTC, CLOCK_TAI returns system time plus the current TAI-UTC offset (+37 sec as of early 2026)
+       TAI is always 19 sec ahead of GPS
+       The GPS epoch (Sun 6 Jan 1980 00:00:00 UTC) was 3657 days after the UNIX epoch of Thu 1 Jan 1970 00:00:00 UTC), ignoring the 9
+       leap seconds between those two dates (because POSIX does)
+    */
+    ts.tv_sec -= UNIX_EPOCH;
+    ts.tv_sec -= TAI_GPS_OFFSET;
+    return ts.tv_sec * BILLION + ts.tv_nsec;
+  }
+#endif
+  // Need to add fallback code that consults an (updated) leap second table
+  if(!atomic_flag_test_and_set_explicit(&Leap_second_warning_logged,memory_order_relaxed)){
+    // Log this message only once
+    fprintf(stderr,"Warning: system doesn't know leap second count; using %d sec, which will break with the next leap second\n",GPS_UTC_OFFSET);
+  }
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec -= UNIX_EPOCH;
+  ts.tv_sec += GPS_UTC_OFFSET;
+  return ts.tv_sec * BILLION + ts.tv_nsec;
+}
+
+void normalize_time(struct timespec *x){
+  // Most common cases first
+  if(x->tv_nsec < 0){
+    x->tv_nsec += BILLION;
+    x->tv_sec--;
+  } else if(x->tv_nsec >= BILLION){
+    x->tv_nsec -= BILLION;
+    x->tv_sec++;
+  } else
+    return;
+
+  // Unlikely to get here
+  if(x->tv_nsec < 0 || x->tv_nsec >= BILLION){
+    lldiv_t f = lldiv(x->tv_nsec,BILLION);
+    x->tv_sec += f.quot;
+    x->tv_nsec = f.rem;
+    if(x->tv_nsec < 0){ // Sign of remainder for negative numerator is not clearly defined
+      x->tv_nsec += BILLION;
+      x->tv_sec--;
+    }
+  }
+}
+
+
+
+char const *Days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+char const *Months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+
+// Format, as UTC, a time measured in nanoseconds from the GPS epoch
+char *format_gpstime(char *result,int len,int64_t t){
+  return format_utctime(result,len,t + BILLION * (UNIX_EPOCH - GPS_UTC_OFFSET));
+}
+
+char *format_gpstime_iso8601(char *result,int len,int64_t t){
+  return format_utctime_iso8601(result,len,t + BILLION * (UNIX_EPOCH - GPS_UTC_OFFSET));
+}
+
+
+// Format, as UTC, a time measured in nanoseconds from the UNIX epoch
+char *format_utctime(char *result,int len,int64_t t){
+  time_t utime = t / BILLION;
+  int t_usec = (int)((t % BILLION) / 1000); // ns to us
+
+  if(t_usec < 0){
+    t_usec += 1000000;
+    utime -= 1;
+  }
+  struct tm tm = {0};
+  gmtime_r(&utime,&tm);
+  // Mon Feb 26 2018 14:40:08.123456 UTC
+  snprintf(result,len,"%s %02d %s %4d %02d:%02d:%02d.%06d UTC",
+	   Days[tm.tm_wday],
+	   tm.tm_mday,
+	   Months[tm.tm_mon],
+	   tm.tm_year+1900,
+	   tm.tm_hour,
+	   tm.tm_min,
+	   tm.tm_sec,
+	   t_usec);
+
+  return result;
+}
+
+char *format_utctime_iso8601(char *result,int len,int64_t t){
+  time_t utime = t / BILLION;
+  int t_usec = (int)((t % BILLION) / 1000);
+
+  if(t_usec < 0){
+    t_usec += 1000000;
+    utime -= 1;
+  }
+  struct tm tm = {0};
+  gmtime_r(&utime,&tm);
+  // 2018-02-26T14:40:08.123456Z
+  snprintf(result,len,"%04d-%02d-%02dT%02d:%02d:%02d.%06dZ",
+	   tm.tm_year+1900,
+	   tm.tm_mon+1,
+	   tm.tm_mday,
+	   tm.tm_hour,
+	   tm.tm_min,
+	   tm.tm_sec,
+	   t_usec);
+
+  return result;
+}
+
+// Format a seconds count into hh:mm:ss
+char *ftime(char * result,int size,int64_t t){
+  // Init to blanks
+  memset(result,0,size);
+  char *cp = result;
+  // Emit sign
+  if(t < 0){
+    *cp = '-';
+    t = -t; // absolute value
+  } else
+    *cp = ' ';
+
+  cp++;
+  size--;
+
+  int64_t const hr = t / 3600; // Hours is potentially unlimited
+  t -= 3600 * hr;
+
+  // Show hours and the hour:minute colon only if hr > 0
+  int r = 0;
+  if(hr > 0)
+    r = snprintf(cp,size,"%lld:",(long long)hr);
+
+  if(r < 0)
+    return NULL;
+  cp += r;
+  size -= r;
+
+  int64_t const mn = t / 60; // minutes is limited to 0-59
+  t -= mn * 60;
+  assert(mn < 60);
+  assert(t < 60);
+
+  r = 0;
+  if(hr > 0)
+    // hours field is present, show minutes with leading zero
+    r = snprintf(cp,size,"%02lld:",(long long)mn);
+  else if(mn > 0)
+    // Hours zero, show minute without leading 0
+    r = snprintf(cp,size,"%lld:",(long long)mn);
+
+  if(r < 0)
+    return NULL;
+  cp += r;
+  size -= r;
+
+
+  r = 0;
+  if(hr > 0 || mn > 0)
+  // Hours or minutes are nonzero, show seconds with leading 0
+    r = snprintf(cp,size,"%02lld",(long long)t);
+  else if(t > 0)
+    r = snprintf(cp,size,"%lld",(long long)t);
+
+  if(r < 0)
+    return NULL;
+
+  return result;
+}
+
+
+// Parse a frequency entry in the form
+// 12345 (12345 Hz)
+// 12k345 (12.345 kHz)
+// 12m345 (12.345 MHz)
+// 12g345 (12.345 GHz)
+// If no g/m/k and number is too small, make a heuristic guess
+// NB! This assumes radio covers 100 kHz - 2 GHz; should make more general
+double parse_frequency(char const *s,bool heuristics){
+  char * const ss = alloca(strlen(s)+1);
+  {
+    size_t i;
+    for(i=0;i<strlen(s);i++)
+      ss[i] = (char)tolower(s[i]);
+
+    ss[i] = '\0';
+  }
+  // Don't hardwire the decimal point, use the current locale
+  char decimal = '.';
+  struct lconv *lc = localeconv();
+  if(lc != NULL && lc->decimal_point != NULL && strlen(lc->decimal_point) > 0)
+    decimal = lc->decimal_point[0];
+
+  double mult = 1;
+  // k, m or g in place of decimal point indicates scaling by 1k, 1M or 1G
+  // h (hertz) means unity scaling; it can be used as a locale-independent
+  // decimal point
+  char *sp = NULL;
+  if((sp = strchr(ss,'g')) != NULL){
+    mult = 1e9;
+    *sp = decimal;
+  } else if((sp = strchr(ss,'m')) != NULL){
+    mult = 1e6;
+    *sp = decimal;
+  } else if((sp = strchr(ss,'k')) != NULL){
+    mult = 1e3;
+    *sp = decimal;
+  } else if((sp = strchr(ss,'h')) != NULL){
+    mult = 1;
+    *sp = decimal;
+  } else if((sp = strchr(ss,decimal)) != NULL){
+    // Disable heuristic if explicitly given
+  }
+  char *endptr = NULL;
+  double f = strtod(ss,&endptr);
+  if(endptr == ss || f == 0)
+    return 0; // Empty entry, or nothing decipherable
+
+  if(!heuristics || sp != NULL || f >= 1e5) // If multiplier explicitly given, or frequency >= 100 kHz (lower limit), return as-is
+    return f * mult;
+
+  // no radix specified & heuristics enabled: empirically guess kHz or MHz
+  if(f < 500)         // Could be kHz or MHz, arbitrarily assume MHz
+    return f * 1e6;
+  else if(f < 100000)
+    return f * 1e3;         // assume kHz
+  else return f;
+}
+
+// Return smallest integer greater than N with no factors > 7
+// Useful for determining efficient FFT sizes
+uint32_t nextfastfft(uint32_t n){
+
+  // Do all internal arithmetic in 64 bits to avoid wraparound
+  uint64_t result = 4288306050; // == 2 * 3^6 * 5^2 * 7^6, largest integer < 2^32 with small factors (biggest possible 32-bit result)
+  if(n >= result)
+    return 0; // Error
+  for(uint64_t f7=1; f7 < result; f7 *= 7){
+    for(uint64_t f5=f7; f5 < result; f5 *= 5){
+      for(uint64_t f3=f5; f3 < result; f3 *= 3){
+	for(uint64_t f2=f3; f2 < result; f2 *= 2){
+	  if(f2 > n){
+	    result = f2;
+	    break;
+	  }
+	}
+      }
+    }
+  }
+  return (uint32_t)result;
+}
+
+// round up to next power of 2
+uint32_t round2(uint32_t v){
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v++;
+  return v;
+}
+
+
+// The amplitude of a noisy FM signal has a Rice distribution
+// Given the ratio 'r' of the mean and standard deviation measurements, find the
+// ratio 'theta' of the Ricean parameters 'nu' and 'sigma', the true
+// signal and noise amplitudes
+
+// Pure noise is Rayleigh, which has mean/stddev = sqrt(pi/(4-pi)) or meansq/variance = pi/(4-pi) = 5.63 dB
+
+// See Wikipedia article on "Rice Distribution"
+
+// Modified Bessel function of the 0th kind
+double i0(double const z){
+  double const t = 0.25 * z * z;
+  double sum = 1 + t;
+  double term = t;
+  for(int k=2; k<40; k++){
+    term *= t/(k * k);
+    sum += term;
+    if(term < 1e-12 * sum)
+      break;
+  }
+  return sum;
+}
+
+// Modified Bessel function of first kind
+double i1(double const z){
+  double const t = 0.25 * z * z;
+  double term = 0.5 * t;
+  double sum = 1 + term;
+
+  for(int k=2; k<40; k++){
+    term *= t / (k * (k+1));
+    sum += term;
+    if(term < 1e-12 * sum)
+      break;
+  }
+  return 0.5 * z * sum;
+}
+double xi(double thetasq){
+
+  double t = (2 + thetasq) * i0(0.25 * thetasq) + thetasq * i1(0.25 * thetasq);
+  t *= t;
+  return 2 + thetasq - (0.125 * M_PI) * exp(-0.5 * thetasq) * t;
+}
+
+
+// Given apparent signal-to-noise power ratio, return corrected value
+double fm_snr(double r){
+
+  if(r <= M_PI / (4 - M_PI)) // shouldn't be this low even on pure noise
+    return 0;
+
+  if(r > 100) // 20 dB
+    return r; // Formula blows up for large SNR, and correction is tiny anyway
+
+  double thetasq = r;
+  for(int i=0;i < 10; i++){
+    double othetasq = thetasq;
+    thetasq = xi(thetasq) * (1+r) - 2;
+    if(fabs(thetasq - othetasq) <= 0.01)
+      break; // converged
+  }
+  return thetasq;
+}
+
+// Simple non-crypto hash function
+// Adapted from https://en.wikipedia.org/wiki/PJW_hash_function
+// This needs replacing -- last 4 bits are usually 0xc because the last character of the DNS name is usually a '.'
+uint32_t ElfHash(const uint8_t *s,size_t length){
+    uint32_t h = 0;
+    while(length-- > 0){
+        h = (h << 4) + *s++;
+	uint32_t high;
+        if ((high = h & 0xF0000000) != 0){
+            h ^= high >> 24;
+	    h &= ~high;
+	}
+    }
+    return h;
+}
+uint32_t ElfHashString(const char *s){
+  return ElfHash((uint8_t *)s,strlen(s));
+}
+
+// FNV-1 hash (https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function)
+uint32_t fnv1hash(const uint8_t *s,unsigned long length){
+  uint32_t hash = 0x811c9dc5;
+  while(length-- > 0){
+    hash *= 0x01000193;
+    hash ^= *s++;
+  }
+  return hash;
+}
+
+
+
+
+#if __APPLE__
+
+// OSX doesn't have pthread_barrier_*
+// Taken from https://stackoverflow.com/questions/3640853/performance-test-sem-t-v-s-dispatch-semaphore-t-and-pthread-once-t-v-s-dispat
+// Apparently by David Cairns
+
+#include <errno.h>
+
+int pthread_barrier_init(pthread_barrier_t *barrier, pthread_barrierattr_t const *attr, unsigned int count)
+{
+  (void)attr;
+    if(count == 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    if(pthread_mutex_init(&barrier->mutex, 0) < 0)
+    {
+        return -1;
+    }
+    if(pthread_cond_init(&barrier->cond, 0) < 0)
+    {
+        pthread_mutex_destroy(&barrier->mutex);
+        return -1;
+    }
+    barrier->tripCount = count;
+    barrier->count = 0;
+
+    return 0;
+}
+
+int pthread_barrier_destroy(pthread_barrier_t *barrier)
+{
+    pthread_cond_destroy(&barrier->cond);
+    pthread_mutex_destroy(&barrier->mutex);
+    return 0;
+}
+
+int pthread_barrier_wait(pthread_barrier_t *barrier)
+{
+    pthread_mutex_lock(&barrier->mutex);
+    ++(barrier->count);
+    if(barrier->count >= barrier->tripCount)
+    {
+        barrier->count = 0;
+        pthread_cond_broadcast(&barrier->cond);
+        pthread_mutex_unlock(&barrier->mutex);
+        return 1;
+    }
+    else
+    {
+        pthread_cond_wait(&barrier->cond, &(barrier->mutex));
+        pthread_mutex_unlock(&barrier->mutex);
+        return 0;
+    }
+}
+
+#endif // __APPLE__
+
+// Round 'size' up to next whole number of system pages
+size_t round_to_page(size_t size){
+  assert(getpagesize() != 0);
+  imaxdiv_t const r = imaxdiv(size,(intmax_t)getpagesize());
+  size_t pages = r.quot;
+  if(r.rem != 0)
+    pages++;
+  return pages * getpagesize();
+}
+// Round 'size' up to next whole number of system pages
+size_t round_to_hugepage(size_t size){
+  size_t hugepagesize = 2 * 1024 * 1024; // 2 MB
+  imaxdiv_t const r = imaxdiv(size,(intmax_t)hugepagesize);
+  size_t pages = r.quot;
+  if(r.rem != 0)
+    pages++;
+  return pages * hugepagesize;
+}
+// Custom version of malloc that aligns to a cache line
+// This is 64 bytes on most modern machines, including the x86 and the ARM 2711 (Pi 4)
+// This is stricter than a float complex or double complex, which is required by fftwf/fftw
+void *lmalloc(size_t size){
+  void *ptr;
+  int r;
+  if((r = posix_memalign(&ptr,64,size)) == 0){
+    assert(ptr != NULL);
+    return ptr;
+  }
+  errno = r;
+  assert(false);
+  return NULL;
+}
+
+
+// Special version of malloc that allocates a mirrored block
+// The block first appears normally, then is followed by a duplicate mapping
+// Very useful for circular buffers that must be accessed sequentially, without wraparound
+// e.g., fftwf_execute()
+// Linux and non-Linux are sufficiently different to warrant two separate routines
+#if __linux__
+
+#if 0
+// Try huge pages, return NULL if unavail
+static void *mirror_alloc_huge(size_t size){
+  size = round_to_hugepage(size);
+  // Create huge page file
+  char fname[256];
+  static int counter;
+  snprintf(fname,sizeof fname,"/dev/hugepages/%d-%d",getpid(),counter++);
+  int fd = open(fname,O_CREAT|O_RDWR,0600);
+  unlink(fname);
+  if(fd == -1){
+    perror("mirror_alloc_huge file create failed");
+    return NULL;
+  }
+  // Reserve virtual space for buffer + mirror
+  uint8_t *base = mmap(NULL,size * 2, PROT_NONE, MAP_PRIVATE|MAP_HUGETLB|MAP_ANONYMOUS, -1, 0);
+  if(base == MAP_FAILED){
+    perror("mirror_alloc_huge first mmap");
+    close(fd);
+    return NULL; // failed
+  }
+  if(ftruncate(fd,size) != 0){
+    perror("mirror_alloc ftruncate");
+    close(fd);
+    munmap(base,size * 2);
+    return NULL;
+  }
+  // Create first appearance of buffer
+  uint8_t *nbase = mmap(base, size, PROT_READ|PROT_WRITE, MAP_HUGETLB|MAP_FIXED|MAP_SHARED, fd, 0);
+  if(nbase != base){
+    perror("mirror_alloc_huge 2nd mmap");
+    close(fd);
+    munmap(base,size * 2);
+    return NULL;
+  }
+  // Create mirror immedately after first
+  uint8_t *mirror = mmap(base + size,size, PROT_READ|PROT_WRITE, MAP_HUGETLB|MAP_FIXED|MAP_SHARED, fd, 0);
+  if(mirror != base + size){
+    perror("mirror_alloc_huge 3rd mmap");
+    munmap(base,size * 2);
+    base = NULL;
+  }
+  close(fd); // No longer needed after all memory maps are in place
+  return base;
+}
+#endif
+
+// Allocate a mirrored buffer, with two consecutive mappings of the same memory
+// Very useful for ring buffers
+void *mirror_alloc(size_t size){
+#if 0 // Seems to hurt performance, disabled for now
+  if(size > 1024 * 1024){
+    // Try huge pages for big buffers
+    void *buffer = mirror_alloc_huge(size);
+    if(buffer != NULL)
+      return buffer;
+  }
+#endif
+  size = round_to_page(size);
+
+  int flags = 0;
+  int fd = memfd_create("mirror_alloc",flags);
+  if(fd < 0){
+    perror("mirror_alloc tmpfile create");
+    return NULL;
+  }
+  if(ftruncate(fd,size) != 0){
+    perror("mirror_alloc ftruncate");
+    close(fd);
+    return NULL;
+  }
+  // Reserve virtual space for buffer + mirror
+  uint8_t *base = mmap(NULL,size * 2, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0); // Retry normal
+  if(base == MAP_FAILED){
+    perror("mirror_alloc first mmap");
+    close(fd);
+    return NULL; // failed
+  }
+  // Create first appearance of buffer
+  uint8_t *nbase = mmap(base, size, PROT_READ|PROT_WRITE, MAP_FIXED|MAP_SHARED, fd, 0);
+  if(nbase != base){
+    perror("mirror_alloc 2nd mmap");
+    close(fd);
+    munmap(base,size * 2);
+    return NULL;
+  }
+  // Create mirror immedately after first
+  uint8_t *mirror = mmap(base + size,size, PROT_READ|PROT_WRITE, MAP_FIXED|MAP_SHARED, fd, 0);
+  if(mirror != base + size){
+    perror("mirror_alloc 3rd mmap");
+    munmap(base,size * 2);
+    base = NULL;
+  }
+  close(fd); // No longer needed after all memory maps are in place
+  return base;
+}
+
+#else // macos, etc
+
+void *mirror_alloc(size_t size){
+  size = round_to_page(size); // mmap requires even number of pages
+
+  char path[] = "/tmp/cb-XXXXXX";
+  int fd = mkstemp(path);
+  unlink(path);
+  if(fd < 0){
+    perror("mirror_alloc mkstemp");
+    return NULL;
+  }
+  if(ftruncate(fd,size) != 0){
+    perror("mirror_alloc ftruncate");
+    close(fd);
+    return NULL;
+  }
+
+  // Reserve virtual space for buffer + mirror
+  uint8_t *base = mmap(NULL,size * 2, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0); // Retry normal
+  if(base == MAP_FAILED){
+    close(fd);
+    return NULL; // failed
+  }
+  // Create first appearance of buffer
+  uint8_t *nbase = mmap(base, size, PROT_READ|PROT_WRITE, MAP_FIXED|MAP_SHARED, fd, 0);
+  if(nbase != base){
+    perror("mirror_alloc first mmap");
+    close(fd);
+    munmap(base,size * 2);
+    return NULL;
+  }
+  // Create mirror immedately after first
+  uint8_t *mirror = mmap(base + size,size, PROT_READ|PROT_WRITE, MAP_FIXED|MAP_SHARED, fd, 0);
+  if(mirror != base + size){
+    perror("mirror_alloc second mmap");
+    munmap(base,size * 2);
+    base = NULL;
+  }
+  close(fd); // No longer needed after all memory maps are in place
+  return base;
+}
+#endif
+
+
+
+void mirror_free(void **p,size_t size){
+  if(p == NULL || *p == NULL)
+    return;
+  munmap(*p, size * 2);
+  *p = NULL; // Nail pointer
+}
+
+#if (defined(__i386__) || defined(__x86_64__)) && (defined(__SSE__) || defined(__AVX__))
+#include <immintrin.h>   // _mm_getcsr, _mm_setcsr
+
+void enable_ftz_daz(void) {
+  unsigned int csr = _mm_getcsr();
+  csr |= (1u << 15);   // FTZ
+  csr |= (1u << 6);    // DAZ
+  _mm_setcsr(csr);
+}
+
+void disable_ftz_daz(void) {
+  unsigned int csr = _mm_getcsr();
+  csr &= ~(1u << 15);
+  csr &= ~(1u << 6);
+  _mm_setcsr(csr);
+}
+#endif
+
+
+#if defined(__aarch64__)
+void enable_ftz(void) {
+  unsigned long fpcr;
+  __asm__ volatile("mrs %0, fpcr" : "=r"(fpcr));
+  fpcr |= (1ul << 24);          // FZ bit
+  __asm__ volatile("msr fpcr, %0" :: "r"(fpcr));
+}
+#endif
+
+
+#undef DROP_ENABLE
+#if DROP_ENABLE
+static size_t linesize(){
+#ifdef _SC_LEVEL1_DCACHE_LINESIZE
+    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+    if (sz > 0) return (size_t) sz;
+#endif
+    return 64;  // Default fallback
+}
+#endif
+
+
+#if DROP_ENABLE && __x86_64__
+void drop_cache(void *mem,size_t bytes){
+  uint8_t *p = (uint8_t *)mem;
+  static size_t line = 0;
+  if(line == 0)
+    line = linesize();
+  for(unsigned int i = 0; i < bytes; i += line){
+    asm volatile ("clflushopt (%0)" :: "r" (p) : "memory"); // need to check that we have clflushopt
+    p += line;
+  }
+  asm volatile ("sfence" ::: "memory");
+}
+#elif DROP_ENABLE &&  __aarch64__
+void drop_cache(void *mem,size_t bytes){
+  uint8_t *p = (uint8_t *)mem;
+  static size_t line = 0;
+  if(line == 0)
+    line = linesize();
+  for(unsigned int i = 0; i < bytes; i += line){
+    asm volatile ("dc civac, %0" :: "r" (p) : "memory");
+    p += line;
+  }
+  asm volatile ("dsb ish");  // Ensure completion
+}
+
+#else
+// Dummy
+void drop_cache(void *mem,size_t bytes){
+  (void)mem;
+  (void)bytes;
+}
+#endif
+#if defined(__i386__) || defined(__x86_64__)
+#include <xmmintrin.h>
+
+enum { MXCSR_EX_FLAGS = 0x3Fu, MXCSR_DE = 1u<<1, MXCSR_UE = 1u<<4 };
+
+uint32_t mxcsr_get_and_clear_flags(void){
+    uint32_t x = _mm_getcsr();
+    uint32_t flags = x & MXCSR_EX_FLAGS;
+    _mm_setcsr(x & ~MXCSR_EX_FLAGS);
+    return flags;
+}
+#endif
