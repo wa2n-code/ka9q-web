@@ -380,7 +380,7 @@ int verbose = 0;
 int debugSSRC = 0;
 int debug_ws_ping = 0; /* gate for ws_ping verbose prints */
 /* If true, emit extra send debugging output (gated with `verbose`). */
-int debug_send = 1;
+int debug_send = 0;
 int debug_send_poll = 0;
 /* Low-volume global send-success counter for temporary debugging (removed) */
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
@@ -1040,7 +1040,7 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len) {
   struct session *sp=find_session_from_websocket(ws);
   if(sp==NULL) {
-    ONION_ERROR("Error did not find session for: ws=%p", ws);
+    //ONION_ERROR("Error did not find session for: ws=%p", ws);
     return OCS_NEED_MORE_DATA;
   }
 
@@ -1560,7 +1560,7 @@ onion_connection_status home(void *data, onion_request * req,
     /* Record underlying fd (or -1 if not available) for use by writer thread */
     sp->ws_fd = wsfd;
   } while(0);
-  fprintf(stderr, "%s: new websocket ws=%p assigned SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, sp->ssrc, sp->client);
+  //fprintf(stderr, "%s: new websocket ws=%p assigned SSRC=%u client=%s\n", __FUNCTION__, (void *)ws, sp->ssrc, sp->client);
   sp->spectrum_active=true;
   sp->audio_active=false;
   /* adoptOnParameterMismatch removed; adoption controlled server-side by backend shift */
