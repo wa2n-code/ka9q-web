@@ -4153,9 +4153,6 @@ const bandOptions = {
         { label: "11M", freq: 25850000 }
     ],
     utility: [
-        { label: "CHU3330", freq: 3330000 },
-        { label: "CHU7850", freq: 7850000 },
-        { label: "CHU14.6", freq: 14670000 },
         { label: "WWV2.5", freq: 2500000 },
         { label: "WWV5", freq: 5000000 },
         { label: "WWV10", freq: 10000000 },
