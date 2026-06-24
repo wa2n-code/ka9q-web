@@ -90,7 +90,7 @@
     race entirely.
 */
 
-const char *webserver_version = "2.83";
+const char *webserver_version = "2.84";
 
 /* Set to 1 to avoid performing hostname lookups for incoming clients.
   When enabled the server will record numeric IP addresses instead of
