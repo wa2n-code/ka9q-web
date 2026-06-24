@@ -54,6 +54,13 @@
 /* Maximum number of concurrent websocket client sessions. Set conservatively. */
 #define MAX_SESSIONS 5
 
+/* Default lifetime (seconds) to request for created/active channels.
+  Radiod will remove channels when this timer expires if no further
+  activity refreshes it. 1000 ~= 20 seconds; choose 500 or 1000 as needed. */
+#ifndef DEFAULT_CHANNEL_LIFETIME
+#define DEFAULT_CHANNEL_LIFETIME 1000
+#endif
+
 /*
   Notes on recent changes (also applied to ka9q-web1/ka9q-web.c):
 
@@ -83,7 +90,7 @@
     race entirely.
 */
 
-const char *webserver_version = "2.83";
+const char *webserver_version = "2.84";
 
 /* Set to 1 to avoid performing hostname lookups for incoming clients.
   When enabled the server will record numeric IP addresses instead of
@@ -1885,8 +1892,8 @@ int init_control(struct session *sp) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   *bp++ = CMD; // Command
-
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+  encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* seconds until channel expires */
   encode_double(&bp,RADIO_FREQUENCY,10000000);
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
@@ -1905,6 +1912,7 @@ int init_control(struct session *sp) {
   *bp++ = CMD; // Command
 
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc+1); // Specific SSRC
+  encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* seconds until channel expires */
   encode_double(&bp,RADIO_FREQUENCY,10000000);
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
@@ -1960,6 +1968,7 @@ void control_set_frequency(struct session *sp,char *str) {
     /* Round to nearest Hz when storing in integer session field */
     sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+    encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_eol(&bp);
@@ -1998,6 +2007,7 @@ void control_set_shift(struct session *sp,char *str) {
     *bp++ = CMD; // Command
     s = strtod(str, NULL); // shift in Hz
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+    encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
     encode_double(&bp,SHIFT_FREQUENCY,s);
     encode_eol(&bp);
@@ -2028,6 +2038,7 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
 
   *bp++ = CMD; // Command
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, LIFETIME, DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
   encode_int(&bp, COMMAND_TAG, arc4random());
   /* Encode LOW_EDGE then HIGH_EDGE as floats */
   encode_float(&bp, LOW_EDGE, lowf);
@@ -2068,6 +2079,7 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   /* Use fixed 32-bit encodings to keep command packet length deterministic */
   encode_int32(&bp, OUTPUT_SSRC, (uint32_t)target_ssrc);
+  encode_int32(&bp, LIFETIME, (uint32_t)DEFAULT_CHANNEL_LIFETIME);
   encode_int32(&bp, COMMAND_TAG, (uint32_t)arc4random());
   /* Encode spectrum average as integer SPECTRUM_AVG */
   encode_int(&bp, SPECTRUM_AVG, val);
@@ -2099,6 +2111,7 @@ void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   encode_int(&bp, OUTPUT_SSRC, target_ssrc);
+  encode_int(&bp, LIFETIME, DEFAULT_CHANNEL_LIFETIME);
   encode_int(&bp, COMMAND_TAG, arc4random());
   /* Encode spectrum overlap as float SPECTRUM_OVERLAP */
   encode_float(&bp, SPECTRUM_OVERLAP, val);
@@ -2141,6 +2154,7 @@ void control_set_window_type(struct session *sp, char *type_str, char *shape_str
   *bp++ = CMD; // Command
   /* Include SSRC for which this setting applies - target the spectrum stream (ssrc+1) */
   encode_int(&bp, OUTPUT_SSRC, target_ssrc);
+  encode_int(&bp, LIFETIME, DEFAULT_CHANNEL_LIFETIME);
   encode_int(&bp, COMMAND_TAG, arc4random());
   /* Encode window type as integer using tag WINDOW_TYPE (status.h) */
   encode_int(&bp, WINDOW_TYPE, val);
@@ -2184,6 +2198,7 @@ void control_set_mode(struct session *sp,char *str) {
   if(strlen(str) > 0) {
     *bp++ = CMD; // Command
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
+    encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
     encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
     encode_eol(&bp);
@@ -2231,6 +2246,7 @@ void control_set_encoding(struct session *sp, bool use_opus) {
   uint8_t *bp = cmdbuffer;
   *bp++ = CMD;
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, LIFETIME, DEFAULT_CHANNEL_LIFETIME);
   encode_int(&bp, COMMAND_TAG, arc4random());
   encode_int(&bp, OUTPUT_ENCODING, use_opus ? OPUS : S16BE);
   encode_eol(&bp);
