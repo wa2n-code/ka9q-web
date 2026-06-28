@@ -616,7 +616,8 @@ function applyQuickBW() {
         _lastWsMsgTs = Date.now();
         _lastWsOpenTs = Date.now();
         if (ws && ws.readyState === WebSocket.OPEN) {
-          try { ws.send("S:"); } catch (e) { console.warn('Failed to send S:', e); }
+          // Respect saved pause state: only start spectrum if not paused
+          try { ws.send(spectrum.paused ? "S:STOP" : "S:"); } catch (e) { console.warn('Failed to send S:', e); }
         }
         // Send current UI state (mode, frequency, zoom) to reduce race with server status/defaults
         // Prefer localStorage preset over DOM value: the DOM may already show an incorrect mode
@@ -1612,8 +1613,61 @@ function applyQuickBW() {
                     power = 10.0 * Math.log10(power);
                     i=i+l;
                     break;
+                  case 10: // INPUT_SAMPRATE (variable-length big-endian uint)
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); input_samprate = _v; }
+                    i += l;
+                    break;
+                  case 13: // INPUT_SAMPLES (variable-length big-endian uint64)
+                    { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); input_samples = _v; }
+                    i += l;
+                    break;
+                  case 3: // GPS_TIME (variable-length big-endian uint64)
+                    { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); gps_time = _v; }
+                    i += l;
+                    break;
+                  case 45: // IF_POWER (float, 0 or 4 bytes)
+                    if (l >= 4) if_power = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  case 47: // NOISE_DENSITY (float, 0 or 4 bytes)
+                    if (l >= 4) noise_density_audio = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  case 104: // AD_OVER (variable-length big-endian uint64)
+                    { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); ad_over = _v; }
+                    i += l;
+                    break;
+                  case 108: // SAMPLES_SINCE_OVER (variable-length big-endian uint64)
+                    { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); samples_since_over = _v; }
+                    i += l;
+                    break;
+                  case 97: // RF_ATTEN
+                    if (l >= 4) rf_atten = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  case 98: // RF_GAIN
+                    if (l >= 4) rf_gain = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  case 99: // RF_AGC
+                    if (l >= 1) rf_agc = view.getUint8(i);
+                    i += l;
+                    break;
+                  case 110: // RF_LEVEL_CAL
+                    if (l >= 4) rf_level_cal = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  case 15: // NOISE_BW
+                    if (l >= 4) noise_bw = view.getFloat32(i, false);
+                    i += l;
+                    break;
+                  default:
+                    i += l; // skip unknown TLV fields
+                    break;
                 }
               }
+              // Update status display from status packet (runs even when spectrum is paused)
+              try { update_stats(); } catch (e) {}
               // Ensure filter edges are numeric (avoid strings/BigInt) before applying
               try {
                 filter_low = Number(filter_low);
@@ -3288,10 +3342,7 @@ function formatUptimeDHMS(seconds) {
 }
 
 function update_stats() {
-  if (spectrum.paused)
-    return;
-
-    // GPS time isn't UTC; it started at Sunday January 6, 1980 at 00:00:00 UTC and there have been 18 UTC leap seconds since
+  // GPS time isn't UTC; it started at Sunday January 6, 1980 at 00:00:00 UTC and there have been 18 UTC leap seconds since
   var t = Number(gps_time) / 1e9;
   t+=315964800;
   t-=18;
@@ -3913,6 +3964,8 @@ function loadSettings() {
   try { document.getElementById("max_hold").checked = spectrum.maxHold; } catch (e) {}
 
   spectrum.paused = getLS("paused", v => (v === "true"), spectrum.paused);
+  // Sync button label to reflect loaded pause state
+  try { const _pb = document.getElementById("pause"); if (_pb) _pb.textContent = spectrum.paused ? "Spectrum Run" : "Spectrum Pause"; } catch (e) {}
   spectrum.decay = getLS("decay", v => parseFloat(v), spectrum.decay);
   spectrum.cursor_active = getLS("cursor_active", v => (v === "true"), spectrum.cursor_active);
 

@@ -1790,6 +1790,23 @@ Spectrum.prototype.togglePaused = function() {
     this.paused = !this.paused;
     document.getElementById("pause").textContent = (this.paused ? "Spectrum Run" : "Spectrum Pause");
     this.saveSettings();
+
+    // Notify server to stop/resume spectrum data so backend stops sending unnecessary packets.
+    try {
+        if (typeof ws !== 'undefined' && ws && ws.readyState === WebSocket.OPEN) {
+            if (this.paused) {
+                // Pause: request backend stop spectrum stream for this client
+                if (typeof sendControl === 'function') sendControl('spectrum', 'S:STOP');
+                else ws.send('S:STOP');
+            } else {
+                // Resume: request backend start for this client
+                if (typeof sendControl === 'function') sendControl('spectrum', 'S:');
+                else ws.send('S:');
+            }
+        }
+    } catch (e) {
+        console.warn('togglePaused: failed to send spectrum control', e);
+    }
 }
 
 Spectrum.prototype.setMaxHold = function(maxhold) {

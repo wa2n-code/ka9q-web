@@ -111,6 +111,7 @@ pthread_t ctrl_task;
 pthread_t audio_task;
 pthread_t ws_ping_task;
 pthread_t ws_watchdog_task;
+pthread_t lifetime_refresh_task;
 /* monitor removed: previously guarded by ENABLE_MONITOR */
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
@@ -201,6 +202,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
 void stop_spectrum_stream(struct session *sp);
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp);
 void control_poll(struct session *sp);
+static void *lifetime_refresh_thread(void *arg);
 void *spectrum_thread(void *arg);
 void *ctrl_thread(void *arg);
 
@@ -523,13 +525,39 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
       case 'S':
       case 's':
         {
+          // Allow an optional parameter: S:STOP to pause spectrum, or S: / S to resume/start.
+          char *param = strtok_r(NULL, ":", &saveptr);
+
+          if (param && strcasecmp(param, "STOP") == 0) {
+            // Client requested spectrum pause: echo SSRC and ask backend to stop spectrum stream for this SSRC
+            char temp_stop[16];
+            snprintf(temp_stop, sizeof(temp_stop), "S:%d", sp->ssrc);
+            send_ws_text_to_session(sp, temp_stop);
+            sp->spectrum_requested_by_client = false;
+            sp->spectrum_restart_attempts = 0;
+            sp->last_spectrum_restart_ms = 0;
+            sp->spectrum_active = false;
+            stop_spectrum_stream(sp);
+            if (verbose) fprintf(stderr, "SSRC %u: spectrum stop requested by client\n", sp->ssrc);
+            break;
+          }
+
+          // Plain S: or S without STOP -> start/resume spectrum for this session
           char temp[16];
           snprintf(temp, sizeof(temp), "S:%d", sp->ssrc);
           send_ws_text_to_session(sp, temp);
           if (debugSSRC) fprintf(stderr, "ws: S: request from ssrc %u\n", sp->ssrc);
+
+          // Avoid starting duplicate spectrum threads if already active or requested
+          if (sp->spectrum_active || sp->spectrum_requested_by_client) {
+            if (verbose) fprintf(stderr, "SSRC %u: spectrum already active/requested, ignoring start\n", sp->ssrc);
+            break;
+          }
+
           sp->spectrum_requested_by_client = true;
           sp->spectrum_restart_attempts = 0;
           sp->last_spectrum_restart_ms = 0;
+          sp->spectrum_active = true;
           if(pthread_create(&sp->spectrum_task,NULL,spectrum_thread,sp) == -1){
             perror("pthread_create: spectrum_thread");
           } else {
@@ -1859,6 +1887,14 @@ int init_connections(const char *multicast_group) {
     snprintf(buff,16,"audio");
     pthread_setname_np(audio_task,buff);
   }
+  /* Start lifetime refresh thread to keep channels alive while spectrum paused */
+  if(pthread_create(&lifetime_refresh_task, NULL, lifetime_refresh_thread, NULL) == -1) {
+    perror("pthread_create: lifetime_refresh_thread");
+  } else {
+    char buff2[32];
+    snprintf(buff2, sizeof(buff2), "lifetime_refresh");
+    pthread_setname_np(lifetime_refresh_task, buff2);
+  }
   /* monitor thread will be started on first client connect to avoid startup noise */
   return(EX_OK);
 }
@@ -2378,6 +2414,50 @@ void control_poll(struct session *sp) {
     if (verbose && debug_send && debug_send_poll) fprintf(stderr, "%s: +%lums: send OK (poll #%d)\n", __FUNCTION__, elapsed_ms, poll_count);
   }
   pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Refresh channel lifetime for a session without changing other params.
+   Sends a CMD with OUTPUT_SSRC and LIFETIME so radiod keeps the channel alive. */
+void control_refresh_lifetime(struct session *sp) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  *bp++ = CMD; // Command
+  encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
+  encode_int(&bp, LIFETIME, DEFAULT_CHANNEL_LIFETIME);
+  encode_int(&bp, COMMAND_TAG, arc4random());
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+    perror("command send: RefreshLifetime");
+  } else {
+    if (verbose && debug_send) fprintf(stderr, "%s: refreshed lifetime for ssrc=%u\n", __FUNCTION__, sp->ssrc);
+    usleep(CONTROL_USLEEP_US);
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+/* Thread: periodically refresh lifetimes for all sessions so radiod does not remove channels
+   while the client is paused or otherwise not sending frequent control commands. */
+static void *lifetime_refresh_thread(void *arg) {
+  (void)arg;
+  /* DEFAULT_CHANNEL_LIFETIME is expressed in backend ticks (~20 ms each).
+     Convert to milliseconds and use half-life as refresh interval. */
+  const unsigned refresh_interval_ms = (unsigned)(DEFAULT_CHANNEL_LIFETIME * 20UL / 2UL);
+  for (;;) {
+    usleep((useconds_t)refresh_interval_ms * 1000UL);
+    pthread_mutex_lock(&session_mutex);
+    struct session *sp = sessions;
+    while (sp != NULL) {
+      // Only refresh if we have an active websocket (session) but no recent spectrum requests
+      if (sp->ws != NULL) {
+        control_refresh_lifetime(sp);
+      }
+      sp = sp->next;
+    }
+    pthread_mutex_unlock(&session_mutex);
+  }
+  return NULL;
 }
 
 /* Forward declarations for helpers used by extract_powers (definitions follow below) */
@@ -3477,6 +3557,19 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     else
       encode_string(&bp, DESCRIPTION, Frontend.description, strlen(Frontend.description));
   }
+  /* Include frontend/channel metadata so client status fields remain current when spectrum is paused */
+  encode_int32(&bp, INPUT_SAMPRATE, (uint32_t)round(fabs(Frontend.samprate)));
+  encode_int64(&bp, INPUT_SAMPLES, (uint64_t)Frontend.samples);
+  encode_int64(&bp, GPS_TIME, (uint64_t)Channel.clocktime);
+  encode_float(&bp, IF_POWER, power2dB(Frontend.if_power));
+  encode_float(&bp, NOISE_DENSITY, sp->noise_density_audio);
+  encode_int64(&bp, AD_OVER, (uint64_t)Frontend.overranges);
+  encode_int64(&bp, SAMPLES_SINCE_OVER, (uint64_t)Frontend.samp_since_over);
+  encode_float(&bp, RF_ATTEN, Frontend.rf_atten);
+  encode_float(&bp, RF_GAIN, Frontend.rf_gain);
+  encode_bool(&bp, RF_AGC, (bool)Frontend.rf_agc);
+  encode_float(&bp, RF_LEVEL_CAL, Frontend.rf_level_cal);
+  encode_float(&bp, NOISE_BW, Channel.spectrum.noise_bw);
   int size = (uint8_t *)bp - output_buffer;
   send_ws_binary_to_session(sp, output_buffer, size);
 }
