@@ -616,8 +616,13 @@ function applyQuickBW() {
         _lastWsMsgTs = Date.now();
         _lastWsOpenTs = Date.now();
         if (ws && ws.readyState === WebSocket.OPEN) {
-          // Respect saved pause state: only start spectrum if not paused
-          try { ws.send(spectrum.paused ? "S:STOP" : "S:"); } catch (e) { console.warn('Failed to send S:', e); }
+          /* Always force a known spectrum state on connect.
+             1) Stop first to clear any stale server-side spectrum flags.
+             2) Start only when UI state is run (not paused). */
+          try { ws.send("S:STOP"); } catch (e) { console.warn('Failed to send S:STOP:', e); }
+          if (!spectrum.paused) {
+            try { setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send("S:"); }, 80); } catch (e) { console.warn('Failed to send S:', e); }
+          }
         }
         // Send current UI state (mode, frequency, zoom) to reduce race with server status/defaults
         // Prefer localStorage preset over DOM value: the DOM may already show an incorrect mode
@@ -1523,8 +1528,11 @@ function applyQuickBW() {
               const i8 = new Uint8Array(dataBuffer);
               const arr = new Float32Array(binCount);
               // dynamic autorange of 8 bit bin levels, using offset/gain from webserver
+              // Guard against gain==0 (no SPECT2 packet received yet): fall back to
+              // radiod's init_chan default of 0.5 dB/step so placeholder frames are visible.
+              const effective_gain = (bins_autorange_gain !== 0) ? bins_autorange_gain : 0.5;
               for (i = 0; i < binCount; i++) {
-                arr[i] = bins_autorange_offset + (bins_autorange_gain * i8[i]);
+                arr[i] = bins_autorange_offset + (effective_gain * i8[i]);
               }
               spectrum.addData(arr);
             /*
