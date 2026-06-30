@@ -482,6 +482,8 @@ static void check_frequency(struct session *sp);
 static void zoom_to(struct session *sp, int level);
 static void zoom(struct session *sp, int shift);
 static void adjust_center_within_bounds(struct session *sp);
+static uint32_t allocate_session_ssrc(void);
+static bool session_pair_in_use(uint32_t ssrc);
 /* Define zoom_table type and table so handler can compute size */
 struct zoom_table_t {
   int bin_width;
@@ -1023,6 +1025,30 @@ static void adjust_center_within_bounds(struct session *sp) {
   sp->center_frequency = (uint32_t)center_freq;
 }
 
+static bool session_pair_in_use(uint32_t ssrc) {
+  struct session *sp = sessions;
+  while (sp != NULL) {
+    if (sp->ssrc == ssrc || sp->ssrc == ssrc + 1 || (sp->ssrc + 1) == ssrc) {
+      return true;
+    }
+    sp = sp->next;
+  }
+  return false;
+}
+
+static uint32_t allocate_session_ssrc(void) {
+  uint32_t candidate;
+
+  do {
+    candidate = arc4random();
+    candidate &= 0x7ffffffeU; /* force even and keep it in the positive 31-bit range */
+    if (candidate == 0)
+      candidate = START_SESSION_ID;
+  } while (session_pair_in_use(candidate));
+
+  return candidate;
+}
+
 /* websocket ping thread: iterate sessions and send short text PINGs */
 static void *ws_ping_thread(void *arg) {
   (void)arg;
@@ -1544,7 +1570,6 @@ onion_connection_status home(void *data, onion_request * req,
   }
   pthread_mutex_unlock(&session_mutex);
 
-  int i;
   struct session *sp=calloc(1,sizeof(*sp));
   /*
    * SSRC allocation convention:
@@ -1555,18 +1580,7 @@ onion_connection_status home(void *data, onion_request * req,
    *    browser can correctly associate spectrum frames when multiple
    *    sessions/clients are active.
    */
-  if(nsessions==0) {
-    sp->ssrc=START_SESSION_ID;
-  } else {
-    for(i=0;i<nsessions;i++) {
-      struct session *s=find_session_from_ssrc(START_SESSION_ID+(i*2));
-      if(s==NULL) {
-        break;
-      }
-      pthread_mutex_unlock(&session_mutex);
-    }
-    sp->ssrc=START_SESSION_ID+(i*2);
-  }
+  sp->ssrc = allocate_session_ssrc();
   sp->ws=ws;
   /* Try to set the underlying websocket socket to non-blocking so slow
      clients do not block server threads. As with the reattach path above,
