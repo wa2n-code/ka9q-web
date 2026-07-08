@@ -1,0 +1,14 @@
+# Example web-blacklist file
+# One entry per line. Blank lines and lines starting with '#' are ignored.
+
+# Single IPv4 address
+192.0.2.45
+
+# IPv4 CIDR block (deny entire /24)
+203.0.113.0/24
+
+# Single IPv6 address
+2001:db8::1
+
+# IPv6 CIDR block
+2001:db8:abcd::/48
