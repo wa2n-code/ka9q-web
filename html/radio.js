@@ -403,6 +403,62 @@
         });
       try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
 
+      // Backend-reported PCM metadata. Prefer these values over GUI mode guesses.
+      let backendOutputSampleRate = null;
+      let backendOutputChannels = null;
+      let backendOutputEncoding = null;
+      let backendOutputMetadataSeen = false;
+
+      function getModeBasedPcmConfig() {
+        let modeEl = document.getElementById('mode');
+        let currentMode = modeEl ? (modeEl.value || '').toLowerCase() : 'am';
+        return {
+          sampleRate: (currentMode === 'fm') ? 24000 : 12000,
+          channels: (currentMode === 'iq') ? 2 : 1
+        };
+      }
+
+      function getPcmPlaybackConfig() {
+        if (backendOutputMetadataSeen &&
+            Number.isFinite(backendOutputSampleRate) && backendOutputSampleRate > 0 &&
+            Number.isFinite(backendOutputChannels) && backendOutputChannels > 0) {
+          return {
+            sampleRate: backendOutputSampleRate,
+            channels: backendOutputChannels
+          };
+        }
+        return getModeBasedPcmConfig();
+      }
+
+      function ensurePcmPlayer() {
+        const pcmCheckbox = document.getElementById('pcm_checkbox');
+        const usePcm = !!(pcmCheckbox && pcmCheckbox.checked);
+        if (!usePcm) return;
+
+        const config = getPcmPlaybackConfig();
+        const needsRecreate = (!player || !player.audioCtx || player.audioCtx.state === 'closed' ||
+          !player.option || player.option.encoding !== '16bitInt' ||
+          Number(player.option.channels) !== Number(config.channels) ||
+          Number(player.option.sampleRate) !== Number(config.sampleRate));
+
+        if (needsRecreate) {
+          try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
+          player = new PCMPlayer({
+            encoding: '16bitInt',
+            channels: config.channels,
+            sampleRate: config.sampleRate,
+            flushingTime: 250
+          });
+          try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
+          try {
+            const volumeSlider = document.getElementById('volume_control');
+            if (volumeSlider) setPlayerVolume(volumeSlider.value);
+          } catch (e) {}
+        } else if (player.audioCtx && player.audioCtx.state === 'suspended') {
+          try { player.resume(); } catch (e) {}
+        }
+      }
+
       // Opus decoder state
       let opusDecoder = null;
       let opusDecoderReady = false;
@@ -1669,6 +1725,18 @@ function applyQuickBW() {
                     if (l >= 4) noise_bw = view.getFloat32(i, false);
                     i += l;
                     break;
+                  case 20: // OUTPUT_SAMPRATE
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputSampleRate = _v; backendOutputMetadataSeen = true; }
+                    i += l;
+                    break;
+                  case 49: // OUTPUT_CHANNELS
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputChannels = _v; backendOutputMetadataSeen = true; }
+                    i += l;
+                    break;
+                  case 107: // OUTPUT_ENCODING
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputEncoding = _v; backendOutputMetadataSeen = true; }
+                    i += l;
+                    break;
                   default:
                     i += l; // skip unknown TLV fields
                     break;
@@ -1676,6 +1744,7 @@ function applyQuickBW() {
               }
               // Update status display from status packet (runs even when spectrum is paused)
               try { update_stats(); } catch (e) {}
+              try { ensurePcmPlayer(); } catch (e) {}
               // Ensure filter edges are numeric (avoid strings/BigInt) before applying
               try {
                 filter_low = Number(filter_low);
@@ -1733,24 +1802,10 @@ function applyQuickBW() {
                 // If AudioContext is missing/closed/suspended, attempt to recover automatically
                 if (!player || !player.audioCtx) {
                   try { console.warn('radio: audio pkt arrived but player/audioCtx missing — recreating player'); } catch (e) {}
-                  let modeEl = document.getElementById('mode');
-                  let currentMode = modeEl ? modeEl.value : 'am';
-                  let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
-                  let newChannels = (currentMode === 'iq') ? 2 : 1;
-                  try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
-                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
-                  try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
-                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
+                  ensurePcmPlayer();
                 } else if (player.audioCtx && player.audioCtx.state === 'closed') {
                   try { console.warn('radio: audioCtx closed — recreating player'); } catch (e) {}
-                  let modeEl = document.getElementById('mode');
-                  let currentMode = modeEl ? modeEl.value : 'am';
-                  let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
-                  let newChannels = (currentMode === 'iq') ? 2 : 1;
-                  try { player.destroy(); } catch (e) {}
-                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
-                  try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
-                  try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
+                  ensurePcmPlayer();
                 } else if (player.audioCtx && player.audioCtx.state === 'suspended') {
                   try { player.audioCtx.resume(); } catch (e) {}
                   // If resume does not succeed, recreate after short delay
@@ -1759,15 +1814,8 @@ function applyQuickBW() {
                       try {
                         if (!p || !p.audioCtx || (p.audioCtx && p.audioCtx.state !== 'running')) {
                           try { console.warn('radio: resume failed or still suspended — recreating player'); } catch (e) {}
-                          let modeEl = document.getElementById('mode');
-                          let currentMode = modeEl ? modeEl.value : 'am';
-                          let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
-                          let newChannels = (currentMode === 'iq') ? 2 : 1;
-                          try { if (p && typeof p.destroy === 'function') p.destroy(); } catch (e) {}
-                          p = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
-                          try { const volumeSlider = document.getElementById('volume_control'); if (volumeSlider) setPlayerVolume(volumeSlider.value); } catch (e) {}
-                          try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
-                          player = p;
+                          ensurePcmPlayer();
+                          p = player;
                         }
                       } catch (ee) {}
                     }, 200);
@@ -2772,37 +2820,8 @@ function applyQuickBW() {
         console.debug('[radio.js] setMode suppressed send; forceSend=', forceSend, 'suppressProgrammaticUI=', suppressProgrammaticUI);
       }
       
-      // Determine the new sample rate and number of channels based on the mode
-      let newSampleRate = 12000;
-      let newChannels = 1;
-
-      if (selected_mode === "iq") {
-          newChannels = 2; // Stereo for IQ mode
-      } else {
-          newChannels = 1; // Mono for other modes
-      }
-
-      if (selected_mode === "fm") {
-          newSampleRate = 24000; // Higher sample rate for FM mode
-      } else {
-          newSampleRate = 12000; // Default sample rate for other modes
-      }
-
-      // Reinitialize the PCMPlayer with the new configuration
-      player.destroy(); // Destroy the existing player instance
-      player = new PCMPlayer({
-          encoding: '16bitInt',
-          channels: newChannels,
-          sampleRate: newSampleRate,
-          flushingTime: 250
-      });
-        try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
-      // Set the player volume to match the slider after reinitializing
-      const volumeSlider = document.getElementById('volume_control');
-      if (volumeSlider) {
-          setPlayerVolume(volumeSlider.value);
-      }
-      //console.log("setMode() selected_mode=", selected_mode, " newSampleRate=", newSampleRate, " newChannels=", newChannels);
+        // Reconfigure PCM playback from backend metadata when PCM is selected.
+        try { ensurePcmPlayer(); } catch (e) {}
       saveSettings();
   // Update filter edge inputs to sensible defaults for this mode
   setFilterEdgesForMode(selected_mode);
@@ -3137,6 +3156,7 @@ function applyQuickBW() {
           if (btn && btn.value === "STOP") {
             sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
           }
+          try { ensurePcmPlayer(); } catch (e) {}
         } else {
           initOpusDecoder();
           // If audio is running, switch to Opus immediately
@@ -3158,6 +3178,7 @@ function applyQuickBW() {
           if (usePcm) {
             destroyOpusDecoder();
             sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
+            try { ensurePcmPlayer(); } catch (e) {}
           } else {
             await initOpusDecoder();
             sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
