@@ -1832,14 +1832,24 @@ function applyQuickBW() {
                   var opusPayload = new Uint8Array(evt.data, i, data_length);
                   var result = opusDecoder.decodeFrame(opusPayload);
                   if (result && result.samplesDecoded > 0) {
+                    const decodedChannels = (result.channelData && result.channelData.length) ? result.channelData.length : 1;
+                    const decodedSamples = result.samplesDecoded;
+                    const interleaved = new Float32Array(decodedSamples * decodedChannels);
+                    for (let sampleIndex = 0; sampleIndex < decodedSamples; sampleIndex++) {
+                      for (let channelIndex = 0; channelIndex < decodedChannels; channelIndex++) {
+                        const channel = result.channelData[channelIndex];
+                        interleaved[(sampleIndex * decodedChannels) + channelIndex] = channel ? channel[sampleIndex] : 0;
+                      }
+                    }
                     // Switch player to Float32 at 48 kHz on first Opus packet
                     if (!player || !player.audioCtx ||
                         player.option.encoding !== '32bitFloat' ||
-                        player.option.sampleRate !== result.sampleRate) {
+                        player.option.sampleRate !== result.sampleRate ||
+                        Number(player.option.channels) !== Number(decodedChannels)) {
                       try { if (player) player.destroy(); } catch(e) {}
                       player = new PCMPlayer({
                         encoding: '32bitFloat',
-                        channels: 1,
+                        channels: decodedChannels,
                         sampleRate: result.sampleRate,
                         flushingTime: 250
                       });
@@ -1850,7 +1860,7 @@ function applyQuickBW() {
                       } catch(e) {}
                     }
                     // Clone to ensure the Float32Array owns its buffer
-                    player.feed(new Float32Array(result.channelData[0]));
+                    player.feed(interleaved);
                   }
                 } catch(e) {
                   console.warn('Opus decode error:', e);
