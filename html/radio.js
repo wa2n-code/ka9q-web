@@ -729,16 +729,21 @@ function applyQuickBW() {
                 // backend audio channel follows the tuned frequency
                 try { sendControl('audio', "A:STOP:" + ssrc.toString(), 50); } catch (e) {}
                 const usePcm = document.getElementById('pcm_checkbox') && document.getElementById('pcm_checkbox').checked;
-                setTimeout(() => {
+                setTimeout(async () => {
                   try {
+                    const modeEl = document.getElementById('mode');
+                    const modeToReassert = modeEl ? (modeEl.value || 'am') : 'am';
+                    try { sendControl('mode', 'M:' + modeToReassert, undefined, true); } catch (e) {}
+                    await new Promise((resolve) => setTimeout(resolve, 180));
                     if (usePcm) {
                       try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
+                      try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
                     } else {
                       // ensure decoder ready then request Opus + start
                       try { initOpusDecoder(); } catch (e) {}
                       try { sendControl('audio', "O:OPUS:" + ssrc.toString(), 50); } catch (e) {}
+                      try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
                     }
-                    try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
                   } catch (e) {}
                 }, 150);
               }
@@ -1787,8 +1792,20 @@ function applyQuickBW() {
                 }
               } catch (e) {}
               break;
-            case 0x7A: // 122 - 16bit PCM Audio at 12000 Hz
-              // Audio data 1 channel 12000
+            // S16BE PCM audio types from the PT table:
+            //  112 (0x70) = 48kHz mono,  113 (0x71) = 48kHz stereo
+            //  116 (0x74) = 24kHz mono,  117 (0x75) = 24kHz stereo
+            //  119 (0x77) = 16kHz mono,  120 (0x78) = 16kHz stereo
+            //  122 (0x7A) = 12kHz mono,  123 (0x7B) = 12kHz stereo  ← ISB uses 0x7B
+            //  125 (0x7D) = 8kHz mono
+            // All big-endian S16BE; player config is driven by backend metadata.
+            // Note: 0x7E (Channel Data) and 0x7F (Spectrum Data) are NOT PCM.
+            case 0x70: case 0x71:
+            case 0x74: case 0x75:
+            case 0x77: case 0x78:
+            case 0x7A: case 0x7B:
+            case 0x7D:
+              // S16BE PCM audio — any sample rate / channel count
               var dataBuffer = evt.data.slice(i,data.byteLength);
               var audio_data=new Uint8Array(dataBuffer,0,data_length);
               // byte swap
@@ -3189,39 +3206,23 @@ function applyQuickBW() {
             destroyOpusDecoder();
             sendControl('audio', "O:PCM:" + ssrc.toString(), 50);
             try { ensurePcmPlayer(); } catch (e) {}
+            sendControl('audio', "A:START:"+ssrc.toString(), 50);
           } else {
+            const modeEl = document.getElementById('mode');
+            const modeToReassert = modeEl ? (modeEl.value || 'am') : 'am';
+            try { sendControl('mode', 'M:' + modeToReassert, undefined, true); } catch (e) {}
+            await new Promise((resolve) => setTimeout(resolve, 180));
             await initOpusDecoder();
             sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
+            sendControl('audio', "A:START:"+ssrc.toString(), 50);
           }
-          sendControl('audio', "A:START:"+ssrc.toString(), 50);
           // If player or its AudioContext is gone, recreate it using current mode
           try {
-            let modeEl = document.getElementById('mode');
-            let currentMode = modeEl ? modeEl.value : 'am';
-            let newSampleRate = (currentMode === 'fm') ? 24000 : 12000;
-            let newChannels = (currentMode === 'iq') ? 2 : 1;
             if (usePcm) {
-              // If the existing player is configured for Opus (32bitFloat)
-              // or has different channels/sampleRate, recreate it for 16-bit PCM.
-              const needRecreate = (!player || !player.audioCtx) ||
-                                   (player && player.option && player.option.encoding !== '16bitInt') ||
-                                   (player && player.option && Number(player.option.channels) !== Number(newChannels)) ||
-                                   (player && player.option && Number(player.option.sampleRate) !== Number(newSampleRate));
-              if (needRecreate) {
-                try { if (player && typeof player.destroy === 'function') player.destroy(); } catch (e) {}
-                player = new PCMPlayer({
-                  encoding: '16bitInt',
-                  channels: newChannels,
-                  sampleRate: newSampleRate,
-                  flushingTime: 250
-                });
-                try { if (typeof applySavedPanner === 'function') applySavedPanner(); } catch (e) {}
-              } else {
-                try { player.resume(); } catch (e) {
-                  try { player.destroy(); } catch (ee) {}
-                  player = new PCMPlayer({ encoding: '16bitInt', channels: newChannels, sampleRate: newSampleRate, flushingTime: 250 });
-                }
-              }
+              // PCM playback is configured from backend metadata; do not guess
+              // the channel layout from the GUI mode here, because user1/ISB
+              // needs the backend-reported stereo configuration.
+              try { ensurePcmPlayer(); } catch (e) {}
             }
             // diagnostics disabled
           } catch (e) {}
