@@ -2892,6 +2892,7 @@ function applyQuickBW() {
           break;
         case 'am':
         case 'sam':
+        case 'isb':
           lowEl.value = -5000;
           highEl.value = 5000;
           break;
