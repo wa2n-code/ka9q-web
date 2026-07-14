@@ -462,6 +462,8 @@
       // Opus decoder state
       let opusDecoder = null;
       let opusDecoderReady = false;
+      // Keep the user-mode USB priming workaround switchable for A/B testing.
+      const ENABLE_USERMODE_USB_PRIME = true;
 
       async function initOpusDecoder() {
         try {
@@ -732,9 +734,9 @@ function applyQuickBW() {
                 setTimeout(async () => {
                   try {
                     const modeEl = document.getElementById('mode');
-                    const modeToReassert = modeEl ? (modeEl.value || 'am') : 'am';
-                    try { sendControl('mode', 'M:' + modeToReassert, undefined, true); } catch (e) {}
-                    await new Promise((resolve) => setTimeout(resolve, 180));
+                    const savedPreset = (window.localStorage) ? localStorage.getItem('preset') : null;
+                    const modeToReassert = savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
+                    await prepareAudioStartupMode(modeToReassert);
                     if (usePcm) {
                       try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
                       try { sendControl('audio', "A:START:" + ssrc.toString(), 50); } catch (e) {}
@@ -768,10 +770,14 @@ function applyQuickBW() {
         fetchZoomTableSize(); // Fetch and store the zoom table size
         // Initialize filter edge inputs based on the target preset
         try {
-          setFilterEdgesForMode(target_preset);
+          const modeEl = document.getElementById('mode');
+          const modeForEdges = (modeEl && modeEl.value) ? modeEl.value : target_preset;
+          setFilterEdgesForMode(modeForEdges);
         } catch (e) {}
         // Attach listeners so spinner/caret presses auto-send
         try { attachEdgeInputListeners(); } catch (e) {}
+        // Push whatever edges are currently visible to backend on each open.
+        try { setTimeout(() => { try { sendFilterEdges(); } catch (e) {} }, 90); } catch (e) {}
         // If a filter-edge update was queued while WS was closed, send it now
           try {
             if (pendingFilterEdges && ws && ws.readyState === WebSocket.OPEN) {
@@ -3194,12 +3200,41 @@ function applyQuickBW() {
         }
     }
 
+    async function prepareAudioStartupMode(modeToReassert) {
+        const mode = (modeToReassert || 'am').toLowerCase();
+        try { sendControl('mode', 'M:' + mode, undefined, true); } catch (e) {}
+        // User presets occasionally need a sideband transition to fully initialize
+        // decoder/audio routing in the backend after cold start.
+        if (ENABLE_USERMODE_USB_PRIME && (mode === 'user1' || mode === 'user2' || mode === 'user3')) {
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          try { sendControl('mode', 'M:usb', undefined, true); } catch (e) {}
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          try { sendControl('mode', 'M:' + mode, undefined, true); } catch (e) {}
+        }
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        // Re-send current frequency and filter edges after final mode set.
+        try {
+          const freqEl = document.getElementById('freq');
+          const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
+          if (!isNaN(freqVal)) sendControl('freq', 'F:' + Number(freqVal).toFixed(3), undefined, true);
+        } catch (e) {}
+        try { sendFilterEdges(); } catch (e) {}
+        await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+
     async function audio_start_stop()
     {
         var btn = document.getElementById("audio_button");
         if(btn.value==="START") {
           btn.value = "STOP";
           btn.innerHTML = "Stop Audio";
+          const modeEl = document.getElementById('mode');
+          const savedPreset = (window.localStorage) ? localStorage.getItem('preset') : null;
+          const modeToReassert = savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
+          try {
+            if (savedPreset && modeEl && modeEl.value !== savedPreset) modeEl.value = savedPreset;
+          } catch (e) {}
+          await prepareAudioStartupMode(modeToReassert);
           const usePcm = document.getElementById('pcm_checkbox') &&
                          document.getElementById('pcm_checkbox').checked;
           if (usePcm) {
@@ -3208,10 +3243,6 @@ function applyQuickBW() {
             try { ensurePcmPlayer(); } catch (e) {}
             sendControl('audio', "A:START:"+ssrc.toString(), 50);
           } else {
-            const modeEl = document.getElementById('mode');
-            const modeToReassert = modeEl ? (modeEl.value || 'am') : 'am';
-            try { sendControl('mode', 'M:' + modeToReassert, undefined, true); } catch (e) {}
-            await new Promise((resolve) => setTimeout(resolve, 180));
             await initOpusDecoder();
             sendControl('audio', "O:OPUS:" + ssrc.toString(), 50);
             sendControl('audio', "A:START:"+ssrc.toString(), 50);
