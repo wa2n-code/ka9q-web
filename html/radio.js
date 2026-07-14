@@ -3205,7 +3205,7 @@ function applyQuickBW() {
         try { sendControl('mode', 'M:' + mode, undefined, true); } catch (e) {}
         // User presets occasionally need a sideband transition to fully initialize
         // decoder/audio routing in the backend after cold start.
-        if (ENABLE_USERMODE_USB_PRIME && (mode === 'user1' || mode === 'user2' || mode === 'user3')) {
+        if (ENABLE_USERMODE_USB_PRIME && (mode === 'isb' || mode === 'user1' || mode === 'user2' || mode === 'user3')) {
           await new Promise((resolve) => setTimeout(resolve, 120));
           try { sendControl('mode', 'M:usb', undefined, true); } catch (e) {}
           await new Promise((resolve) => setTimeout(resolve, 120));
