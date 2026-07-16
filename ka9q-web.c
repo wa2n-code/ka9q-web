@@ -134,54 +134,53 @@ struct session {
   uint32_t center_frequency;
   uint32_t frequency;           // tuned frequency, in Hz
   uint32_t bin_width;
-  float tc;
   int bins;
   char description[128];
   char client[128];
   struct session *next;
   struct session *previous;
   bool once;
-  float noise_density_audio;
-  float if_power;
+  double noise_density_audio;
+  double if_power;
   int zoom_index;
   char requested_preset[32];
-  float bins_min_db;
-  float bins_max_db;
+  double bins_min_db;
+  double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
   int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
-  float spectrum_base;
-  float spectrum_step;
+  double spectrum_base;
+  double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
-    unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
-    bool spectrum_requested_by_client; /* true if client requested spectrum */
-    int spectrum_restart_attempts;    /* number of restart attempts made */
-    unsigned long last_spectrum_restart_ms; /* monotonic ms of last restart attempt */
-    /* If the client recently commanded a mode change leaving CWU/CWL, this
-      flag records that event so we can adopt the backend frequency when the
-      backend clears the CW shift. `left_cw_time_ms` is the monotonic time in
-      milliseconds when the client requested the change; `left_cw_prev_preset`
-      stores the previous preset name (e.g., "cwu"/"cwl"). */
-    int left_cw_pending;
-    unsigned long left_cw_time_ms;
-    char left_cw_prev_preset[8];
-    /* If the client recently toggled between CWU and CWL (flip), mark a
-       short-lived pending flag so the status packet handler can adopt the
-       backend frequency when the backend shifts the carrier by the expected
-       doubled-shift amount. */
-    int cw_flip_pending;
-    unsigned long cw_flip_time_ms;
-    char cw_flip_prev_preset[8];
-    bool opus_active; /* true when client has requested Opus encoding */
-    /* Outgoing websocket queue and writer thread */
-    struct ws_msg *out_head;
-    struct ws_msg *out_tail;
-    pthread_mutex_t out_mutex;
-    pthread_cond_t out_cond;
-    pthread_t writer_task;
-    bool writer_running;
+  unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
+  bool spectrum_requested_by_client; /* true if client requested spectrum */
+  int spectrum_restart_attempts;    /* number of restart attempts made */
+  unsigned long last_spectrum_restart_ms; /* monotonic ms of last restart attempt */
+  /* If the client recently commanded a mode change leaving CWU/CWL, this
+     flag records that event so we can adopt the backend frequency when the
+     backend clears the CW shift. `left_cw_time_ms` is the monotonic time in
+     milliseconds when the client requested the change; `left_cw_prev_preset`
+     stores the previous preset name (e.g., "cwu"/"cwl"). */
+  int left_cw_pending;
+  unsigned long left_cw_time_ms;
+  char left_cw_prev_preset[8];
+  /* If the client recently toggled between CWU and CWL (flip), mark a
+     short-lived pending flag so the status packet handler can adopt the
+     backend frequency when the backend shifts the carrier by the expected
+     doubled-shift amount. */
+  int cw_flip_pending;
+  unsigned long cw_flip_time_ms;
+  char cw_flip_prev_preset[8];
+  bool opus_active; /* true when client has requested Opus encoding */
+  /* Outgoing websocket queue and writer thread */
+  struct ws_msg *out_head;
+  struct ws_msg *out_tail;
+  pthread_mutex_t out_mutex;
+  pthread_cond_t out_cond;
+  pthread_t writer_task;
+  bool writer_running;
   /* uint32_t last_poll_tag; */
 };
 
@@ -198,9 +197,9 @@ extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
 extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 extern void control_set_encoding(struct session *sp, bool use_opus);
 int init_demod(struct channel *channel);
-void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw);
+void control_get_powers(struct session *sp,double frequency,int bins,double bin_bw);
 /* New: request powers with explicit demod type (fallback to SPECT2_DEMOD if needed) */
-void control_get_powers_with_demod(struct session *sp,float frequency,int bins,float bin_bw,int demod_type);
+void control_get_powers_with_demod(struct session *sp,double frequency,int bins,double bin_bw,int demod_type);
 void stop_spectrum_stream(struct session *sp);
 int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *bin_bw,int32_t const ssrc,uint8_t const * const buffer,int length,struct session *sp);
 void control_poll(struct session *sp);
@@ -924,12 +923,12 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
             char *endptr;
             double f = strtod(token,&endptr) * 1000.0;
             if (token != endptr) {
-              sp->center_frequency = f;
+              sp->center_frequency = (uint32_t)round(fabs(f));
             }
           }
        adjust_center_within_bounds(sp);
           pthread_mutex_lock(&sp->spectrum_mutex);
-          control_get_powers(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width);
+          control_get_powers(sp,sp->center_frequency,sp->bins,sp->bin_width);
           pthread_mutex_unlock(&sp->spectrum_mutex);
           control_poll(sp);
         } else if (token && strcmp(token, "SIZE") == 0) {
@@ -1134,7 +1133,7 @@ static void check_frequency(struct session *sp) {
 
     int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
 
-    int64_t fs2 = Frontend.samprate / 2;
+    int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
     if (freq_bin >= sp->bins) {
         int64_t target_bin = sp->bins - 30;
         int64_t new_min_f = (int64_t)sp->frequency - target_bin * sp->bin_width;
@@ -1183,7 +1182,7 @@ static void zoom_to(struct session *sp, int level) {
 
   if(Frontend.samprate != 0){
     while(zoom_table[level].bin_width * zoom_table[level].bin_count
-	  > Frontend.samprate/2 && level < table_size)
+	  > round(Frontend.samprate/2.0) && level < table_size)
       level++;
     if(level == table_size)
       level--;
@@ -1205,7 +1204,7 @@ static void adjust_center_within_bounds(struct session *sp) {
 
   int64_t span = (int64_t)sp->bin_width * sp->bins;
   int64_t center_freq = (int64_t)sp->center_frequency;
-  int64_t fs2 = Frontend.samprate / 2;
+  int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
   if (span >= (fs2 * 2)) {
     /* span covers full range; center must be clamped to middle */
     center_freq = fs2;
@@ -1851,12 +1850,12 @@ onion_connection_status home(void *data, onion_request * req,
   sp->frequency=10000000;
   int level = 0;
 #if 0
-  sp->center_frequency = Frontend.samprate/4;
+  sp->center_frequency = round(Frontend.samprate/4.0);
   const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
 
 
   for(; level < table_size; level++)
-    if(zoom_table[level].bin_width * zoom_table[level].bin_count <= Frontend.samprate/2)
+    if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(Frontend.samprate/2.0))
       break;
   sp->zoom_index = level;
 #else
@@ -2311,13 +2310,13 @@ void control_set_shift(struct session *sp,char *str) {
 void control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
-  float lowf = 0.0f;
-  float highf = 0.0f;
+  double lowf = 0.0;
+  double highf = 0.0;
 
   if (low_str && strlen(low_str) > 0)
-    lowf = strtof(low_str, NULL);
+    lowf = strtod(low_str, NULL);
   if (high_str && strlen(high_str) > 0)
-    highf = strtof(high_str, NULL);
+    highf = strtod(high_str, NULL);
 
   *bp++ = CMD; // Command
   encode_int(&bp, OUTPUT_SSRC, sp->ssrc);
@@ -2384,10 +2383,10 @@ void control_set_spectrum_average(struct session *sp, char *val_str) {
 void control_set_spectrum_overlap(struct session *sp, char *val_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
-  float val = 0.0f;
+  double val = 0.0;
 
   if (val_str && strlen(val_str) > 0)
-    val = strtof(val_str, NULL);
+    val = strtod(val_str, NULL);
 
   int target_ssrc = sp ? (sp->ssrc + 1) : 0; /* use ssrc+1 for spectrum stream */
 
@@ -2556,7 +2555,7 @@ void stop_spectrum_stream(struct session *sp) {
   encode_int(&bp,COMMAND_TAG,tag);
   encode_int(&bp,DEMOD_TYPE,SPECT2_DEMOD);
   encode_int(&bp,BIN_COUNT,sp->bins);
-  encode_float(&bp,RESOLUTION_BW,(float)sp->bin_width);
+  encode_float(&bp,RESOLUTION_BW,sp->bin_width);
   encode_double(&bp,RADIO_FREQUENCY,0);
   encode_eol(&bp);
   int const command_len = bp - cmdbuffer;
@@ -2588,7 +2587,7 @@ If the send operation does not transmit the expected number of bytes, an error m
 unlocked, allowing other threads to use the control socket. This approach ensures that spectral power requests are sent
 safely and reliably in a concurrent, networked environment.
 */
-void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw) {
+void control_get_powers(struct session *sp, double frequency,int bins,double bin_bw) {
   /* Avoid sending a spectrum request with frequency == 0. A 0 Hz tune
      is interpreted by the backend as a command to close the spectrum
      demod thread; that can race with startup and leave the spectrum
@@ -2597,7 +2596,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   */
   if (frequency <= 0.0) {
     if (sp && sp->center_frequency != 0) {
-      frequency = (double)sp->center_frequency;
+      frequency = sp->center_frequency;
       if (verbose) fprintf(stderr, "control_get_powers: adjusted zero freq -> center_frequency=%u for ssrc=%u\n", sp->center_frequency, sp->ssrc+1);
     } else {
       if (verbose) fprintf(stderr, "control_get_powers: skipping zero-frequency spectrum request for ssrc=%u\n", sp ? sp->ssrc+1 : 0);
@@ -2607,7 +2606,7 @@ void control_get_powers(struct session *sp,float frequency,int bins,float bin_bw
   control_get_powers_with_demod(sp,frequency,bins,bin_bw,SPECT2_DEMOD);
 }
 
-void control_get_powers_with_demod(struct session *sp,float frequency,int bins,float bin_bw,int demod_type){
+void control_get_powers_with_demod(struct session *sp,double frequency,int bins,double bin_bw,int demod_type){
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
   *bp++ = CMD; // Command
@@ -2936,11 +2935,11 @@ static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned
   sp->bins_min_db = +INFINITY;
   int i = l_count / 2; // DC
   do {
-    float p = decode_float(cp, sizeof(float));
+    double p = decode_float(cp, sizeof(float));
     p = power2dB(p);
     if (p == -INFINITY)
       p = -150;
-    power[i] = p;
+    power[i] = (float)p;
     if (p > sp->bins_max_db)
       sp->bins_max_db = p;
     if (p < sp->bins_min_db)
@@ -2973,7 +2972,7 @@ After processing all fields or encountering an end-of-list marker, the function 
 against malformed or unexpected data, as it checks buffer boundaries and handles variable-length fields. It is
 a typical example of defensive programming for parsing binary protocols in C or C++.
 */
-int extract_noise(float *n0,uint8_t const * const buffer,int length,struct session *sp){
+int extract_noise(double *n0,uint8_t const * const buffer,int length,struct session *sp){
   uint8_t const *cp = buffer;
 
   while(cp - buffer < length){
@@ -3071,7 +3070,7 @@ void *spectrum_thread(void *arg) {
   struct session *sp = (struct session *)arg;
   while(sp->spectrum_active) {
     pthread_mutex_lock(&sp->spectrum_mutex);
-    control_get_powers_with_demod(sp,(float)sp->center_frequency,sp->bins,(float)sp->bin_width, SPECT2_DEMOD);
+    control_get_powers_with_demod(sp,sp->center_frequency,sp->bins,sp->bin_width, SPECT2_DEMOD);
     pthread_mutex_unlock(&sp->spectrum_mutex);
     control_poll(sp);
     if(usleep(sp->spectrum_poll_us) != 0) {
@@ -3556,10 +3555,10 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
   *ip++ = (uint32_t)sp->zoom_index;
   /* Use radiod's init_chan defaults if no SPECT2 packet has arrived yet (step==0).
      This makes placeholder frames visible even before the first real spectrum response. */
-  float const spec_base = (Channel.spectrum.step != 0.0) ? (float)Channel.spectrum.base : -150.0f;
-  float const spec_step = (Channel.spectrum.step != 0.0) ? (float)Channel.spectrum.step :   0.5f;
-  *(float *)ip++ = spec_base;
-  *(float *)ip++ = spec_step;
+  double const spec_base = (Channel.spectrum.step != 0.0) ? Channel.spectrum.base : -150.0;
+  double const spec_step = (Channel.spectrum.step != 0.0) ? Channel.spectrum.step :   0.5;
+  *(float *)ip++ = (float)spec_base;
+  *(float *)ip++ = (float)spec_step;
 
   int header_size = (uint8_t *)ip - &output_buffer[0];
   int length = (PKTSIZE - header_size) / sizeof(float);
@@ -3613,9 +3612,9 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
   }
 
   uint8_t *fp = (uint8_t *)ip;
-  for (int i = 0; i < npower; i++) {
-    *fp++ = powers[i];
-  }
+  for (int i = 0; i < npower; i++)
+    *fp++ = (uint8_t)roundf(powers[i]);
+
   int size = (uint8_t *)fp - &output_buffer[0];
 
   send_ws_binary_to_session(sp, output_buffer, size);
@@ -3728,7 +3727,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     }
   }
 
-  float n0 = 0.0f;
+  double n0 = 0.0;
   if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
     sp->noise_density_audio = n0;
 
