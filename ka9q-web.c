@@ -143,6 +143,13 @@ struct session {
   double noise_density_audio;
   double if_power;
   int zoom_index;
+  /* True once spectrum_thread's retroactive default-view correction (see
+     its body) has run for this session, whether or not it actually changed
+     anything. A session created before Frontend ever populated (the very
+     first connection right after a restart) gets stuck with the plain HF
+     defaults below at creation time; this flag makes that correction a
+     one-shot retry once real Frontend data exists, instead of never. */
+  bool default_view_retro_checked;
   char requested_preset[32];
   double bins_min_db;
   double bins_max_db;
@@ -151,6 +158,12 @@ struct session {
   double spectrum_base;
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
+  double last_sent_backend_frequency; /* last Channel.tune.freq this session was sent a BFREQ for -
+                                          per-session on purpose: this used to be a single static
+                                          shared by every session in ctrl_thread(), so tuning one
+                                          session's frequency would make every OTHER active session
+                                          (on a different frequency) receive a spurious redundant
+                                          BFREQ on its next status packet. NaN until first sent. */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
@@ -666,6 +679,36 @@ static void log_git_commit_index_runtime(void) {
 /* sleep time for spectrum polling and related retries (microseconds) */
 useconds_t spectrum_poll_us = 100000; // default 100 ms
 
+/* Some radiod backends don't implement SPECT2_DEMOD at all (older releases
+ * and forks predating it) - a request for it isn't recognized as
+ * a spectrum demod, so radiod silently loads a plain audio preset instead
+ * and no BIN_DATA/BIN_BYTE_DATA is ever produced. There's no capability
+ * flag in the status protocol to ask for this up front, so it's detected
+ * per-process (one radiod backend per ka9q-web instance) by probing: try
+ * SPECT2_DEMOD first, and if no spectrum TLV arrives after a handful of
+ * requests, fall back to the older SPECT_DEMOD for the rest of this
+ * process's life. Counted cumulatively across spectrum_thread's whole
+ * process lifetime (not a single-invocation timer) - a browser reload
+ * tears down and restarts spectrum_thread well under any reasonable
+ * per-invocation timeout, so a per-invocation clock would never
+ * accumulate enough evidence; a running total does. */
+static volatile int Spect2_supported = -1; /* -1 = unknown, 0 = no, 1 = yes */
+static volatile int Spect2_probe_attempts = 0; /* cumulative failed SPECT2_DEMOD polls */
+static pthread_mutex_t spect2_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define SPECT2_PROBE_MAX_ATTEMPTS 10
+/* sp->last_spectrum_recv_ms (existing field) is stamped unconditionally by
+ * process_spectrum_packet() for ANY response on the spectrum SSRC, real
+ * bin data or not - it's the wrong signal for "did SPECT2_DEMOD actually
+ * work", since a rejected/misinterpreted demod request still gets SOME
+ * response. This counter increments only inside extract_powers()'s own
+ * BIN_DATA/BIN_BYTE_DATA success paths (the only places real spectrum
+ * bins were actually decoded), so it's safe to use as that signal. */
+static volatile unsigned long Real_spectrum_packets = 0;
+
+static int preferred_spectrum_demod(void) {
+  return (Spect2_supported == 0) ? SPECT_DEMOD : SPECT2_DEMOD;
+}
+
 #define MAX_BINS 1620
 
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
@@ -687,11 +730,39 @@ struct zoom_table_t {
 const struct zoom_table_t zoom_table[] = {
   {40000, 1620},
   {20000, 1620},
+  // 18790 Hz added: gives 30,439,800 Hz (bin_width * 1620), the closest
+  // achievable step to a direct-sampling HF front end's real coverage
+  // without exceeding it. Measured on an RX888 (Frontend.min_IF=15000,
+  // Frontend.max_IF=30,456,000, a 30,441,000 Hz window, matching its
+  // reported 0.015-30.456 MHz coverage). Without this entry, both
+  // {40000,1620}=64.8MHz and {20000,1620}=32.4MHz exceed that window and
+  // get skipped by zoom_to()'s while loop, which falls through to the
+  // next entry that fits - {10000,1620}=16.2MHz - showing barely half of
+  // HF's real coverage under a "Full Band" request. Same reasoning as the
+  // 5432Hz and 1480Hz entries below: this table has no per-front-end
+  // awareness beyond "pick the widest entry from here that still fits",
+  // so any front end whose real coverage falls between two existing steps
+  // silently loses most of a full-span view.
+  {18790, 1620},
   {10000, 1620},
   {8000, 1620},
+  // 5432 Hz added: gives 8,799,840 Hz (bin_width * 1620), the closest
+  // achievable step to the Airspy R2's real-sampling usable window
+  // (confirmed 8.8MHz: max_IF=-600kHz, min_IF=-0.47*20Msps, src/airspy.c)
+  // without exceeding it - same reasoning as the 1480Hz entry below for
+  // VHF's 2.4Msps complex/IQ capture. Without this, the widest achievable
+  // zoom was 5000Hz*1620=8.1MHz, leaving a ~700kHz gap versus what the
+  // hardware actually supports.
+  {5432, 1620},
   {5000, 1620},
   {4000, 1620},
   {2000, 1620},
+  // 1480 Hz added: gives a 2,397,600 Hz span (bin_width * 1620), the
+  // closest achievable step to a full 2.4 Msps complex/IQ capture (e.g. an
+  // RTL-SDR at its usual rate) without exceeding it. The next entry up
+  // (2000 -> 3,240,000 Hz) exceeds it, leaving a gap between 1.62MHz and
+  // "as wide as the hardware actually captures".
+  {1480, 1620},
   {1000, 1620},
   {800, 1620},
   {500, 1620},
@@ -1122,8 +1193,38 @@ void websocket_closed(struct session *sp) {
   if (spectrum_join) pthread_join(spectrum_join, NULL);
 }
 
+// Effective valid IF window relative to Frontend.frequency, i.e. the true
+// receivable RF range is [Frontend.frequency + lo_if, Frontend.frequency +
+// hi_if]. Frontend.min_IF/max_IF are already decoded from FE_LOW_EDGE/
+// FE_HIGH_EDGE (decode_radio_status(), phase 4) and are set by the ka9q-radio
+// front end drivers - symmetrically for complex/IQ (rtlsdr.c:
+// +/-0.47*samprate) and asymmetrically, entirely below the tuned frequency,
+// for real-sampling ones (airspy.c: -0.47*samprate to -600kHz) - so using
+// them directly here replaces the old +/- samprate/2 symmetric-only
+// assumption for both cases at once, not just one. Falls back to the old
+// symmetric approximation only if a front end driver somehow never sets
+// them (defensive; not expected to trigger with rtlsdr.c or airspy.c).
+static void frontend_if_bounds(double *lo_if, double *hi_if){
+  if(!isnan(Frontend.min_IF) && !isnan(Frontend.max_IF) && Frontend.max_IF > Frontend.min_IF){
+    *lo_if = Frontend.min_IF;
+    *hi_if = Frontend.max_IF;
+  } else {
+    double const fs2 = round(Frontend.samprate / 2.0);
+    *lo_if = -fs2;
+    *hi_if = fs2;
+  }
+}
+
 static void check_frequency(struct session *sp) {
-    if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0)
+    // Frontend.frequency is NAN until the backend's first FIRST_LO_FREQUENCY
+    // TLV arrives (see its init near Frontend's declaration) - a backend
+    // that sends INPUT_SAMPRATE without ever sending FIRST_LO_FREQUENCY
+    // (version skew between radiod forks, same class of gap the SPECT2_DEMOD
+    // fallback elsewhere in this codebase exists for) leaves samprate != 0
+    // while frequency stays NAN indefinitely. round()ing a NAN into the
+    // int64_t lo below is undefined behaviour - same hazard already guarded
+    // against at line ~1987/~3301; this call site needs the same guard.
+    if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0 || isnan(Frontend.frequency))
       return;
 
     int64_t span = (int64_t)sp->bin_width * sp->bins;
@@ -1133,14 +1234,28 @@ static void check_frequency(struct session *sp) {
 
     int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
 
-    int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
+    // Valid RF range is [lo+lo_if, lo+hi_if] around the front end's real
+    // tuned centre (Frontend.frequency), not [0, fs2] - that assumption is
+    // only true for a direct-sampling HF receiver (RX888) where
+    // Frontend.frequency is ~0. For a tuner-based front end (RTL-SDR,
+    // Airspy) it is not, and the old assumption clamped center_freq to a
+    // negative value that wrapped around to a huge number when stored in
+    // the uint32_t sp->center_frequency (observed: 145000010 -> 4294547296).
+    // lo_if/hi_if come from Frontend.min_IF/max_IF (FE_LOW_EDGE/FE_HIGH_EDGE)
+    // - symmetric for complex/IQ front ends, asymmetric (entirely negative)
+    // for real-sampling ones - see frontend_if_bounds() above.
+    int64_t lo = (int64_t)round(Frontend.frequency);
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    int64_t const lo_bound = lo + (int64_t)round(lo_if);
+    int64_t const hi_bound = lo + (int64_t)round(hi_if);
     if (freq_bin >= sp->bins) {
         int64_t target_bin = sp->bins - 30;
         int64_t new_min_f = (int64_t)sp->frequency - target_bin * sp->bin_width;
         int64_t new_center = new_min_f + (span / 2);
         int64_t new_max_f = new_center + (span / 2);
-        if (new_max_f > fs2) {
-            new_center = fs2 - (span / 2);
+        if (new_max_f > hi_bound) {
+            new_center = hi_bound - (span / 2);
             new_min_f = new_center - (span / 2);
         }
         center_freq = new_center;
@@ -1154,10 +1269,10 @@ static void check_frequency(struct session *sp) {
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
     }
 
-    if (min_f < 0) {
-        center_freq = 0 + (span / 2);
-    } else if (max_f > fs2) {
-        center_freq = fs2 - (span / 2);
+    if (min_f < lo_bound) {
+        center_freq = lo_bound + (span / 2);
+    } else if (max_f > hi_bound) {
+        center_freq = hi_bound - (span / 2);
     }
 
     // Final recompute after any adjustments
@@ -1181,8 +1296,20 @@ static void zoom_to(struct session *sp, int level) {
     level = 0;
 
   if(Frontend.samprate != 0){
+    // Widest usable span is the width of the real valid IF window
+    // (Frontend.max_IF - Frontend.min_IF), not a flat samprate/2 assumption:
+    // that's only correct for a real-sampling front end whose window happens
+    // to be (close to) symmetric - a complex/IQ front end (RTL-SDR) captures
+    // close to the FULL sample rate around the tuned centre, and an
+    // asymmetric real-sampling front end (Airspy: -0.47*samprate to
+    // -600kHz) has a *different* width again. See frontend_if_bounds()
+    // above - this replaces the previous Frontend.isreal-based
+    // approximation with the actual measured window width.
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    double const max_span = hi_if - lo_if;
     while(zoom_table[level].bin_width * zoom_table[level].bin_count
-	  > round(Frontend.samprate/2.0) && level < table_size)
+	  > max_span && level < table_size)
       level++;
     if(level == table_size)
       level--;
@@ -1199,21 +1326,35 @@ static void zoom(struct session *sp, int shift) {
 /* Clamp center frequency so the visible span stays within [0, fs/2]
    but do not force the tuned frequency to be inside the visible window. */
 static void adjust_center_within_bounds(struct session *sp) {
-  if(sp->bin_width == 0 || sp->bins == 0 || Frontend.samprate == 0)
+  // Same NAN hazard as check_frequency() above (see its comment): a backend
+  // that reports INPUT_SAMPRATE but never FIRST_LO_FREQUENCY leaves
+  // Frontend.frequency permanently NAN while samprate != 0. Cast to int64_t
+  // below is undefined behaviour on NAN.
+  if(sp->bin_width == 0 || sp->bins == 0 || Frontend.samprate == 0 || isnan(Frontend.frequency))
     return;
 
   int64_t span = (int64_t)sp->bin_width * sp->bins;
   int64_t center_freq = (int64_t)sp->center_frequency;
-  int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
-  if (span >= (fs2 * 2)) {
-    /* span covers full range; center must be clamped to middle */
-    center_freq = fs2;
+  /* Same fix as check_frequency(): valid range is [lo+lo_if, lo+hi_if]
+     around the front end's real tuned centre (Frontend.frequency), not
+     [0, fs2] - see frontend_if_bounds() above. This function is reached
+     from the "Z:c:" zoom-center command and was independently reproducing
+     the exact same zero-based bug - confirmed by it recomputing 795000
+     from our real values (fs2 - half with lo=0). */
+  int64_t lo = (int64_t)round(Frontend.frequency);
+  double lo_if, hi_if;
+  frontend_if_bounds(&lo_if, &hi_if);
+  int64_t const lo_bound = lo + (int64_t)round(lo_if);
+  int64_t const hi_bound = lo + (int64_t)round(hi_if);
+  if (span >= (hi_bound - lo_bound)) {
+    /* span covers full range; center must be clamped to the middle */
+    center_freq = (lo_bound + hi_bound) / 2;
   } else {
     int64_t half = span / 2;
-    if (center_freq - half < 0) {
-      center_freq = half;
-    } else if (center_freq + half > fs2) {
-      center_freq = fs2 - half;
+    if (center_freq - half < lo_bound) {
+      center_freq = lo_bound + half;
+    } else if (center_freq + half > hi_bound) {
+      center_freq = hi_bound - half;
     }
   }
   sp->center_frequency = (uint32_t)center_freq;
@@ -1847,25 +1988,72 @@ onion_connection_status home(void *data, onion_request * req,
   /* adoptOnParameterMismatch removed; adoption controlled server-side by backend shift */
 
 
-  sp->frequency=10000000;
+  /* 10 MHz (WWV) is a deliberately good HF default - a real, known signal -
+     but it's outside VHF/UHF's receivable range entirely. Keep it when it's
+     actually receivable on this front end; otherwise default to the centre
+     of the front end's real coverage. Only possible once Frontend has real
+     data (populated by an active session's own status traffic, not yet
+     true for the very first connection right after a fresh restart) -
+     Frontend.frequency is NAN until then (see its init above), and casting
+     NaN to int64_t is undefined behaviour, so both must be checked before
+     trusting these values, not just samprate. */
+  sp->frequency = 10000000;
+  if (Frontend.samprate > 0 && !isnan(Frontend.frequency)) {
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
+    int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
+    if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound))
+      sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
+  }
   int level = 0;
-#if 0
-  sp->center_frequency = round(Frontend.samprate/4.0);
-  const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+  if (Frontend.samprate > 0) {
+    /* Center the default view on the real front end's usable band, and
+       pick the widest zoom level that still fits its real usable width.
+       Reuses frontend_if_bounds() - the SAME already-established, tested
+       helper zoom_to()/check_frequency()/adjust_center_within_bounds()
+       all use elsewhere in this file for exactly this real-vs-complex
+       front end distinction - rather than inventing a second, cruder
+       approximation.
 
-
-  for(; level < table_size; level++)
-    if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(Frontend.samprate/2.0))
-      break;
+       IMPORTANT, found the hard way: sp->center_frequency is ABSOLUTE RF
+       Hz everywhere else in this file (check_frequency()/zoom_to()/
+       adjust_center_within_bounds() all compare it directly against
+       Frontend.frequency-derived absolute bounds) - it is NOT baseband-
+       relative, and must not be set to a baseband-relative 0 here for
+       complex/IQ front ends. radio.js confirms the same convention on the
+       client side: it uses the wire centre value directly, with no LO
+       addition. On HF this distinction is invisible, because
+       Frontend.frequency is ~0 and the two conventions coincide; on a
+       tuner-based front end getting it wrong puts the spectrum axis off
+       by the full LO frequency. */
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    sp->center_frequency = isnan(Frontend.frequency) ? 0
+      : (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
+    const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+    for(; level < table_size; level++)
+      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(hi_if - lo_if))
+        break;
+    if (level >= table_size)
+      level = table_size - 1; /* nothing fit (shouldn't happen) - narrowest, not out of bounds */
+  } else {
+    /* Frontend.samprate not yet populated - this is the very first
+       session since this process started, before any status packet has
+       arrived. Dividing/indexing against an unknown sample rate would
+       either divide by zero or walk off the end of zoom_table, so fall
+       back to the old fixed default (this is almost certainly why this
+       block was disabled in the first place) until real frontend data
+       exists. */
+    level = 6;
+  }
   sp->zoom_index = level;
-#else
-  level = 6;
-#endif
   sp->bins=zoom_table[level].bin_count;
   sp->bin_width=zoom_table[level].bin_width; // width of a pixel in hz
   sp->next=NULL;
   sp->previous=NULL;
   sp->shift = NAN;
+  sp->last_sent_backend_frequency = NAN;
 
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
@@ -2603,7 +2791,7 @@ void control_get_powers(struct session *sp, double frequency,int bins,double bin
       return;
     }
   }
-  control_get_powers_with_demod(sp,frequency,bins,bin_bw,SPECT2_DEMOD);
+  control_get_powers_with_demod(sp,frequency,bins,bin_bw,preferred_spectrum_demod());
 }
 
 void control_get_powers_with_demod(struct session *sp,double frequency,int bins,double bin_bw,int demod_type){
@@ -2868,6 +3056,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       /* record per-session spectrum receive time */
       if (sp)
         sp->last_spectrum_recv_ms = now_ms();
+      Real_spectrum_packets++;
       break;
     case BIN_DATA:
       l_count = optlen/sizeof(float);
@@ -2880,6 +3069,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       /* record per-session spectrum receive time */
       if (sp)
         sp->last_spectrum_recv_ms = now_ms();
+      Real_spectrum_packets++;
       break;
     case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -2933,6 +3123,27 @@ static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned
     return 0;
   sp->bins_max_db = -INFINITY;
   sp->bins_min_db = +INFINITY;
+  // This function is only ever reached via the BIN_DATA case in
+  // extract_powers()'s TLV dispatch - the newer compact BIN_BYTE_DATA
+  // encoding goes through the entirely separate handle_bin_byte_data()
+  // below and never touches this code at all. BIN_DATA itself arrives in
+  // raw FFT order (DC-first, wrapped as [0..+N/2-1,-N/2..-1] in
+  // frequency-bin terms) and needs the shift below to become
+  // ascending-frequency order.
+  //
+  // The shift was previously gated on `if (Frontend.isreal)` (i.e. skipped
+  // for a real-sampling front end), on the theory that a real front end's
+  // FFT yields already-monotonic 0..Nyquist bins and shifting would splice
+  // the Nyquist-adjacent bin onto DC. Observed BIN_DATA from a
+  // real-sampling (direct-sampling HF) front end does not match that: the
+  // array is DC-first there too, and skipping the shift leaves it
+  // unrotated - not a cosmetic seam but a full left/right half swap, with
+  // the upper half of the requested window landing in the first half of
+  // the array and the wrapped-around lower half in the second. Reported
+  // as "HF spectrum display: left/right sides swapped". Independently
+  // decoding the same wire data gives the same conclusion: BIN_DATA always
+  // needs the shift, BIN_BYTE_DATA never does, with no dependency on
+  // Frontend.isreal either way.
   int i = l_count / 2; // DC
   do {
     double p = decode_float(cp, sizeof(float));
@@ -3068,11 +3279,108 @@ returns `NULL` when the thread exits, as required by the POSIX thread API.
 */
 void *spectrum_thread(void *arg) {
   struct session *sp = (struct session *)arg;
+  /* Baseline against the process-wide Real_spectrum_packets counter, NOT
+     sp->last_spectrum_recv_ms - that field is stamped by
+     process_spectrum_packet() for ANY response on this SSRC, including
+     the plain-audio fallback radiod sends when it doesn't recognize
+     SPECT2_DEMOD, so it can't distinguish "got real bin data" from "got
+     some response". Real_spectrum_packets only moves on an actual
+     decoded BIN_DATA/BIN_BYTE_DATA TLV. */
+  unsigned long last_seen_real = Real_spectrum_packets;
   while(sp->spectrum_active) {
-    pthread_mutex_lock(&sp->spectrum_mutex);
-    control_get_powers_with_demod(sp,sp->center_frequency,sp->bins,sp->bin_width, SPECT2_DEMOD);
-    pthread_mutex_unlock(&sp->spectrum_mutex);
+    /* Retroactive default-view correction: if this session was created
+       before Frontend ever populated (samprate/frequency still 0/NAN at
+       that time - see the detailed comment at session creation), its
+       tuned frequency/spectrum centre/zoom were left at plain HF defaults
+       that are outside VHF/UHF's receivable range. That correction only
+       ran once, at creation, so it never got retried once real Frontend
+       data showed up. Check the flag unlocked first (cheap, and false
+       forever after the first successful pass, so this degrades to a
+       single bool read for the rest of the session's life); only take
+       session_mutex - which every other Frontend/session mutation in this
+       file already holds while touching these same fields - when there is
+       actually a chance of work to do. */
+    if (!sp->default_view_retro_checked && Frontend.samprate > 0 && !isnan(Frontend.frequency)) {
+      pthread_mutex_lock(&session_mutex);
+      if (!sp->default_view_retro_checked) {
+        sp->default_view_retro_checked = true;
+        /* Never overwrite a frequency/view the user has since chosen for
+           themselves - only fix up a session that's still sitting on the
+           untouched creation-time defaults. */
+        if (sp->last_client_command_ms == 0) {
+          double lo_if, hi_if;
+          frontend_if_bounds(&lo_if, &hi_if);
+          int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
+          int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
+          bool retuned = false;
+          if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound)) {
+            sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
+            retuned = true;
+            fprintf(stderr, "SSRC %u: retroactive default-view correction: session was created before "
+                    "Frontend populated, retuning stuck HF-default frequency to %u Hz\n", sp->ssrc, sp->frequency);
+          }
+          if (sp->center_frequency == 0) {
+            sp->center_frequency = (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
+            const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+            int level = 0;
+            for(; level < table_size; level++)
+              if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(hi_if - lo_if))
+                break;
+            if (level >= table_size)
+              level = table_size - 1;
+            sp->zoom_index = level;
+            sp->bins = zoom_table[level].bin_count;
+            sp->bin_width = zoom_table[level].bin_width;
+          }
+          if (retuned) {
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+            control_set_frequency(sp, freq_msg);
+          }
+        }
+      }
+      pthread_mutex_unlock(&session_mutex);
+    }
+    int const demod = preferred_spectrum_demod();
+    /* Unconditionally re-assert the full channel spec every cycle rather
+       than trusting a keep-alive to survive between polls. Where radiod
+       sits behind a proxy or multiplexer that reaps channels it no longer
+       recognizes, a spectrum channel can disappear between polls; re-asserting
+       the whole spec recreates it from scratch on the next cycle instead of
+       leaving the display permanently dead. Against a plain radiod this is
+       simply idempotent.
+       Never BLOCK waiting for spectrum_mutex: a session-cleanup path
+       elsewhere can hold it, and this loop must never get stuck behind
+       it - skip this cycle's poke rather than stall, and just try again
+       next cycle (spectrum_poll_us later). */
+    bool sent = false;
+    if (pthread_mutex_trylock(&sp->spectrum_mutex) == 0) {
+      control_get_powers_with_demod(sp,sp->center_frequency,sp->bins,sp->bin_width, demod);
+      pthread_mutex_unlock(&sp->spectrum_mutex);
+      sent = true;
+    }
     control_poll(sp);
+    if (Spect2_supported == -1) {
+      if (Real_spectrum_packets != last_seen_real) {
+        pthread_mutex_lock(&spect2_probe_mutex);
+        Spect2_supported = 1;
+        pthread_mutex_unlock(&spect2_probe_mutex);
+      } else if (sent && demod == SPECT2_DEMOD) {
+        pthread_mutex_lock(&spect2_probe_mutex);
+        if (Spect2_supported == -1) {
+          Spect2_probe_attempts++;
+          if (Spect2_probe_attempts >= SPECT2_PROBE_MAX_ATTEMPTS) {
+            Spect2_supported = 0;
+            fprintf(stderr, "spectrum_thread: no spectrum data received after %d SPECT2_DEMOD "
+                    "requests (cumulative across reconnects) - this radiod backend appears not to "
+                    "support it, falling back to SPECT_DEMOD for the rest of this process's life\n",
+                    Spect2_probe_attempts);
+          }
+        }
+        pthread_mutex_unlock(&spect2_probe_mutex);
+      }
+    }
+    last_seen_real = Real_spectrum_packets;
     if(usleep(sp->spectrum_poll_us) != 0) {
       perror("spectrum_thread: usleep(sp->spectrum_poll_us)");
     }
@@ -3144,7 +3452,7 @@ void set_realtime(void){
 /* Forward declarations for helpers used by ctrl_thread (helpers defined later) */
 static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
-static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length);
 static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
 
 /*
@@ -3183,7 +3491,6 @@ multiple clients, supporting features like dynamic scaling, error correction, an
 */
 void *ctrl_thread(void *arg)
 {
-  static double last_sent_backend_frequency = 0.0;
   uint8_t buffer[PKTSIZE / sizeof(float)];
 
   if (run_with_realtime)
@@ -3224,7 +3531,7 @@ void *ctrl_thread(void *arg)
         } else {
           if (debugSSRC)
             fprintf(stderr, "ctrl_thread: status packet ssrc=%u -> session ssrc=%u sp=%p\n", ssrc, sp->ssrc, (void *)sp);
-          process_status_packet(sp, buffer, (int)rx_length, &last_sent_backend_frequency);
+          process_status_packet(sp, buffer, (int)rx_length);
           pthread_mutex_unlock(&session_mutex);
         }
       } else {
@@ -3639,12 +3946,16 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
     5) Build a status RTP payload (baseband power, filter edges, optional description)
       and send it to the browser via `send_ws_binary_to_session()`.
   - Notes:
-    * `last_sent_backend_frequency` is used to avoid redundant BFREQ notifications.
+    * `sp->last_sent_backend_frequency` is used to avoid redundant BFREQ
+      notifications - per-session (not a shared/static value across
+      sessions): every session in ctrl_thread()'s loop calls this function,
+      and two sessions tuned to different frequencies must each track their
+      own "last BFREQ sent" independently, or tuning one spuriously
+      re-notifies the other on its very next status packet.
     * The function relies on helper wrappers (send_ws_*) to perform websocket I/O
       with proper locking.
 */
-static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length,
-                       double *last_sent_backend_frequency)
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length)
 {
   uint8_t output_buffer[PKTSIZE];
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
@@ -3687,7 +3998,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               char freq_msg[64];
               snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
               send_ws_text_to_session(sp, freq_msg);
-              *last_sent_backend_frequency = Channel.tune.freq;
+              sp->last_sent_backend_frequency = Channel.tune.freq;
               sp->left_cw_pending = 0;
             }
           }
@@ -3713,7 +4024,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             char freq_msg[64];
             snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
             send_ws_text_to_session(sp, freq_msg);
-            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->last_sent_backend_frequency = Channel.tune.freq;
             sp->cw_flip_pending = 0;
             sp->freq_mismatch_count = 0;
           } else if (now - sp->cw_flip_time_ms > 5000UL) {
@@ -3794,15 +4105,15 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
      causing repeated notifications or false mismatch detection. */
   {
     const double FREQ_EPS_HZ = 0.5; /* 0.5 Hz tolerance */
-    bool backend_changed = isnan(*last_sent_backend_frequency) ||
-                           (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
+    bool backend_changed = isnan(sp->last_sent_backend_frequency) ||
+                           (fabs(sp->last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
       if (backend_changed) {
       /* Always notify client of backend frequency changes; server state is authoritative. */
       current_backend_frequency = Channel.tune.freq;
       char freq_msg[64];
       snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
       send_ws_text_to_session(sp, freq_msg);
-      *last_sent_backend_frequency = Channel.tune.freq;
+      sp->last_sent_backend_frequency = Channel.tune.freq;
     }
   }
 
@@ -3814,7 +4125,42 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     double session_freq = (double)sp->frequency;
     double diff = fabs(backend_freq - session_freq);
 
-    if (diff <= FREQ_EPS_HZ) {
+    if (backend_freq <= FREQ_EPS_HZ && session_freq > FREQ_EPS_HZ) {
+      /* A backend-reported frequency of ~0 Hz while we have a real nonzero
+         frequency requested is never a legitimate "someone else retuned to
+         DC" state - 0 Hz is radiod's own disable convention, and a channel
+         that has been torn down or reaped reads back as 0. Adopting it (the
+         pre-existing "no recent client command" branch below) pushes
+         BFREQ_FORCE:0.000 to the browser every time that happens. Never
+         adopt this specific case, regardless of the client-recent window -
+         just reassert our own frequency.
+
+         Throttled the same way the mismatch-resend branch below already
+         is (MAX_FREQ_MISMATCH consecutive polls before resending). Without
+         the throttle this calls control_set_frequency() on every single
+         poll for as long as the backend reads ~0 Hz - every ~100ms at the
+         default spectrum_poll_us - i.e. hundreds of redundant
+         RADIO_FREQUENCY sets, all taking the single global ctl_mutex that
+         every session's poll shares. */
+      sp->freq_mismatch_count++;
+      if (verbose && debug_send) {
+        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+        fprintf(stderr, "%s: +%lums: SSRC %u: backend reports 0 Hz (disabled/reaped) while session wants "
+                "%.3f kHz - never adopting 0 (mismatch %d/%d)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
+      }
+      if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: reasserting %.3f kHz after %d polls of backend 0 Hz\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001, MAX_FREQ_MISMATCH);
+        }
+        char freq_msg[64];
+        snprintf(freq_msg, sizeof(freq_msg), "%.3f", session_freq * 0.001);
+        control_set_frequency(sp, freq_msg);
+        sp->freq_mismatch_count = 0;
+      }
+    } else if (diff <= FREQ_EPS_HZ) {
       /* Considered matched */
       if (sp->freq_mismatch_count != 0) {
         int prev_count = sp->freq_mismatch_count;
@@ -3843,7 +4189,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         char freq_msg[64];
         snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
         send_ws_text_to_session(sp, freq_msg);
-        *last_sent_backend_frequency = Channel.tune.freq;
+        sp->last_sent_backend_frequency = Channel.tune.freq;
         sp->freq_mismatch_count = 0;
       } else {
         const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
@@ -3863,7 +4209,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
           snprintf(freq_msg, sizeof(freq_msg), "BFREQ_FORCE:%.3f", Channel.tune.freq);
           send_ws_text_to_session(sp, freq_msg);
           /* Keep last_sent_backend_frequency in sync when we actually notify */
-          *last_sent_backend_frequency = Channel.tune.freq;
+          sp->last_sent_backend_frequency = Channel.tune.freq;
           sp->freq_mismatch_count = 0;
           sp->last_client_command_ms = 0;
         } else {
@@ -3921,6 +4267,30 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   }
   /* Include frontend/channel metadata so client status fields remain current when spectrum is paused */
   encode_int32(&bp, INPUT_SAMPRATE, (uint32_t)round(fabs(Frontend.samprate)));
+  /* Real-sampling front ends (Airspy, RX888) have a valid IF window that is
+     NOT symmetric around Frontend.frequency like a complex/IQ front end's is
+     - confirmed in src/airspy.c: max_IF = -600000, min_IF = -0.47*samprate,
+     both negative, i.e. the usable window sits entirely BELOW the tuned
+     frequency. Frontend.isreal/min_IF/max_IF are already decoded server-side
+     via decode_radio_status() (FE_ISREAL/FE_LOW_EDGE/FE_HIGH_EDGE) but were
+     never forwarded to the browser - the client had no way to know the
+     front end was asymmetric at all, and silently assumed the complex/IQ
+     case (symmetric +/- samprate/2) always. Encoded BEFORE
+     FIRST_LO_FREQUENCY deliberately: that field's one-shot retune-validity
+     check needs these already parsed, same reasoning as input_samprate
+     above. */
+  encode_bool(&bp, FE_ISREAL, Frontend.isreal);
+  encode_float(&bp, FE_LOW_EDGE, Frontend.min_IF);
+  encode_float(&bp, FE_HIGH_EDGE, Frontend.max_IF);
+  /* Front end's real tuned RF centre (first LO frequency) - already decoded server-side
+     into Frontend.frequency via FIRST_LO_FREQUENCY (decode_status.c), but never forwarded
+     to the browser before. Without it, the client has no way to know a tuner-based front
+     end (RTL-SDR, Airspy) isn't centred at 0 Hz like direct-sampling HF receivers are.
+     Encoded AFTER input_samprate/FE_ISREAL/FE_LOW_EDGE/FE_HIGH_EDGE deliberately: the
+     client applies a one-shot retune correction as soon as this field arrives, and
+     needs all of those already parsed from earlier in this same packet for that
+     check to be meaningful. */
+  encode_double(&bp, FIRST_LO_FREQUENCY, Frontend.frequency);
   encode_int64(&bp, INPUT_SAMPLES, (uint64_t)Frontend.samples);
   encode_int64(&bp, GPS_TIME, (uint64_t)Channel.clocktime);
   encode_float(&bp, IF_POWER, power2dB(Frontend.if_power));
