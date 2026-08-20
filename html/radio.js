@@ -1208,22 +1208,14 @@ function applyQuickBW() {
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
           }
-          // BFREQ: server-sent backend frequency in kHz (e.g., "BFREQ:10000.000")
+          // BFREQ: server-sent backend frequency in Hz (e.g., "BFREQ:470000.000")
           // BFREQ_FORCE: server-forced backend frequency update (UI should always apply)
           if ((args[0] === 'BFREQ' || args[0] === 'BFREQ_FORCE') && args.length > 1) {
             const f_raw = parseFloat(args[1]);
             if (Number.isFinite(f_raw)) {
-              // Detect whether server sent kHz (e.g., 14183.000) or Hz (e.g., 14183000)
-              let hz;
-              if (f_raw > 1000000) {
-                // large number — assume already in Hz
-                hz = Math.round(f_raw);
-                // console.debug('[radio.js] BFREQ text received (server) interpreted as Hz:', args[1], 'hz=', hz);
-              } else {
-                // assume kHz
-                hz = Math.round(f_raw * 1000);
-                // console.debug('[radio.js] BFREQ text received (server) interpreted as kHz:', args[1], 'hz=', hz);
-              }
+              // Backend (Channel.tune.freq) always reports Hz; a <1MHz/kHz
+              // heuristic here previously misinterpreted sub-1MHz Hz values as kHz.
+              const hz = Math.round(f_raw);
               backendFrequencyHz = hz;
               try {
                 const freqEl = document.getElementById('freq');
