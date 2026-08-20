@@ -4267,7 +4267,12 @@ const bandOptions = {
         { label: "15M", freq: 21300000 },
         { label: "12M", freq: 24930000 },
         { label: "10M", freq: 28500000 },
-	{ label: "6M",  freq: 50100000 }
+	{ label: "6M",  freq: 50100000 },
+	// 2m/70cm: the list stopped at 6M, which is as far as a direct-sampling
+	// HF front end reaches. With a tuner-based front end (RTL-SDR, Airspy)
+	// these bands are receivable and previously had no quick-select entry.
+	{ label: "2M", freq: 145500000 },
+	{ label: "70CM", freq: 433500000 }
     ],
     broadcast: [
         { label: "120M", freq:2397500 },
@@ -4714,11 +4719,24 @@ window.zoomTable = [
  // { bin_width: 50000, bin_count: 1620 },
   { bin_width: 40000, bin_count: 1620 },
   { bin_width: 20000, bin_count: 1620 },
+  // The three entries below must stay in lockstep with the server's
+  // zoom_table[] in ka9q-web.c, in the same index order: the "Z:<n>" command
+  // sends a bare index into that table, so an entry present on one side and
+  // not the other silently shifts every wider selection by one step.
+  // 18790 Hz -> 30,439,800 Hz, the widest step that still fits a typical
+  // direct-sampling HF front end's real coverage (~30.44 MHz).
+  { bin_width: 18790, bin_count: 1620 },
   { bin_width: 10000, bin_count: 1620 },
   { bin_width: 8000, bin_count: 1620 },
+  // 5432 Hz -> 8,799,840 Hz, the widest step fitting an Airspy R2's 8.8 MHz
+  // real-sampling window (max_IF=-600kHz, min_IF=-0.47*20Msps, src/airspy.c).
+  { bin_width: 5432, bin_count: 1620 },
   { bin_width: 5000, bin_count: 1620 },
   { bin_width: 4000, bin_count: 1620 },
   { bin_width: 2000, bin_count: 1620 },
+  // 1480 Hz -> 2,397,600 Hz, the widest step fitting a full 2.4 Msps
+  // complex/IQ capture (e.g. an RTL-SDR at its usual rate).
+  { bin_width: 1480, bin_count: 1620 },
   { bin_width: 1000, bin_count: 1620 },
   { bin_width: 800, bin_count: 1620 },
   { bin_width: 500, bin_count: 1620 },
