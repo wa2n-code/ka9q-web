@@ -192,6 +192,14 @@
                             <option value="2">OVR</option>
                         </select>
                         <button id="cw_instant_button" title="Apply alternate bandwidth" style="margin-left:6px; padding:2px 6px; font-size:90%" disabled>QuickBW</button>
+                        <label for="samprate_select" style="margin-left:6px;">Rate:</label>
+                        <select id="samprate_select" title="Audio sample rate" style="font-size:90%;">
+                            <option value="8000">8k</option>
+                            <option value="12000">12k</option>
+                            <option value="16000">16k</option>
+                            <option value="24000">24k</option>
+                            <option value="48000">48k</option>
+                        </select>
                     </td>
                     <td align="center">
                         <label for="ckKeepFreqCentered" style="margin-right:2px;">AZC</label>
@@ -401,7 +409,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.86: Shift filter edges with left mouse drag</li>
+            <li>v2.86: Shift filter edges with left mouse drag, audio sample rate override</li>
             <li>v2.85: Add ISB mode</li>
             <li>v2.84: Include lifetime on radiod commands, Start Stop Spectrum stops spectrum network streaming, ssrc's now randomized, IP Blacklist</li>
             <li>v2.83: Extensive websocket improvements, Audio Pan slider persists and loads, remove CHU</li>

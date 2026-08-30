@@ -658,6 +658,115 @@ function applyQuickBW() {
   sendFilterEdges();
 }
 
+// Sample rate control: a plain dropdown of Opus-legal audio sample rates,
+// placed next to the QuickBW button. Tracks/highlights the backend-reported
+// current rate (backendOutputSampleRate) via <select>.value.
+const SAMPLE_RATES = [8000, 12000, 16000, 24000, 48000];
+let sampleRateManuallySet = false;
+// Rate we most recently requested; suppresses stale backend echoes from
+// overwriting the tooltip/value before the backend catches up.
+let pendingSampleRate = null;
+
+function defaultSampleRateForMode(mode) {
+  switch ((mode || '').toLowerCase()) {
+    case 'fm':
+      return 24000;
+    case 'iq':
+      return 48000;
+    default:
+      return 12000;
+  }
+}
+
+// Reflect the backend-reported current sample rate in the dropdown value
+// (so it shows highlighted/selected) and in its tooltip. Skip writes while
+// the user has the dropdown focused/open, or when nothing actually changed,
+// to avoid visible flicker from frequent status-packet updates.
+function updateSampRateUI() {
+  try {
+    const sel = document.getElementById('samprate_select');
+    const rate = (typeof backendOutputSampleRate === 'number' && backendOutputSampleRate > 0) ? backendOutputSampleRate : null;
+    if (!sel || !rate || SAMPLE_RATES.indexOf(rate) === -1) return;
+    if (pendingSampleRate !== null) {
+      if (rate === pendingSampleRate) {
+        pendingSampleRate = null;
+      } else {
+        return; // backend hasn't applied the requested rate yet; don't show stale value
+      }
+    }
+    if (document.activeElement !== sel) {
+      const rateStr = String(rate);
+      if (sel.value !== rateStr) sel.value = rateStr;
+      const newTitle = 'Audio sample rate: ' + (rate / 1000) + ' kHz';
+      if (sel.title !== newTitle) sel.title = newTitle;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function sendSampleRate(rate) {
+  const r = Number(rate);
+  if (!Number.isFinite(r) || SAMPLE_RATES.indexOf(r) === -1) return;
+  pendingSampleRate = r;
+  try {
+    const sel = document.getElementById('samprate_select');
+    if (sel) sel.title = 'Audio sample rate: ' + (r / 1000) + ' kHz';
+  } catch (e) { /* ignore */ }
+  try { sendControl('samprate', 'Y:' + r, undefined, true); } catch (e) { console.warn('Failed to send sample rate', e); }
+}
+
+// Clamp filter edges so they stay within +/- rate/2 (Nyquist) of a newly
+// selected sample rate, updating the input boxes and resending edges if changed.
+function clampFilterEdgesToRate(rate) {
+  try {
+    const lowEl = document.getElementById('filterLowInput');
+    const highEl = document.getElementById('filterHighInput');
+    if (!lowEl || !highEl) return;
+    const nyquist = Number(rate) / 2;
+    if (!Number.isFinite(nyquist) || nyquist <= 0) return;
+    let low = parseFloat(lowEl.value);
+    let high = parseFloat(highEl.value);
+    let changed = false;
+    if (Number.isFinite(high) && high > nyquist) { high = nyquist; highEl.value = high; changed = true; }
+    if (Number.isFinite(low) && low < -nyquist) { low = -nyquist; lowEl.value = low; changed = true; }
+    if (changed) {
+      try { updateEdgeButtonState(); } catch (e) {}
+      try { sendFilterEdges(); } catch (e) {}
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// Apply the mode-appropriate default sample rate; called from setMode() so the
+// backend rate follows the demodulator mode automatically. Skips the rate
+// change once the user has manually chosen a rate, but always re-clamps the
+// filter edges to whichever rate (manual or default) is now in effect.
+function applySampleRateForMode(mode) {
+  const sel = document.getElementById('samprate_select');
+  let rate;
+  if (sampleRateManuallySet) {
+    rate = sel ? Number(sel.value) : defaultSampleRateForMode(mode);
+  } else {
+    rate = defaultSampleRateForMode(mode);
+    if (sel) sel.value = String(rate);
+    sendSampleRate(rate);
+  }
+  clampFilterEdgesToRate(rate);
+}
+
+(function attachSampRateControl(){
+  function attach() {
+    const sel = document.getElementById('samprate_select');
+    if (!sel) return;
+    sel.addEventListener('change', function() {
+      sampleRateManuallySet = true;
+      const rate = Number(sel.value);
+      sendSampleRate(rate);
+      clampFilterEdgesToRate(rate);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach, { once: true });
+  else attach();
+})();
+
       // Network-to-host helpers (explicit, predictable byte swaps)
       // For this codebase DataView reads explicitly specify endianness where needed.
       // Make ntoh helpers no-ops to avoid double-swapping values.
@@ -1742,7 +1851,7 @@ function applyQuickBW() {
                     i += l;
                     break;
                   case 20: // OUTPUT_SAMPRATE
-                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputSampleRate = _v; backendOutputMetadataSeen = true; }
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputSampleRate = _v; backendOutputMetadataSeen = true; try { updateSampRateUI(); } catch (e) {} }
                     i += l;
                     break;
                   case 49: // OUTPUT_CHANNELS
@@ -2868,6 +2977,8 @@ function applyQuickBW() {
   suppressEdgeAutoSend = false;
   // Update QuickBW button state when mode changes programmatically
   try { updateQuickBWButtonState(); } catch (e) {}
+  // Follow the demodulator mode with the appropriate audio sample rate
+  try { applySampleRateForMode(selected_mode); } catch (e) {}
   }
 
     function selectMode(mode) {

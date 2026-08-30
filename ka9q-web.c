@@ -196,6 +196,7 @@ extern void control_set_spectrum_average(struct session *sp, char *val_str);
 extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
 extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 extern void control_set_encoding(struct session *sp, bool use_opus);
+extern void control_set_samprate(struct session *sp, char *str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,double frequency,int bins,double bin_bw);
 /* New: request powers with explicit demod type (fallback to SPECT2_DEMOD if needed) */
@@ -824,6 +825,15 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           if (ov != NULL) {
             control_set_spectrum_overlap(sp, ov);
             fflush(stderr);
+          }
+        }
+        break;
+      case 'Y':
+      case 'y':
+        {
+          char *rate = strtok_r(NULL, ":", &saveptr);
+          if (rate != NULL) {
+            control_set_samprate(sp, rate);
           }
         }
         break;
@@ -2540,6 +2550,37 @@ void control_set_encoding(struct session *sp, bool use_opus) {
     if (verbose)
       fprintf(stderr, "%s: set encoding to %s for ssrc=%u\n", __FUNCTION__,
               use_opus ? "OPUS" : "PCM", (unsigned)sp->ssrc);
+    usleep(CONTROL_USLEEP_US);
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
+// Send a request to change the output audio sample rate (Hz) for a session.
+// The backend (radio_status.c) validates the rate, rejects it if illegal for
+// the current encoding (e.g. non-Opus-legal rates when Opus is active), and
+// restarts the demodulator to recompute filters when the rate actually changes.
+void control_set_samprate(struct session *sp, char *str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  if(str == NULL || strlen(str) == 0)
+    return;
+  char *endptr;
+  long const rate = strtol(str,&endptr,10);
+  if(str == endptr || rate <= 0)
+    return;
+  *bp++ = CMD;
+  encode_int(&bp,OUTPUT_SSRC,sp->ssrc);
+  encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME);
+  encode_int(&bp,COMMAND_TAG,arc4random());
+  encode_int(&bp,OUTPUT_SAMPRATE,(int)rate);
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
+    fprintf(stderr,"command send error: %s\n",strerror(errno));
+  } else {
+    if (verbose)
+      fprintf(stderr, "%s: requested samprate %ld for ssrc=%u\n", __FUNCTION__, rate, (unsigned)sp->ssrc);
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
