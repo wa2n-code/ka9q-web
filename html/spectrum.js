@@ -184,6 +184,11 @@ function Spectrum(id, options) {
     // Throttle sending center requests to backend during drag (ms)
     let lastCenterSend = 0;
     const centerSendInterval = 300; // ms
+    // Filter edge drag state: null, 'low', or 'high'
+    this._filterDragEdge = null;
+    const FILTER_EDGE_HIT_PX = 6; // pixel hit-test tolerance for grabbing a filter edge
+    let lastFilterEdgeSend = 0;
+    const filterEdgeSendInterval = 100; // ms, throttle network sends while dragging a filter edge
     const spectrum = this;
 
     // Try to flush any pending frequency message when websocket buffer drains
@@ -257,7 +262,20 @@ function Spectrum(id, options) {
     };
 
     this.canvas.addEventListener('mousedown', function(e) {
-        if (e.button === 0) { // Left mouse button: start possible click or drag
+        if (e.button === 0) { // Left mouse button: start possible click or drag, or filter-edge drag
+            const edgePixels = spectrum.getFilterEdgeScreenX();
+            if (edgePixels) {
+                const distLow = Math.abs(e.offsetX - edgePixels.xLow);
+                const distHigh = Math.abs(e.offsetX - edgePixels.xHigh);
+                // Grab whichever edge is closest, as long as it's within the hit tolerance.
+                // This lets the low edge be grabbed even when it sits very near the carrier.
+                if (Math.min(distLow, distHigh) <= FILTER_EDGE_HIT_PX) {
+                    spectrum._filterDragEdge = (distLow <= distHigh) ? 'low' : 'high';
+                    spectrum.canvas.style.cursor = 'ew-resize';
+                    e.preventDefault();
+                    return;
+                }
+            }
             leftDown = true;
             leftDragStarted = false;
             leftStartX = e.offsetX;
@@ -280,8 +298,56 @@ function Spectrum(id, options) {
         e.preventDefault();
     });
 
+    // Hover feedback: show a resize cursor when over a filter edge (not while dragging)
+    this.canvas.addEventListener('mousemove', function(e) {
+        if (leftDown || isDragging || spectrum._filterDragEdge) return;
+        const edgePixels = spectrum.getFilterEdgeScreenX();
+        if (!edgePixels) { spectrum.canvas.style.cursor = ""; return; }
+        const distLow = Math.abs(e.offsetX - edgePixels.xLow);
+        const distHigh = Math.abs(e.offsetX - edgePixels.xHigh);
+        spectrum.canvas.style.cursor = (Math.min(distLow, distHigh) <= FILTER_EDGE_HIT_PX) ? "ew-resize" : "";
+    });
+
     window.addEventListener('mousemove', function(e) {
         const rect = spectrum.canvas.getBoundingClientRect();
+        // Dragging a filter edge (low or high) takes priority over spectrum panning
+        if (spectrum._filterDragEdge) {
+            if (!(e.buttons & 1)) { // button released outside the canvas
+                spectrum._filterDragEdge = null;
+                spectrum.canvas.style.cursor = "";
+                return;
+            }
+            const mouseX = e.clientX - rect.left;
+            const hz_per_pixel = spectrum.spanHz / spectrum.canvas.width;
+            const startFreq = spectrum.centerHz - (spectrum.spanHz / 2.0);
+            const freqAtMouse = startFreq + (mouseX * hz_per_pixel);
+            let offsetHz = freqAtMouse - spectrum.frequency;
+            const minGapHz = 20; // keep low/high edges from crossing or collapsing
+            const maxEdgeHz = 6000; // backend's widest supported filter edge
+            offsetHz = Math.max(-maxEdgeHz, Math.min(maxEdgeHz, offsetHz));
+            if (spectrum._filterDragEdge === 'low') {
+                offsetHz = Math.min(offsetHz, spectrum.filter_high - minGapHz);
+                spectrum.filter_low = Math.round(offsetHz);
+            } else {
+                offsetHz = Math.max(offsetHz, spectrum.filter_low + minGapHz);
+                spectrum.filter_high = Math.round(offsetHz);
+            }
+            try {
+                const lowEl = document.getElementById('filterLowInput');
+                const highEl = document.getElementById('filterHighInput');
+                if (lowEl) lowEl.value = spectrum.filter_low;
+                if (highEl) highEl.value = spectrum.filter_high;
+            } catch (err) { /* ignore */ }
+            try {
+                const now = Date.now();
+                if ((now - lastFilterEdgeSend) >= filterEdgeSendInterval) {
+                    lastFilterEdgeSend = now;
+                    if (typeof sendFilterEdges === 'function') sendFilterEdges();
+                }
+            } catch (err) { console.warn('Failed to send filter edges during drag', err); }
+            if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+            return;
+        }
         // Left mouse drag: shift spectrum center
         if (leftDown && (e.buttons & 1)) {
             const mouseX = e.clientX - rect.left;
@@ -389,6 +455,13 @@ function Spectrum(id, options) {
         }
     });
     window.addEventListener('mouseup', function(e) {
+        // Finalize a filter-edge drag: send final edges and bail out before quick-click/pan logic
+        if (spectrum._filterDragEdge && e.button === 0) {
+            try { if (typeof sendFilterEdges === 'function') sendFilterEdges(); } catch (err) { console.warn('Failed to send final filter edges', err); }
+            spectrum._filterDragEdge = null;
+            spectrum.canvas.style.cursor = "";
+            return;
+        }
         // Left mouse quick click: change tuned frequency
         if (leftDown && e.button === 0) {
             const dragDuration = Date.now() - leftStartTime;
@@ -531,6 +604,20 @@ Spectrum.prototype.setFrequency = function(freq) {
 Spectrum.prototype.setFilter = function(low,high) {
     this.filter_low=low;
     this.filter_high=high;
+}
+
+// Compute the current on-screen pixel x-positions of the filter low/high edges,
+// using the same frequency<->pixel mapping as the mouse-to-frequency handlers.
+Spectrum.prototype.getFilterEdgeScreenX = function() {
+    if (!this.spanHz || !this.canvas || !this.canvas.width) return null;
+    if (typeof this.filter_low !== 'number' || typeof this.filter_high !== 'number') return null;
+    var hz_per_pixel = this.spanHz / this.canvas.width;
+    if (!hz_per_pixel) return null;
+    var startFreq = this.centerHz - (this.spanHz / 2.0);
+    return {
+        xLow: ((this.frequency + this.filter_low) - startFreq) / hz_per_pixel,
+        xHigh: ((this.frequency + this.filter_high) - startFreq) / hz_per_pixel
+    };
 }
 
 
