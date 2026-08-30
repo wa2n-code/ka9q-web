@@ -323,7 +323,9 @@ function Spectrum(id, options) {
             const freqAtMouse = startFreq + (mouseX * hz_per_pixel);
             let offsetHz = freqAtMouse - spectrum.frequency;
             const minGapHz = 20; // keep low/high edges from crossing or collapsing
-            const maxEdgeHz = 6000; // backend's widest supported filter edge
+            const maxEdgeHz = (Number.isFinite(spectrum.outputSampleRate) && spectrum.outputSampleRate > 0)
+                ? spectrum.outputSampleRate / 2
+                : 6000;
             offsetHz = Math.max(-maxEdgeHz, Math.min(maxEdgeHz, offsetHz));
             if (spectrum._filterDragEdge === 'low') {
                 offsetHz = Math.min(offsetHz, spectrum.filter_high - minGapHz);

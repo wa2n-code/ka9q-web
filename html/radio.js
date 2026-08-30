@@ -435,9 +435,12 @@
       function ensurePcmPlayer() {
         const pcmCheckbox = document.getElementById('pcm_checkbox');
         const usePcm = !!(pcmCheckbox && pcmCheckbox.checked);
+        const config = getPcmPlaybackConfig();
+        if (typeof spectrum !== 'undefined' && spectrum) {
+          spectrum.outputSampleRate = config.sampleRate;
+        }
         if (!usePcm) return;
 
-        const config = getPcmPlaybackConfig();
         const needsRecreate = (!player || !player.audioCtx || player.audioCtx.state === 'closed' ||
           !player.option || player.option.encoding !== '16bitInt' ||
           Number(player.option.channels) !== Number(config.channels) ||
