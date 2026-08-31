@@ -2757,6 +2757,18 @@ function applySampleRateForMode(mode) {
 
     // ...existing code...
 
+    // Rounds the frequency input to the nearest 1 kHz and sets it, regardless of Alt state.
+    function setFrequencyRoundedW(evt)
+    {
+        try {
+          const freqEl = document.getElementById("freq");
+          let f = parseFloat(freqEl.value, 10) * 1000.0;
+          f = Math.round(f / 1000.0) * 1000.0;
+          freqEl.value = (f / 1000.0).toFixed(3);
+        } catch (e) {}
+        setFrequencyW(evt);
+    }
+
     function setFrequencyW(a, b)
     {
         // Normalize arguments so existing callers still work.
