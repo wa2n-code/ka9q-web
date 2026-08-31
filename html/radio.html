@@ -246,6 +246,14 @@
                             <option value="1.01">1.01</option>
                             <option value="1.1">1.1</option>
                         </select>
+                        <label for="filter2_select" style="margin-left:6px;">Filter2:</label>
+                        <select id="filter2_select" title="Secondary (sharper) post-filter length" style="font-size:90%;">
+                            <option value="0">Off</option>
+                            <option value="1">20ms</option>
+                            <option value="2">40ms</option>
+                            <option value="3">60ms</option>
+                            <option value="4">80ms</option>
+                        </select>
                     </td>
                     <td align="center">
                         <label for="panner_control" style="font-size:15px">Pan:</label>
@@ -410,7 +418,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.86: Shift filter edges with left mouse drag, audio sample rate override</li>
+            <li>v2.86: Shift filter edges with left mouse drag, audio sample rate override, kHz rounding button, Filter2 override</li>
             <li>v2.85: Add ISB mode</li>
             <li>v2.84: Include lifetime on radiod commands, Start Stop Spectrum stops spectrum network streaming, ssrc's now randomized, IP Blacklist</li>
             <li>v2.83: Extensive websocket improvements, Audio Pan slider persists and loads, remove CHU</li>

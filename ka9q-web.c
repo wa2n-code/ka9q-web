@@ -197,6 +197,7 @@ extern void control_set_spectrum_overlap(struct session *sp, char *val_str);
 extern void control_set_window_type(struct session *sp, char *type_str, char *shape_str);
 extern void control_set_encoding(struct session *sp, bool use_opus);
 extern void control_set_samprate(struct session *sp, char *str);
+extern void control_set_filter2(struct session *sp, char *str);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,double frequency,int bins,double bin_bw);
 /* New: request powers with explicit demod type (fallback to SPECT2_DEMOD if needed) */
@@ -834,6 +835,15 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           char *rate = strtok_r(NULL, ":", &saveptr);
           if (rate != NULL) {
             control_set_samprate(sp, rate);
+          }
+        }
+        break;
+      case 'X':
+      case 'x':
+        {
+          char *idx = strtok_r(NULL, ":", &saveptr);
+          if (idx != NULL) {
+            control_set_filter2(sp, idx);
           }
         }
         break;
@@ -2586,6 +2596,36 @@ void control_set_samprate(struct session *sp, char *str) {
   pthread_mutex_unlock(&ctl_mutex);
 }
 
+// Send a request to change the FILTER2 blocking index for a session (0 = off,
+// 1-4 = concatenated post-filter sharpness presets normally chosen via
+// presets.conf). The backend rebuilds the second filter when this changes.
+void control_set_filter2(struct session *sp, char *str) {
+  uint8_t cmdbuffer[PKTSIZE];
+  uint8_t *bp = cmdbuffer;
+  if(str == NULL || strlen(str) == 0)
+    return;
+  char *endptr;
+  long const idx = strtol(str,&endptr,10);
+  if(str == endptr || idx < 0 || idx > 4)
+    return;
+  *bp++ = CMD;
+  encode_int(&bp,OUTPUT_SSRC,sp->ssrc);
+  encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME);
+  encode_int(&bp,COMMAND_TAG,arc4random());
+  encode_int(&bp,FILTER2,(int)idx);
+  encode_eol(&bp);
+  int const command_len = bp - cmdbuffer;
+  pthread_mutex_lock(&ctl_mutex);
+  if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
+    fprintf(stderr,"command send error: %s\n",strerror(errno));
+  } else {
+    if (verbose)
+      fprintf(stderr, "%s: requested filter2=%ld for ssrc=%u\n", __FUNCTION__, idx, (unsigned)sp->ssrc);
+    usleep(CONTROL_USLEEP_US);
+  }
+  pthread_mutex_unlock(&ctl_mutex);
+}
+
 void stop_spectrum_stream(struct session *sp) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
@@ -3953,6 +3993,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   encode_int(&bp, OUTPUT_SAMPRATE, Channel.output.samprate);
   encode_int(&bp, OUTPUT_CHANNELS, Channel.output.channels);
   encode_int(&bp, OUTPUT_ENCODING, Channel.output.encoding);
+  encode_int(&bp, FILTER2, Channel.filter2.blocking);
   if (!sp->once) {
     sp->once = true;
     if (description_override)

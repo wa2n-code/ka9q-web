@@ -410,6 +410,8 @@
       let backendOutputChannels = null;
       let backendOutputEncoding = null;
       let backendOutputMetadataSeen = false;
+      // Backend-reported FILTER2 index (0=off, 1-4 = 20/40/60/80ms), set via mode presets
+      let backendFilter2 = null;
 
       function getModeBasedPcmConfig() {
         let modeEl = document.getElementById('mode');
@@ -761,6 +763,58 @@ function applySampleRateForMode(mode) {
       const rate = Number(sel.value);
       sendSampleRate(rate);
       clampFilterEdgesToRate(rate);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach, { once: true });
+  else attach();
+})();
+
+// Filter2 (secondary sharper post-filter) control: dropdown of index values
+// 0 (off) through 4 (80ms), sent as-is to the backend. Reflects the
+// backend-reported current index (backendFilter2), which typically changes
+// as a side effect of mode/preset changes.
+const FILTER2_LABELS = { 0: 'Off', 1: '20ms', 2: '40ms', 3: '60ms', 4: '80ms' };
+// Index we most recently requested; suppresses stale backend echoes from
+// overwriting the tooltip/value before the backend catches up.
+let pendingFilter2 = null;
+
+function updateFilter2UI() {
+  try {
+    const sel = document.getElementById('filter2_select');
+    if (!sel || !Number.isFinite(backendFilter2) || !(backendFilter2 in FILTER2_LABELS)) return;
+    if (pendingFilter2 !== null) {
+      if (backendFilter2 === pendingFilter2) {
+        pendingFilter2 = null;
+      } else {
+        return; // backend hasn't applied the requested index yet; don't show stale value
+      }
+    }
+    if (document.activeElement !== sel) {
+      const idxStr = String(backendFilter2);
+      if (sel.value !== idxStr) sel.value = idxStr;
+      const newTitle = 'Secondary (sharper) post-filter: ' + FILTER2_LABELS[backendFilter2];
+      if (sel.title !== newTitle) sel.title = newTitle;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function sendFilter2(idx) {
+  const i = Number(idx);
+  if (!Number.isFinite(i) || !(i in FILTER2_LABELS)) return;
+  pendingFilter2 = i;
+  try {
+    const sel = document.getElementById('filter2_select');
+    if (sel) sel.title = 'Secondary (sharper) post-filter: ' + FILTER2_LABELS[i];
+  } catch (e) { /* ignore */ }
+  try { sendControl('filter2', 'X:' + i, undefined, true); } catch (e) { console.warn('Failed to send filter2', e); }
+}
+
+(function attachFilter2Control(){
+  function attach() {
+    const sel = document.getElementById('filter2_select');
+    if (!sel) return;
+    sel.addEventListener('change', function() {
+      sendFilter2(sel.value);
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach, { once: true });
@@ -1860,6 +1914,10 @@ function applySampleRateForMode(mode) {
                     break;
                   case 107: // OUTPUT_ENCODING
                     { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendOutputEncoding = _v; backendOutputMetadataSeen = true; }
+                    i += l;
+                    break;
+                  case 44: // FILTER2 (variable-length big-endian uint; 0=off, 1-4 = 20/40/60/80ms)
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); backendFilter2 = _v; try { updateFilter2UI(); } catch (e) {} }
                     i += l;
                     break;
                   default:
