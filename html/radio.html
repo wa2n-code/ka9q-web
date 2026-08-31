@@ -73,6 +73,7 @@
               <div style="display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; width: 100%; margin-bottom: 2px;">
                 <button id="save_memory" title="Save current frequency to selected memory">Save</button>
                 <button id="recall_memory" title="Recall frequency from selected memory">Recall</button>
+                                <button id="immediate_recall_button" aria-pressed="false" title="Enable automatic recall when selecting a channel memory" style="padding:2px 6px; font-size:90%; opacity:0.6">Immed</button>
               </div>
               <!-- Row 5: Delete button -->
 
@@ -394,7 +395,7 @@
         <li>Tick the 'Activate cursor' box to enable cursor: use wheel or click to select cursor location</li>
         <li>Click on the 'Autoscale' button to set amplitude range to fit current spectrum</li>
         <li>The 'Max hold decay' setting adjusts how slowly the max hold trace decays</li>
-        <li>The Channel Memory box saves / restores up to 50 current frequencies and modes with descriptions</li>
+        <li>The Channel Memory box saves / restores up to 100 current frequencies and modes with descriptions</li>
         <li>Space bar toggles audio (when not in full screen mode)</li>
         <li>Check AZC to enable Auto Zoom Center to scroll spectrum background and keep tuned frequency centered</li>
         <li>Use the Edge button to send the filter low and high edge frequencies set in the text boxes next to the mode selector</li>
@@ -419,7 +420,7 @@
    <div style="font-size:small;">
         <b>Current:</b> <span id="version"></span>
         <ul>
-            <li>v2.86: Shift filter edges with left mouse drag, audio sample rate override, kHz rounding button, Filter2 override</li>
+            <li>v2.86: Shift filter edges with left mouse drag, audio sample rate override, kHz rounding button, Filter2 override, 100 channel memory expansion</li>
             <li>v2.85: Add ISB mode</li>
             <li>v2.84: Include lifetime on radiod commands, Start Stop Spectrum stops spectrum network streaming, ssrc's now randomized, IP Blacklist</li>
             <li>v2.83: Extensive websocket improvements, Audio Pan slider persists and loads, remove CHU</li>

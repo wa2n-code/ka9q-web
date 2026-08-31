@@ -4079,6 +4079,8 @@ function checkMaxMinChanged(){  // Save the check boxes for show max and min
   saveSettings();
 }
 
+const MEMORY_SLOT_COUNT = 100;
+
 function setDefaultSettings(writeToStorage = true) {
   if (writeToStorage) console.log("Setting default settings");
   spectrum.averaging = 10;
@@ -4136,9 +4138,9 @@ function setDefaultSettings(writeToStorage = true) {
   var beEl = document.getElementById('ckShowBandEdges');
   if (beEl) beEl.checked = enableBandEdges;
   const MEMORY_KEY = 'frequency_memories';
-  // Use 50 entries to match the memories subsystem expectations
+  // Use the configured number of entries to match the memories subsystem expectations
   // Each memory is an object: { freq: string, desc: string, mode: string }
-  let memories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+  let memories = Array.from({ length: MEMORY_SLOT_COUNT }, (_, i) => ({ freq: "", desc: "", mode: "" }));
   // Initialize memory 0 to WWV10 @ 10,000 kHz AM (10000000 Hz) when creating defaults
   memories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
   if (writeToStorage) {
@@ -4355,7 +4357,7 @@ function loadSettings() {
     let mem = null;
     try { mem = localStorage.getItem(MEMORY_KEY); } catch (e) { mem = null; }
     if (mem === null) {
-      const defaultMemories = Array.from({ length: 50 }, (_, i) => ({ freq: "", desc: "", mode: "" }));
+      const defaultMemories = Array.from({ length: MEMORY_SLOT_COUNT }, (_, i) => ({ freq: "", desc: "", mode: "" }));
       defaultMemories[0] = { freq: "10000000", desc: "WWV 10MHz", mode: "am" };
       try { localStorage.setItem(MEMORY_KEY, JSON.stringify(defaultMemories)); frequencyMemoriesInitialized = true; } catch (e) { /* ignore */ }
     }
@@ -4378,7 +4380,7 @@ function diagnosticCheckSettings(showAlert = true) {
   const missing = expected.filter(k => {
     try { return localStorage.getItem(k) === null; } catch (e) { return true; }
   });
-  // Special validation for frequency_memories: ensure it's a JSON array of length >=50
+  // Special validation for frequency_memories: ensure it's a JSON array of the configured length
   try {
     const memRaw = localStorage.getItem('frequency_memories');
     let memInvalid = false;
@@ -4387,7 +4389,7 @@ function diagnosticCheckSettings(showAlert = true) {
     } else {
       try {
         const memParsed = JSON.parse(memRaw);
-        if (!Array.isArray(memParsed) || memParsed.length < 50) memInvalid = true;
+        if (!Array.isArray(memParsed) || memParsed.length < MEMORY_SLOT_COUNT) memInvalid = true;
         else {
           // Check memory 0 has expected default values (or at least populated)
           const m0 = memParsed[0];
@@ -4586,7 +4588,7 @@ function setShowBandEdges(checked) {
 (function() {
     const MEMORY_KEY = 'frequency_memories';
     // Each memory is now an object: { freq: string, desc: string, mode: string }
-    let memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
+  let memories = Array(MEMORY_SLOT_COUNT).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
 
     function loadMemories() {
         const saved = localStorage.getItem(MEMORY_KEY);
@@ -4595,7 +4597,7 @@ function setShowBandEdges(checked) {
           const arr = JSON.parse(saved);
           // Backward compatibility: upgrade from legacy string-array or
           // mixed-object array to a normalized object array with `freq` in Hz.
-          if (Array.isArray(arr) && arr.length === 50) {
+          if (Array.isArray(arr) && arr.length === MEMORY_SLOT_COUNT) {
             // Helper to normalize a numeric-like value to Hz string.
             const normalizeToHz = (val) => {
               if (val === null || val === undefined || val === '') return '';
@@ -4619,10 +4621,10 @@ function setShowBandEdges(checked) {
             try { localStorage.setItem(MEMORY_KEY, JSON.stringify(memories)); } catch (e) {}
           }
             } catch (e) {
-                memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
+                memories = Array(MEMORY_SLOT_COUNT).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
             }
         } else {
-            memories = Array(50).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
+            memories = Array(MEMORY_SLOT_COUNT).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
         }
         window.memories = memories;
     }
@@ -4635,9 +4637,9 @@ function setShowBandEdges(checked) {
     function updateDropdownLabels() {
         const sel = document.getElementById('memory_select');
         if (!sel) return;
-        if (sel.options.length !== 50) {
+        if (sel.options.length !== MEMORY_SLOT_COUNT) {
             sel.innerHTML = '';
-            for (let i = 0; i < 50; i++) {
+          for (let i = 0; i < MEMORY_SLOT_COUNT; i++) {
                 const opt = document.createElement('option');
                 opt.value = i;
                 opt.textContent = `${i+1}: ---`;
@@ -4646,7 +4648,7 @@ function setShowBandEdges(checked) {
         }
         // Determine the max width for frequency (e.g., 13 chars for extra padding)
         const PAD_WIDTH = 28;
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < MEMORY_SLOT_COUNT; i++) {
           const m = memories[i];
           let freqStr = '---';
           if (m && m.freq) {
@@ -5138,17 +5140,32 @@ window.addEventListener('DOMContentLoaded', function() {
             var descBox = document.getElementById('memory_desc');
             var saveBtn = document.getElementById('save_memory');
             var recallBtn = document.getElementById('recall_memory');
+            var immediateRecallBtn = document.getElementById('immediate_recall_button');
             var deleteBtn = document.getElementById('delete_memory');
             var exportBtn = document.getElementById('export_memories');
             var importBtn = document.getElementById('import_memories_btn');
             var importInput = document.getElementById('import_memories');
-            if (!sel || !descBox || !saveBtn || !recallBtn || !deleteBtn || !exportBtn || !importBtn || !importInput) {
+            if (!sel || !descBox || !saveBtn || !recallBtn || !immediateRecallBtn || !deleteBtn || !exportBtn || !importBtn || !importInput) {
                 console.error('One or more memory UI elements are missing in HTML.');
                 return;
             }
             window.loadMemories();
             window.updateDropdownLabels();
-            sel.onchange = function() { window.loadMemories(); window.updateDropdownLabels(); descBox.value = window.memories[parseInt(sel.value, 10)].desc || ''; };
+            var immediateRecallEnabled = false;
+            immediateRecallBtn.onclick = function() {
+              immediateRecallEnabled = !immediateRecallEnabled;
+              immediateRecallBtn.setAttribute('aria-pressed', String(immediateRecallEnabled));
+              immediateRecallBtn.style.opacity = immediateRecallEnabled ? '' : '0.6';
+              immediateRecallBtn.title = immediateRecallEnabled
+                ? 'Automatically recall the selected channel memory'
+                : 'Enable automatic recall when selecting a channel memory';
+            };
+            sel.onchange = function() {
+              window.loadMemories();
+              window.updateDropdownLabels();
+              descBox.value = window.memories[parseInt(sel.value, 10)].desc || '';
+              if (immediateRecallEnabled) recallBtn.click();
+            };
             descBox.oninput = function() {
                 window.loadMemories();
                 var idx = parseInt(sel.value, 10);
@@ -5273,14 +5290,14 @@ window.addEventListener('DOMContentLoaded', function() {
 
                     try {
                         var arr = JSON.parse(evt.target.result);
-                        if (Array.isArray(arr) && arr.length === 50) {
-                            var newMemories;
+                        if (Array.isArray(arr) && (arr.length === 50 || arr.length === MEMORY_SLOT_COUNT)) {
+                          var newMemories = Array(MEMORY_SLOT_COUNT).fill(null).map(() => ({ freq: '', desc: '', mode: '' }));
                             if (typeof arr[0] === 'string') {
-                                newMemories = arr.map(f => ({ freq: f, desc: '', mode: '' }));
+                            arr.forEach((f, i) => { newMemories[i] = { freq: f, desc: '', mode: '' }; });
                             } else {
-                                newMemories = arr.map(m => ({ freq: m.freq || '', desc: m.desc || '', mode: m.mode || '' }));
+                            arr.forEach((m, i) => { newMemories[i] = { freq: m.freq || '', desc: m.desc || '', mode: m.mode || '' }; });
                             }
-                            for (let i = 0; i < 50; i++) {
+                          for (let i = 0; i < MEMORY_SLOT_COUNT; i++) {
                                 window.memories[i] = newMemories[i];
                             }
                             window.saveMemories();
