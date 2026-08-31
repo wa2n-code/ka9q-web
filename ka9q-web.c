@@ -116,7 +116,8 @@ pthread_t lifetime_refresh_task;
 pthread_mutex_t output_dest_socket_mutex;
 pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
-#define CONTROL_USLEEP_US 10000 // minimum of 20 ms observed for backend to process a command and update status, so 30 ms is a safe default
+#define CONTROL_USLEEP_US 20000 // minimum observed for backend to process a command and update status
+#define FILTER_EDGE_MIN_INTERVAL_MS 250
 
 struct session {
   bool spectrum_active;
@@ -152,6 +153,7 @@ struct session {
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+  unsigned long last_filter_edge_command_ms;
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
   unsigned long last_spectrum_recv_ms; /* monotonic ms when last spectrum TLV received */
@@ -198,6 +200,8 @@ extern void control_set_window_type(struct session *sp, char *type_str, char *sh
 extern void control_set_encoding(struct session *sp, bool use_opus);
 extern void control_set_samprate(struct session *sp, char *str);
 extern void control_set_filter2(struct session *sp, char *str);
+static void control_set_filter_edges_throttled(struct session *sp, char *low_str,
+                                                char *high_str, bool force);
 int init_demod(struct channel *channel);
 void control_get_powers(struct session *sp,double frequency,int bins,double bin_bw);
 /* New: request powers with explicit demod type (fallback to SPECT2_DEMOD if needed) */
@@ -790,12 +794,20 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
         }
         break;
       case 'e':
+        {
+          char *low = strtok_r(NULL, ":", &saveptr);
+          char *high = strtok_r(NULL, ":", &saveptr);
+          if (low != NULL && high != NULL) {
+            control_set_filter_edges_throttled(sp, low, high, false);
+          }
+        }
+        break;
       case 'E':
         {
           char *low = strtok_r(NULL, ":", &saveptr);
           char *high = strtok_r(NULL, ":", &saveptr);
           if (low != NULL && high != NULL) {
-            control_set_filter_edges(sp, low, high);
+            control_set_filter_edges_throttled(sp, low, high, true);
           }
         }
         break;
@@ -1021,6 +1033,7 @@ void add_session(struct session *sp) {
   sp->last_spectrum_restart_ms = 0;
   sp->write_in_progress = false;
   sp->last_write_start_ms = 0;
+  sp->last_filter_edge_command_ms = 0;
 
   pthread_mutex_lock(&session_mutex);
   if(sessions==NULL) {
@@ -2327,6 +2340,18 @@ void control_set_shift(struct session *sp,char *str) {
 /* Send filter edge settings (low and high) to the control socket for this session.
    low_str and high_str are strings containing values in Hz (or kHz?) - follow same units as client.
 */
+static void control_set_filter_edges_throttled(struct session *sp, char *low_str,
+                                                char *high_str, bool force) {
+  unsigned long const now = now_ms();
+
+  if (!force && sp->last_filter_edge_command_ms != 0
+      && now - sp->last_filter_edge_command_ms < FILTER_EDGE_MIN_INTERVAL_MS)
+    return;
+
+  sp->last_filter_edge_command_ms = now;
+  control_set_filter_edges(sp, low_str, high_str);
+}
+
 void control_set_filter_edges(struct session *sp, char *low_str, char *high_str) {
   uint8_t cmdbuffer[PKTSIZE];
   uint8_t *bp = cmdbuffer;
@@ -2353,8 +2378,9 @@ void control_set_filter_edges(struct session *sp, char *low_str, char *high_str)
     unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
     fprintf(stderr, "%s: +%lums: sending filter edges low=%f high=%f\n", __FUNCTION__, elapsed_ms, lowf, highf);
   }
-    if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
+  if (send(Ctl_fd, cmdbuffer, command_len, 0) != command_len) {
     fprintf(stderr, "%s: command send error: %s\n", __FUNCTION__, strerror(errno));
+    usleep(CONTROL_USLEEP_US);
   } else {
     //if (verbose) fprintf(stderr, "%s: send OK\n", __FUNCTION__);
     usleep(CONTROL_USLEEP_US);
@@ -2588,6 +2614,7 @@ void control_set_samprate(struct session *sp, char *str) {
   pthread_mutex_lock(&ctl_mutex);
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
     fprintf(stderr,"command send error: %s\n",strerror(errno));
+    usleep(CONTROL_USLEEP_US);
   } else {
     if (verbose)
       fprintf(stderr, "%s: requested samprate %ld for ssrc=%u\n", __FUNCTION__, rate, (unsigned)sp->ssrc);
@@ -3273,8 +3300,11 @@ void *ctrl_thread(void *arg)
   while (1) {
     uint32_t ssrc = 0;
     ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
-    if (rx_length <= 2)
+    if (rx_length <= 2) {
+      if (rx_length < 0)
+        usleep(10000);
       continue;
+    }
     if (verbose)
       fprintf(stderr, "ctrl_thread: recv_status_packet len=%zd ssrc=%u\n", rx_length, ssrc);
 

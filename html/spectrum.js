@@ -263,7 +263,7 @@ function Spectrum(id, options) {
 
     this.canvas.addEventListener('mousedown', function(e) {
         if (e.button === 0) { // Left mouse button: start possible click or drag, or filter-edge drag
-            const edgePixels = spectrum.getFilterEdgeScreenX();
+            const edgePixels = window.filterEdgeDragEnabled ? spectrum.getFilterEdgeScreenX() : null;
             if (edgePixels) {
                 const distLow = Math.abs(e.offsetX - edgePixels.xLow);
                 const distHigh = Math.abs(e.offsetX - edgePixels.xHigh);
@@ -301,7 +301,7 @@ function Spectrum(id, options) {
     // Hover feedback: show a resize cursor when over a filter edge (not while dragging)
     this.canvas.addEventListener('mousemove', function(e) {
         if (leftDown || isDragging || spectrum._filterDragEdge) return;
-        const edgePixels = spectrum.getFilterEdgeScreenX();
+        const edgePixels = window.filterEdgeDragEnabled ? spectrum.getFilterEdgeScreenX() : null;
         if (!edgePixels) { spectrum.canvas.style.cursor = ""; return; }
         const distLow = Math.abs(e.offsetX - edgePixels.xLow);
         const distHigh = Math.abs(e.offsetX - edgePixels.xHigh);
@@ -344,7 +344,7 @@ function Spectrum(id, options) {
                 const now = Date.now();
                 if ((now - lastFilterEdgeSend) >= filterEdgeSendInterval) {
                     lastFilterEdgeSend = now;
-                    if (typeof sendFilterEdges === 'function') sendFilterEdges();
+                    if (typeof sendFilterEdges === 'function') sendFilterEdges(false);
                 }
             } catch (err) { console.warn('Failed to send filter edges during drag', err); }
             if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
@@ -459,7 +459,7 @@ function Spectrum(id, options) {
     window.addEventListener('mouseup', function(e) {
         // Finalize a filter-edge drag: send final edges and bail out before quick-click/pan logic
         if (spectrum._filterDragEdge && e.button === 0) {
-            try { if (typeof sendFilterEdges === 'function') sendFilterEdges(); } catch (err) { console.warn('Failed to send final filter edges', err); }
+            try { if (typeof sendFilterEdges === 'function') sendFilterEdges(true); } catch (err) { console.warn('Failed to send final filter edges', err); }
             spectrum._filterDragEdge = null;
             spectrum.canvas.style.cursor = "";
             return;

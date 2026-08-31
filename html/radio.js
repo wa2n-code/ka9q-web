@@ -69,6 +69,17 @@
       // a mode change. Previously adjustable; removed in favor of single mode send.
       // pending filter edges to send once websocket opens
       let pendingFilterEdges = null;
+      window.filterEdgeDragEnabled = false;
+      window.toggleFilterEdgeDrag = function toggleFilterEdgeDrag() {
+        window.filterEdgeDragEnabled = !window.filterEdgeDragEnabled;
+        const button = document.getElementById('filter_drag_button');
+        if (!button) return;
+        button.setAttribute('aria-pressed', String(window.filterEdgeDragEnabled));
+        button.style.opacity = window.filterEdgeDragEnabled ? '' : '0.6';
+        button.title = window.filterEdgeDragEnabled
+          ? 'Filter edge dragging is enabled'
+          : 'Enable Drag before dragging a filter edge on the spectrum';
+      };
       // expected ack tracking for last sent edges
       let expectedFilterAck = null; // { low, high, time, retries }
       const EXPECTED_ACK_MAX_RETRIES = 3;
@@ -1257,7 +1268,7 @@ function sendFilter2(idx) {
       }
 
       // Send filter edge settings (low and high) to the server via websocket
-      function sendFilterEdges() {
+      function sendFilterEdges(force) {
         const lowEl = document.getElementById('filterLowInput');
         const highEl = document.getElementById('filterHighInput');
         if (!lowEl || !highEl) return;
@@ -1272,7 +1283,7 @@ function sendFilter2(idx) {
             // Normalize to integers to ensure consistent payload formatting
             const lowInt = Math.round(low);
             const highInt = Math.round(high);
-            const payload = 'e:' + lowInt.toString() + ':' + highInt.toString();
+            const payload = (force === false ? 'e:' : 'E:') + lowInt.toString() + ':' + highInt.toString();
             // Throttled send to avoid overrunning backend
             sendControl('edges', payload);
             // update debug overlay state (record attempt)
