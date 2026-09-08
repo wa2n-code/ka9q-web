@@ -148,7 +148,6 @@ struct session {
   double bins_min_db;
   double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
-  int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
   double spectrum_base;
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
@@ -3787,20 +3786,20 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         const double SHIFT_CLEAR_EPS_HZ = 0.5;
         unsigned long now = now_ms();
         if (!isnan(old_shift) && fabs(old_shift) > SHIFT_CLEAR_EPS_HZ && fabs(new_shift) <= SHIFT_CLEAR_EPS_HZ) {
-          /* Ensure the backend preset is no longer CW */
-          if (!(strncasecmp(Channel.preset, "cwu", 3) == 0 || strncasecmp(Channel.preset, "cwl", 3) == 0)) {
-            /* reasonable time window: 5 seconds */
-            if (now - sp->left_cw_time_ms <= 5000UL) {
-              if (verbose)
-                fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to recent CW->non-CW mode change (shift=%.3f Hz)\n",
-                        sp->ssrc, Channel.tune.freq * 0.001, new_shift);
-              sp->frequency = (uint32_t)lround(Channel.tune.freq);
-              char freq_msg[64];
-              snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-              send_ws_text_to_session(sp, freq_msg);
-              *last_sent_backend_frequency = Channel.tune.freq;
-              sp->left_cw_pending = 0;
-            }
+          /* radiod (nopreset branch) no longer echoes PRESET in status, so we can't
+             re-verify against the backend; sp->requested_preset (set locally when
+             the client's mode command was sent) is already known non-CW here. */
+          /* reasonable time window: 5 seconds */
+          if (now - sp->left_cw_time_ms <= 5000UL) {
+            if (verbose)
+              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to recent CW->non-CW mode change (shift=%.3f Hz)\n",
+                      sp->ssrc, Channel.tune.freq * 0.001, new_shift);
+            sp->frequency = (uint32_t)lround(Channel.tune.freq);
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+            send_ws_text_to_session(sp, freq_msg);
+            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->left_cw_pending = 0;
           }
         }
       }
@@ -3842,63 +3841,11 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
     sp->noise_density_audio = n0;
 
-  /* Handle preset mismatch / adoption */
-  if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
-    /* Decide whether to adopt a backend-changed preset (because no recent
-       local client command exists) or to retry our requested preset. */
-    const int MAX_PRESET_MISMATCH = 5;
-    const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
-    unsigned long now = now_ms();
-    bool client_recent = ((sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS))
-               || ((sp->reattach_time_ms != 0) && (now - sp->reattach_time_ms <= CLIENT_CMD_WINDOW_MS));
-
-    if (!client_recent) {
-      /* No recent local client command: adopt backend-reported preset and notify client. */
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s (no recent local command)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset);
-      }
-      if (debug_send) {
-        fprintf(stderr, "%s: preset_adopt: SSRC %u adopting backend preset '%s' -> sending M_FORCE to client\n", __FUNCTION__, sp->ssrc, Channel.preset);
-      }
-      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
-      sp->preset_mismatch_count = 0;
-      sp->last_client_command_ms = 0;
-      /* Notify this client so its UI can update (force update) */
-      char pm[64];
-      snprintf(pm, sizeof(pm), "M_FORCE:%s", sp->requested_preset);
-      send_ws_text_to_session(sp, pm);
-    } else {
-      /* Recent local command exists; track mismatches and resend after threshold. */
-      sp->preset_mismatch_count++;
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
-      }
-      if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-        if (verbose && debug_send) {
-          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-          fprintf(stderr, "%s: +%lums: SSRC %u: resending requested preset %s after %d mismatches\n",
-                  __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, MAX_PRESET_MISMATCH);
-        }
-        control_set_mode(sp, sp->requested_preset);
-        sp->preset_mismatch_count = 0;
-      }
-    }
-  } else {
-    /* Preset matches; if we previously recorded mismatches, log that they
-       have now been satisfied before clearing the counter. */
-    if (sp->preset_mismatch_count != 0) {
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-      }
-    }
-    sp->preset_mismatch_count = 0;
-  }
+  /* Preset mismatch/adoption against Channel.preset removed: radiod's nopreset
+     branch no longer echoes PRESET in status packets (write-only), so
+     Channel.preset is always empty and can't be used to validate or adopt
+     the session's mode. sp->requested_preset (updated locally in
+     control_set_mode()) is now the sole source of truth for the client UI. */
 
   /* Backend frequency change -> notify client (tolerant comparison)
      Use a small tolerance to prevent tiny floating-point differences from
@@ -3942,7 +3889,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
          per-session `shift`, adopt immediately regardless of
          `adoptOnParameterMismatch`. This avoids spurious mismatch churn
          when a CW preset adjusts the carrier by the audio shift amount. */
-      if ((strncmp(Channel.preset, "cwu", 3) == 0 || strncmp(Channel.preset, "cwl", 3) == 0)
+      if ((strncasecmp(sp->requested_preset, "cwu", 3) == 0 || strncasecmp(sp->requested_preset, "cwl", 3) == 0)
           && !isnan(sp->shift)
           && fabs(diff - fabs(sp->shift)) <= FREQ_EPS_HZ) {
         if (verbose && debug_send) {
