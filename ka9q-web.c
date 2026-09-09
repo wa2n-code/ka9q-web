@@ -118,6 +118,11 @@ pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
 #define CONTROL_USLEEP_US 20000 // minimum observed for backend to process a command and update status
 #define FILTER_EDGE_MIN_INTERVAL_MS 250
+#define MODE_COMMAND_TIMEOUT_MS 500
+/* Allow a few more status-poll gaps before declaring the command lost.
+ * The backend echoes COMMAND_TAG only after it has processed a mode update,
+ * and transient network jitter can delay that status update. */
+#define MODE_COMMAND_MAX_RETRIES 5
 
 struct session {
   bool spectrum_active;
@@ -145,6 +150,11 @@ struct session {
   double if_power;
   int zoom_index;
   char requested_preset[32];
+  char pending_mode[32];
+  uint32_t pending_mode_tag;
+  unsigned long mode_command_sent_ms;
+  int mode_command_retries;
+  bool mode_command_pending;
   double bins_min_db;
   double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
@@ -152,6 +162,7 @@ struct session {
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+  unsigned long poll_not_before_ms; /* hold status polls briefly after a mode command */
   unsigned long last_filter_edge_command_ms;
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
@@ -591,6 +602,7 @@ int debugSSRC = 0;
 int debug_ws_ping = 0; /* gate for ws_ping verbose prints */
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 0;
+int debug_mode = 0; /* focused mode command confirmation/retry logging */
 int debug_send_poll = 0;
 /* Low-volume global send-success counter for temporary debugging (removed) */
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
@@ -912,8 +924,14 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           }
         }
         sp->last_client_command_ms = now_ms();
+        {
+          unsigned long poll_interval_ms = (sp->spectrum_poll_us + 999U) / 1000U;
+          if (poll_interval_ms == 0)
+            poll_interval_ms = 1;
+          sp->poll_not_before_ms = now_ms() + poll_interval_ms;
+        }
+        sp->mode_command_retries = 0;
         control_set_mode(sp,&tmp[2]);
-        control_poll(sp);
         break;
       case 'T':
       case 't':
@@ -1490,25 +1508,9 @@ int main(int argc,char **argv) {
       debug_ws_ping = 1;
       fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
     }
-  }
-
-  /* Allow enabling extra debug via environment variables to avoid recompiles:
-     KA9Q_DEBUGSSRC=1  -> enable SSRC/session debug prints
-     KA9Q_DEBUGSEND=1  -> enable send-path debug prints
-  */
-  {
-    char *e;
-    if ((e = getenv("KA9Q_DEBUGSSRC")) && atoi(e)) {
-      debugSSRC = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUGSSRC enabled\n");
-    }
-    if ((e = getenv("KA9Q_DEBUGSEND")) && atoi(e)) {
-      debug_send = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUGSEND enabled\n");
-    }
-    if ((e = getenv("KA9Q_DEBUG_WSPING")) && atoi(e)) {
-      debug_ws_ping = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
+    if ((e = getenv("KA9Q_DEBUGMODE")) && atoi(e)) {
+      debug_mode = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUGMODE enabled\n");
     }
   }
 
@@ -2523,10 +2525,11 @@ void control_set_mode(struct session *sp,char *str) {
   uint8_t *bp = cmdbuffer;
 
   if(strlen(str) > 0) {
+    uint32_t const tag = arc4random();
     *bp++ = CMD; // Command
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
@@ -2534,9 +2537,14 @@ void control_set_mode(struct session *sp,char *str) {
     strlcpy(sp->requested_preset,str,sizeof(sp->requested_preset));
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sp->mode_command_pending = false;
     } else {
+      strlcpy(sp->pending_mode, str, sizeof(sp->pending_mode));
+      sp->pending_mode_tag = tag;
+      sp->mode_command_sent_ms = now_ms();
+      sp->mode_command_pending = true;
       unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-      if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending PRESET='%s' for ssrc=%u\n", __FUNCTION__, elapsed_ms, str, (unsigned)sp->ssrc);
+      if (debug_mode) fprintf(stderr, "%s: +%lums: sending PRESET='%s' for ssrc=%u\n", __FUNCTION__, elapsed_ms, str, (unsigned)sp->ssrc);
       usleep(CONTROL_USLEEP_US);
       //if (verbose && debug_send) fprintf(stderr, "%s: +%lums: send OK\n", __FUNCTION__, elapsed_ms);
     }
@@ -2788,6 +2796,8 @@ static void control_poll_ssrc(uint32_t ssrc) {
 
 void control_poll(struct session *sp) {
   if (sp == NULL) return;
+  if (sp->poll_not_before_ms != 0 && now_ms() < sp->poll_not_before_ms)
+    return;
   control_poll_ssrc(sp->ssrc);
 }
 
@@ -2827,7 +2837,10 @@ static void *lifetime_refresh_thread(void *arg) {
   const useconds_t loop_sleep_us = 1000000; /* 1s cadence */
   unsigned elapsed_ms = 0;
   for (;;) {
-    uint32_t ssrcs[MAX_SESSIONS];
+    struct poll_target {
+      uint32_t ssrc;
+      unsigned long poll_not_before_ms;
+    } targets[MAX_SESSIONS];
     int nssrc = 0;
     usleep(loop_sleep_us);
     pthread_mutex_lock(&session_mutex);
@@ -2835,7 +2848,9 @@ static void *lifetime_refresh_thread(void *arg) {
     while (sp != NULL) {
       // Snapshot SSRCs for active websocket sessions; do control sends after unlocking session_mutex.
       if (sp->ws != NULL && nssrc < MAX_SESSIONS) {
-        ssrcs[nssrc++] = sp->ssrc;
+        targets[nssrc].ssrc = sp->ssrc;
+        targets[nssrc].poll_not_before_ms = sp->poll_not_before_ms;
+        nssrc++;
       }
       sp = sp->next;
     }
@@ -2844,7 +2859,8 @@ static void *lifetime_refresh_thread(void *arg) {
     for (int i = 0; i < nssrc; i++) {
       /* Keep status flowing even when spectrum thread is paused/stopped so UI
          informational fields (A/D, N0, RX rate, uptime, etc) continue to update. */
-      control_poll_ssrc(ssrcs[i]);
+      if (targets[i].poll_not_before_ms == 0 || now_ms() >= targets[i].poll_not_before_ms)
+        control_poll_ssrc(targets[i].ssrc);
       if (elapsed_ms >= refresh_interval_ms) {
         /* Also refresh spectrum SSRC lifetime when client has requested spectrum.
            This keeps the +1 channel from expiring during long-running sessions. */
@@ -2852,7 +2868,7 @@ static void *lifetime_refresh_thread(void *arg) {
         struct session *s = sessions;
         bool refresh_spectrum = false;
         while (s != NULL) {
-          if (s->ssrc == ssrcs[i]) {
+          if (s->ssrc == targets[i].ssrc) {
             refresh_spectrum = s->spectrum_requested_by_client;
             break;
           }
@@ -2860,11 +2876,11 @@ static void *lifetime_refresh_thread(void *arg) {
         }
         pthread_mutex_unlock(&session_mutex);
         if (refresh_spectrum) {
-          control_refresh_lifetime_ssrc(ssrcs[i] + 1);
+          control_refresh_lifetime_ssrc(targets[i].ssrc + 1);
         }
       }
       if (elapsed_ms >= refresh_interval_ms) {
-        control_refresh_lifetime_ssrc(ssrcs[i]);
+        control_refresh_lifetime_ssrc(targets[i].ssrc);
       }
     }
 
@@ -3760,6 +3776,32 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
   bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+
+  /* PRESET is write-only on the nopreset backend. Use the echoed command tag
+     to confirm mode changes and retry a lost mode command a bounded number of times. */
+  if (sp->mode_command_pending) {
+    if (Channel.status.tag == sp->pending_mode_tag) {
+      sp->mode_command_pending = false;
+      sp->mode_command_retries = 0;
+      if (debug_mode)
+        fprintf(stderr, "SSRC %u: mode command tag %u confirmed\n",
+                sp->ssrc, sp->pending_mode_tag);
+    } else if (now_ms() - sp->mode_command_sent_ms >= MODE_COMMAND_TIMEOUT_MS) {
+      if (sp->mode_command_retries < MODE_COMMAND_MAX_RETRIES) {
+        sp->mode_command_retries++;
+        if (debug_mode)
+          fprintf(stderr, "SSRC %u: mode command tag %u not observed, retry %d/%d\n",
+                  sp->ssrc, sp->pending_mode_tag, sp->mode_command_retries,
+                  MODE_COMMAND_MAX_RETRIES);
+        control_set_mode(sp, sp->pending_mode);
+      } else {
+        sp->mode_command_pending = false;
+        if (debug_mode)
+          fprintf(stderr, "SSRC %u: mode command retries exhausted for '%s'\n",
+                  sp->ssrc, sp->pending_mode);
+      }
+    }
+  }
 
   if (have_shift) {
     double new_shift = Channel.tune.shift;
