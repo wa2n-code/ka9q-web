@@ -119,6 +119,8 @@ pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
 #define CONTROL_USLEEP_US 20000 // minimum observed for backend to process a command and update status
 #define FILTER_EDGE_MIN_INTERVAL_MS 250
+#define TAG_COMMAND_TIMEOUT_MS 100
+#define FREQUENCY_COMMAND_MAX_RETRIES 3
 #define MODE_COMMAND_TIMEOUT_MS 500
 /* Allow a few more status-poll gaps before declaring the command lost.
  * The backend echoes COMMAND_TAG only after it has processed a mode update,
@@ -156,6 +158,11 @@ struct session {
   unsigned long mode_command_sent_ms;
   int mode_command_retries;
   bool mode_command_pending;
+  uint32_t pending_frequency_tag;
+  unsigned long frequency_command_sent_ms;
+  int frequency_command_retries;
+  bool frequency_command_pending;
+  bool frequency_command_retrying;
   double bins_min_db;
   double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
@@ -605,6 +612,7 @@ int debug_ws_ping = 0; /* gate for ws_ping verbose prints */
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 0;
 int debug_mode = 0; /* focused mode command confirmation/retry logging */
+int debug_tag = 0; /* focused command tag confirmation/retry logging */
 int debug_send_poll = 0;
 /* Low-volume global send-success counter for temporary debugging (removed) */
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
@@ -1514,6 +1522,10 @@ int main(int argc,char **argv) {
       debug_mode = 1;
       fprintf(stderr, "Debug: KA9Q_DEBUGMODE enabled\n");
     }
+    if ((e = getenv("KA9Q_DEBUGTAG")) && atoi(e)) {
+      debug_tag = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUGTAG enabled\n");
+    }
   }
 
   fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
@@ -2289,20 +2301,27 @@ void control_set_frequency(struct session *sp,char *str) {
   double f;
 
   if(strlen(str) > 0){
+    uint32_t const tag = arc4random();
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
     /* Round to nearest Hz when storing in integer session field */
     sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sp->frequency_command_pending = false;
     } else {
+      if (!sp->frequency_command_retrying)
+        sp->frequency_command_retries = 0;
+      sp->pending_frequency_tag = tag;
+      sp->frequency_command_sent_ms = now_ms();
+      sp->frequency_command_pending = true;
       unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
       if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending RADIO_FREQUENCY=%.0f Hz for ssrc=%u\n", __FUNCTION__, elapsed_ms, f, (unsigned)sp->ssrc);
       /* allow backend a short time to process this command before sending another */
@@ -3949,22 +3968,49 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     if (tag_cache_seen(sp->pending_mode_tag, sp->mode_command_sent_ms)) {
       sp->mode_command_pending = false;
       sp->mode_command_retries = 0;
-      if (debug_mode)
+      if (debug_mode || debug_tag)
         fprintf(stderr, "SSRC %u: mode command tag %u confirmed\n",
                 sp->ssrc, sp->pending_mode_tag);
     } else if (now_ms() - sp->mode_command_sent_ms >= MODE_COMMAND_TIMEOUT_MS) {
       if (sp->mode_command_retries < MODE_COMMAND_MAX_RETRIES) {
         sp->mode_command_retries++;
-        if (debug_mode)
+        if (debug_mode || debug_tag)
           fprintf(stderr, "SSRC %u: mode command tag %u not observed, retry %d/%d\n",
                   sp->ssrc, sp->pending_mode_tag, sp->mode_command_retries,
                   MODE_COMMAND_MAX_RETRIES);
         control_set_mode(sp, sp->pending_mode);
       } else {
         sp->mode_command_pending = false;
-        if (debug_mode)
+        if (debug_mode || debug_tag)
           fprintf(stderr, "SSRC %u: mode command retries exhausted for '%s'\n",
                   sp->ssrc, sp->pending_mode);
+      }
+    }
+  }
+
+  if (sp->frequency_command_pending) {
+    if (tag_cache_seen(sp->pending_frequency_tag, sp->frequency_command_sent_ms)) {
+      sp->frequency_command_pending = false;
+      sp->frequency_command_retries = 0;
+      if (debug_tag)
+        fprintf(stderr, "SSRC %u: frequency command tag %u confirmed\n",
+                sp->ssrc, sp->pending_frequency_tag);
+    } else if (now_ms() - sp->frequency_command_sent_ms >= TAG_COMMAND_TIMEOUT_MS) {
+      if (sp->frequency_command_retries < FREQUENCY_COMMAND_MAX_RETRIES) {
+        char freq_msg[64];
+        sp->frequency_command_retries++;
+        if (debug_tag)
+          fprintf(stderr, "SSRC %u: frequency command tag %u not observed, retry %d/%d\n",
+                  sp->ssrc, sp->pending_frequency_tag, sp->frequency_command_retries,
+                  FREQUENCY_COMMAND_MAX_RETRIES);
+        snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+        sp->frequency_command_retrying = true;
+        control_set_frequency(sp, freq_msg);
+        sp->frequency_command_retrying = false;
+      } else {
+        sp->frequency_command_pending = false;
+        if (debug_tag)
+          fprintf(stderr, "SSRC %u: frequency command retries exhausted\n", sp->ssrc);
       }
     }
   }
@@ -4139,7 +4185,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
               __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
           }
-          if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+          if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH && !sp->frequency_command_pending) {
             /* After repeated mismatches reassert our requested frequency by
                resending it to the backend rather than adopting the polled value. */
             if (verbose && debug_send) {
