@@ -108,6 +108,7 @@ double current_backend_frequency = 0.0;
 int Ctl_fd = -1, Input_fd = -1, Status_fd = -1;
 pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
+pthread_t status_reader_task;
 pthread_t audio_task;
 pthread_t ws_ping_task;
 pthread_t ws_watchdog_task;
@@ -222,6 +223,7 @@ void control_poll(struct session *sp);
 static void *lifetime_refresh_thread(void *arg);
 void *spectrum_thread(void *arg);
 void *ctrl_thread(void *arg);
+static void *status_reader_thread(void *arg);
 
 /* websocket send helpers (forward declarations) */
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size);
@@ -2160,6 +2162,14 @@ int init_connections(const char *multicast_group) {
     pthread_setname_np(ctrl_task,buff);
   }
 
+  if(pthread_create(&status_reader_task,NULL,status_reader_thread,NULL) == -1){
+    perror("pthread_create: status_reader_thread");
+  } else {
+    char buff[16];
+    snprintf(buff,16,"status_reader");
+    pthread_setname_np(status_reader_task,buff);
+  }
+
   if(pthread_create(&audio_task,NULL,audio_thread,NULL) == -1){
     perror("pthread_create");
   } else {
@@ -3269,6 +3279,104 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
 static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
 static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
+static bool tag_cache_seen(uint32_t tag, unsigned long since_ms);
+
+/* ---- BEGIN TAG CACHE / STATUS QUEUE ----
+ * radiod always echoes COMMAND_TAG back in the status update generated for
+ * every command it processes (even a no-op command). The confirmation logic
+ * previously compared the tag inline while decoding each status packet in
+ * ctrl_thread, but ctrl_thread also does the heavier per-session work (session
+ * lookups, websocket sends, frequency-mismatch handling). If that work is slow,
+ * recvfrom() is not called often enough and the kernel can drop status packets
+ * before we ever see them -- including the one carrying our confirming tag.
+ *
+ * To fix this, a dedicated reader thread does nothing but recvfrom() and a
+ * cheap tag-only scan of each packet, so it can keep up with the socket
+ * regardless of how busy the rest of the pipeline is. Every tag it sees is
+ * mirrored into a small ring buffer immediately. The full packet is then
+ * handed off to ctrl_thread (now a consumer) for the existing processing. */
+#define TAG_CACHE_SIZE 128
+struct tag_cache_entry {
+  uint32_t tag;
+  unsigned long seen_ms;
+  bool valid;
+};
+static struct tag_cache_entry tag_cache[TAG_CACHE_SIZE];
+static int tag_cache_idx = 0;
+static pthread_mutex_t tag_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void tag_cache_add(uint32_t tag, unsigned long seen_ms) {
+  pthread_mutex_lock(&tag_cache_mutex);
+  tag_cache[tag_cache_idx].tag = tag;
+  tag_cache[tag_cache_idx].seen_ms = seen_ms;
+  tag_cache[tag_cache_idx].valid = true;
+  tag_cache_idx = (tag_cache_idx + 1) % TAG_CACHE_SIZE;
+  pthread_mutex_unlock(&tag_cache_mutex);
+}
+
+/* Returns true if `tag` was mirrored at or after `since_ms`. */
+static bool tag_cache_seen(uint32_t tag, unsigned long since_ms) {
+  bool found = false;
+  pthread_mutex_lock(&tag_cache_mutex);
+  for (int i = 0; i < TAG_CACHE_SIZE; i++) {
+    if (tag_cache[i].valid && tag_cache[i].tag == tag && tag_cache[i].seen_ms >= since_ms) {
+      found = true;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&tag_cache_mutex);
+  return found;
+}
+
+/* Cheap TLV scan for just COMMAND_TAG, mirroring the walk in decode_radio_status()
+ * without touching Frontend/Channel or any other field. `body`/`body_len` are the
+ * packet bytes after the leading pkt_type byte, matching decode_radio_status()'s
+ * calling convention. */
+static bool peek_command_tag(uint8_t const *body, int body_len, uint32_t *out_tag) {
+  uint8_t const *cp = body;
+  uint8_t const *end = body + body_len;
+  while (cp < end) {
+    enum status_type type = (enum status_type)*cp++;
+    if (type == EOL)
+      break;
+    if (cp >= end)
+      break;
+    unsigned int optlen = *cp++;
+    if (optlen & 0x80) {
+      int length_of_length = optlen & 0x7f;
+      optlen = 0;
+      while (length_of_length > 0 && cp < end) {
+        optlen <<= 8;
+        optlen |= *cp++;
+        length_of_length--;
+      }
+    }
+    if (cp + optlen > end)
+      break;
+    if (type == COMMAND_TAG) {
+      *out_tag = (uint32_t)decode_int64(cp, optlen);
+      return true;
+    }
+    cp += optlen;
+  }
+  return false;
+}
+
+/* Bounded queue of raw packets handed from status_reader_thread to ctrl_thread. */
+#define STATUS_QUEUE_SIZE 64
+struct status_queue_entry {
+  uint8_t buffer[PKTSIZE / sizeof(float)];
+  int rx_length;
+  uint32_t ssrc;
+};
+static struct status_queue_entry status_queue[STATUS_QUEUE_SIZE];
+static int status_queue_head = 0; /* next slot to write */
+static int status_queue_tail = 0; /* next slot to read */
+static int status_queue_count = 0;
+static pthread_mutex_t status_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t status_queue_cond = PTHREAD_COND_INITIALIZER;
+static unsigned long status_queue_drops = 0;
+/* ---- END TAG CACHE / STATUS QUEUE ---- */
 
 /*
 The `ctrl_thread` function is a POSIX thread routine responsible for handling incoming status and spectrum data packets,
@@ -3304,6 +3412,53 @@ and WebSocket connections. The code is robust, handling errors gracefully and pr
 This design allows the application to efficiently process and forward real-time radio or spectrum data to
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
+/* status_reader_thread: the only thread that calls recvfrom() on Status_fd.
+ * Kept intentionally minimal (recv + tag mirror + enqueue) so it can never
+ * fall behind the socket, regardless of how long ctrl_thread's per-session
+ * processing takes. This is what lets the tag cache reliably see every
+ * COMMAND_TAG radiod echoes back, even under load. */
+static void *status_reader_thread(void *arg)
+{
+  uint8_t buffer[PKTSIZE / sizeof(float)];
+
+  while (1) {
+    uint32_t ssrc = 0;
+    ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
+    if (rx_length <= 2) {
+      if (rx_length < 0)
+        usleep(10000);
+      continue;
+    }
+
+    if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+      uint32_t tag;
+      if (peek_command_tag(buffer + 1, (int)rx_length - 1, &tag))
+        tag_cache_add(tag, now_ms());
+    }
+
+    pthread_mutex_lock(&status_queue_mutex);
+    if (status_queue_count >= STATUS_QUEUE_SIZE) {
+      /* Consumer is falling behind; drop the oldest entry rather than
+         blocking the reader (which would reintroduce the original problem). */
+      status_queue_tail = (status_queue_tail + 1) % STATUS_QUEUE_SIZE;
+      status_queue_count--;
+      status_queue_drops++;
+      if (debug_mode)
+        fprintf(stderr, "status_reader_thread: queue full, dropped oldest packet (total drops=%lu)\n",
+                status_queue_drops);
+    }
+    struct status_queue_entry *e = &status_queue[status_queue_head];
+    memcpy(e->buffer, buffer, (size_t)rx_length);
+    e->rx_length = (int)rx_length;
+    e->ssrc = ssrc;
+    status_queue_head = (status_queue_head + 1) % STATUS_QUEUE_SIZE;
+    status_queue_count++;
+    pthread_cond_signal(&status_queue_cond);
+    pthread_mutex_unlock(&status_queue_mutex);
+  }
+  return NULL;
+}
+
 void *ctrl_thread(void *arg)
 {
   static double last_sent_backend_frequency = 0.0;
@@ -3314,14 +3469,21 @@ void *ctrl_thread(void *arg)
 
   while (1) {
     uint32_t ssrc = 0;
-    ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
-    if (rx_length <= 2) {
-      if (rx_length < 0)
-        usleep(10000);
-      continue;
-    }
+    int rx_length;
+
+    pthread_mutex_lock(&status_queue_mutex);
+    while (status_queue_count == 0)
+      pthread_cond_wait(&status_queue_cond, &status_queue_mutex);
+    struct status_queue_entry *e = &status_queue[status_queue_tail];
+    rx_length = e->rx_length;
+    ssrc = e->ssrc;
+    memcpy(buffer, e->buffer, (size_t)rx_length);
+    status_queue_tail = (status_queue_tail + 1) % STATUS_QUEUE_SIZE;
+    status_queue_count--;
+    pthread_mutex_unlock(&status_queue_mutex);
+
     if (verbose)
-      fprintf(stderr, "ctrl_thread: recv_status_packet len=%zd ssrc=%u\n", rx_length, ssrc);
+      fprintf(stderr, "ctrl_thread: recv_status_packet len=%d ssrc=%u\n", rx_length, ssrc);
 
     if (ssrc % 2 == 1) { /* spectrum */
       struct session *sp = find_session_from_ssrc(ssrc - 1);
@@ -3778,9 +3940,13 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
 
   /* PRESET is write-only on the nopreset backend. Use the echoed command tag
-     to confirm mode changes and retry a lost mode command a bounded number of times. */
+     to confirm mode changes and retry a lost mode command a bounded number of times.
+     Consult the tag cache (mirrored by status_reader_thread as soon as any status
+     packet arrives) rather than only this session's just-decoded Channel.status.tag,
+     since the confirming status packet may belong to a different session/ssrc and
+     the single shared Channel struct only reflects the most recently decoded one. */
   if (sp->mode_command_pending) {
-    if (Channel.status.tag == sp->pending_mode_tag) {
+    if (tag_cache_seen(sp->pending_mode_tag, sp->mode_command_sent_ms)) {
       sp->mode_command_pending = false;
       sp->mode_command_retries = 0;
       if (debug_mode)
