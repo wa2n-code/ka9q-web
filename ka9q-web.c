@@ -121,6 +121,7 @@ pthread_cond_t output_dest_socket_cond;
 #define FILTER_EDGE_MIN_INTERVAL_MS 250
 #define TAG_COMMAND_TIMEOUT_MS 100
 #define FREQUENCY_COMMAND_MAX_RETRIES 3
+#define MODE_ADOPTION_WINDOW_MS 5000UL
 #define MODE_COMMAND_TIMEOUT_MS 500
 /* Allow a few more status-poll gaps before declaring the command lost.
  * The backend echoes COMMAND_TAG only after it has processed a mode update,
@@ -163,6 +164,7 @@ struct session {
   int frequency_command_retries;
   bool frequency_command_pending;
   bool frequency_command_retrying;
+  unsigned long last_mode_command_ms;
   double bins_min_db;
   double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
@@ -934,6 +936,7 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           }
         }
         sp->last_client_command_ms = now_ms();
+        sp->last_mode_command_ms = now_ms();
         {
           unsigned long poll_interval_ms = (sp->spectrum_poll_us + 999U) / 1000U;
           if (poll_interval_ms == 0)
@@ -2242,6 +2245,7 @@ int init_control(struct session *sp) {
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
     fprintf(stderr,"command send error: %s\n",strerror(errno));
   } else {
+    sp->last_mode_command_ms = now_ms();
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
@@ -3988,6 +3992,23 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     }
   }
 
+  if (!sp->mode_command_pending && Channel.preset[0] != '\0') {
+    unsigned long now = now_ms();
+    bool mode_window_expired = sp->last_mode_command_ms == 0
+                            || now - sp->last_mode_command_ms > MODE_ADOPTION_WINDOW_MS;
+    if (mode_window_expired
+        && strcasecmp(sp->requested_preset, Channel.preset) != 0) {
+      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+      if (debug_tag)
+        fprintf(stderr, "SSRC %u: adopting backend mode '%s' after %lums\n",
+                sp->ssrc, Channel.preset,
+                sp->last_mode_command_ms ? now - sp->last_mode_command_ms : 0UL);
+      char mode_msg[sizeof(Channel.preset) + 3];
+      snprintf(mode_msg, sizeof(mode_msg), "M:%s", Channel.preset);
+      send_ws_text_to_session(sp, mode_msg);
+    }
+  }
+
   if (sp->frequency_command_pending) {
     if (tag_cache_seen(sp->pending_frequency_tag, sp->frequency_command_sent_ms)) {
       sp->frequency_command_pending = false;
@@ -4095,11 +4116,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
     sp->noise_density_audio = n0;
 
-  /* Preset mismatch/adoption against Channel.preset removed: radiod's nopreset
-     branch no longer echoes PRESET in status packets (write-only), so
-     Channel.preset is always empty and can't be used to validate or adopt
-     the session's mode. sp->requested_preset (updated locally in
-     control_set_mode()) is now the sole source of truth for the client UI. */
+  /* A missing PRESET is unknown; never treat it as a mode mismatch. */
 
   /* Backend frequency change -> notify client (tolerant comparison)
      Use a small tolerance to prevent tiny floating-point differences from
