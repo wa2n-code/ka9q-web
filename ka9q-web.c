@@ -90,7 +90,7 @@
     race entirely.
 */
 
-const char *webserver_version = "2.86";
+const char *webserver_version = "2.87";
 
 /* Set to 1 to avoid performing hostname lookups for incoming clients.
   When enabled the server will record numeric IP addresses instead of
@@ -108,6 +108,7 @@ double current_backend_frequency = 0.0;
 int Ctl_fd = -1, Input_fd = -1, Status_fd = -1;
 pthread_mutex_t ctl_mutex;
 pthread_t ctrl_task;
+pthread_t status_reader_task;
 pthread_t audio_task;
 pthread_t ws_ping_task;
 pthread_t ws_watchdog_task;
@@ -118,6 +119,14 @@ pthread_cond_t output_dest_socket_cond;
 /* microseconds to sleep after successful control send to avoid overrunning backend */
 #define CONTROL_USLEEP_US 20000 // minimum observed for backend to process a command and update status
 #define FILTER_EDGE_MIN_INTERVAL_MS 250
+#define TAG_COMMAND_TIMEOUT_MS 100
+#define FREQUENCY_COMMAND_MAX_RETRIES 3
+#define MODE_ADOPTION_WINDOW_MS 5000UL
+#define MODE_COMMAND_TIMEOUT_MS 500
+/* Allow a few more status-poll gaps before declaring the command lost.
+ * The backend echoes COMMAND_TAG only after it has processed a mode update,
+ * and transient network jitter can delay that status update. */
+#define MODE_COMMAND_MAX_RETRIES 5
 
 struct session {
   bool spectrum_active;
@@ -145,14 +154,25 @@ struct session {
   double if_power;
   int zoom_index;
   char requested_preset[32];
+  char pending_mode[32];
+  uint32_t pending_mode_tag;
+  unsigned long mode_command_sent_ms;
+  int mode_command_retries;
+  bool mode_command_pending;
+  uint32_t pending_frequency_tag;
+  unsigned long frequency_command_sent_ms;
+  int frequency_command_retries;
+  bool frequency_command_pending;
+  bool frequency_command_retrying;
+  unsigned long last_mode_command_ms;
   double bins_min_db;
   double bins_max_db;
   int freq_mismatch_count; /* counts consecutive status cycles with freq mismatch */
-  int preset_mismatch_count; /* counts consecutive status cycles with preset mismatch */
   double spectrum_base;
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
+  unsigned long poll_not_before_ms; /* hold status polls briefly after a mode command */
   unsigned long last_filter_edge_command_ms;
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
@@ -212,6 +232,7 @@ void control_poll(struct session *sp);
 static void *lifetime_refresh_thread(void *arg);
 void *spectrum_thread(void *arg);
 void *ctrl_thread(void *arg);
+static void *status_reader_thread(void *arg);
 
 /* websocket send helpers (forward declarations) */
 static void send_ws_binary_to_session(struct session *sp, uint8_t *buf, int size);
@@ -592,6 +613,8 @@ int debugSSRC = 0;
 int debug_ws_ping = 0; /* gate for ws_ping verbose prints */
 /* If true, emit extra send debugging output (gated with `verbose`). */
 int debug_send = 0;
+int debug_mode = 0; /* focused mode command confirmation/retry logging */
+int debug_tag = 0; /* focused command tag confirmation/retry logging */
 int debug_send_poll = 0;
 /* Low-volume global send-success counter for temporary debugging (removed) */
 /* Poll-cycle start time (ms since monotonic epoch). Reset when poll count starts/resets. */
@@ -913,8 +936,15 @@ static onion_connection_status handle_ws_message(struct session *sp, char *tmp) 
           }
         }
         sp->last_client_command_ms = now_ms();
+        sp->last_mode_command_ms = now_ms();
+        {
+          unsigned long poll_interval_ms = (sp->spectrum_poll_us + 999U) / 1000U;
+          if (poll_interval_ms == 0)
+            poll_interval_ms = 1;
+          sp->poll_not_before_ms = now_ms() + poll_interval_ms;
+        }
+        sp->mode_command_retries = 0;
         control_set_mode(sp,&tmp[2]);
-        control_poll(sp);
         break;
       case 'T':
       case 't':
@@ -1491,25 +1521,13 @@ int main(int argc,char **argv) {
       debug_ws_ping = 1;
       fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
     }
-  }
-
-  /* Allow enabling extra debug via environment variables to avoid recompiles:
-     KA9Q_DEBUGSSRC=1  -> enable SSRC/session debug prints
-     KA9Q_DEBUGSEND=1  -> enable send-path debug prints
-  */
-  {
-    char *e;
-    if ((e = getenv("KA9Q_DEBUGSSRC")) && atoi(e)) {
-      debugSSRC = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUGSSRC enabled\n");
+    if ((e = getenv("KA9Q_DEBUGMODE")) && atoi(e)) {
+      debug_mode = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUGMODE enabled\n");
     }
-    if ((e = getenv("KA9Q_DEBUGSEND")) && atoi(e)) {
-      debug_send = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUGSEND enabled\n");
-    }
-    if ((e = getenv("KA9Q_DEBUG_WSPING")) && atoi(e)) {
-      debug_ws_ping = 1;
-      fprintf(stderr, "Debug: KA9Q_DEBUG_WSPING enabled\n");
+    if ((e = getenv("KA9Q_DEBUGTAG")) && atoi(e)) {
+      debug_tag = 1;
+      fprintf(stderr, "Debug: KA9Q_DEBUGTAG enabled\n");
     }
   }
 
@@ -2159,6 +2177,14 @@ int init_connections(const char *multicast_group) {
     pthread_setname_np(ctrl_task,buff);
   }
 
+  if(pthread_create(&status_reader_task,NULL,status_reader_thread,NULL) == -1){
+    perror("pthread_create: status_reader_thread");
+  } else {
+    char buff[16];
+    snprintf(buff,16,"status_reader");
+    pthread_setname_np(status_reader_task,buff);
+  }
+
   if(pthread_create(&audio_task,NULL,audio_thread,NULL) == -1){
     perror("pthread_create");
   } else {
@@ -2219,6 +2245,7 @@ int init_control(struct session *sp) {
   if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
     fprintf(stderr,"command send error: %s\n",strerror(errno));
   } else {
+    sp->last_mode_command_ms = now_ms();
     usleep(CONTROL_USLEEP_US);
   }
   pthread_mutex_unlock(&ctl_mutex);
@@ -2278,20 +2305,27 @@ void control_set_frequency(struct session *sp,char *str) {
   double f;
 
   if(strlen(str) > 0){
+    uint32_t const tag = arc4random();
     *bp++ = CMD; // Command
     f = fabs(strtod(str,0) * 1000.0);    // convert from kHz to Hz
     /* Round to nearest Hz when storing in integer session field */
     sp->frequency = (uint32_t)lround(f);
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_double(&bp,RADIO_FREQUENCY,f);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sp->frequency_command_pending = false;
     } else {
+      if (!sp->frequency_command_retrying)
+        sp->frequency_command_retries = 0;
+      sp->pending_frequency_tag = tag;
+      sp->frequency_command_sent_ms = now_ms();
+      sp->frequency_command_pending = true;
       unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
       if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending RADIO_FREQUENCY=%.0f Hz for ssrc=%u\n", __FUNCTION__, elapsed_ms, f, (unsigned)sp->ssrc);
       /* allow backend a short time to process this command before sending another */
@@ -2524,10 +2558,11 @@ void control_set_mode(struct session *sp,char *str) {
   uint8_t *bp = cmdbuffer;
 
   if(strlen(str) > 0) {
+    uint32_t const tag = arc4random();
     *bp++ = CMD; // Command
     encode_int(&bp,OUTPUT_SSRC,sp->ssrc); // Specific SSRC
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
-    encode_int(&bp,COMMAND_TAG,arc4random()); // Append a command tag
+    encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
@@ -2535,9 +2570,14 @@ void control_set_mode(struct session *sp,char *str) {
     strlcpy(sp->requested_preset,str,sizeof(sp->requested_preset));
     if(send(Ctl_fd, cmdbuffer, command_len, 0) != command_len){
       fprintf(stderr,"command send error: %s\n",strerror(errno));
+      sp->mode_command_pending = false;
     } else {
+      strlcpy(sp->pending_mode, str, sizeof(sp->pending_mode));
+      sp->pending_mode_tag = tag;
+      sp->mode_command_sent_ms = now_ms();
+      sp->mode_command_pending = true;
       unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-      if (verbose && debug_send) fprintf(stderr, "%s: +%lums: sending PRESET='%s' for ssrc=%u\n", __FUNCTION__, elapsed_ms, str, (unsigned)sp->ssrc);
+      if (debug_mode) fprintf(stderr, "%s: +%lums: sending PRESET='%s' for ssrc=%u\n", __FUNCTION__, elapsed_ms, str, (unsigned)sp->ssrc);
       usleep(CONTROL_USLEEP_US);
       //if (verbose && debug_send) fprintf(stderr, "%s: +%lums: send OK\n", __FUNCTION__, elapsed_ms);
     }
@@ -2789,6 +2829,8 @@ static void control_poll_ssrc(uint32_t ssrc) {
 
 void control_poll(struct session *sp) {
   if (sp == NULL) return;
+  if (sp->poll_not_before_ms != 0 && now_ms() < sp->poll_not_before_ms)
+    return;
   control_poll_ssrc(sp->ssrc);
 }
 
@@ -2828,7 +2870,10 @@ static void *lifetime_refresh_thread(void *arg) {
   const useconds_t loop_sleep_us = 1000000; /* 1s cadence */
   unsigned elapsed_ms = 0;
   for (;;) {
-    uint32_t ssrcs[MAX_SESSIONS];
+    struct poll_target {
+      uint32_t ssrc;
+      unsigned long poll_not_before_ms;
+    } targets[MAX_SESSIONS];
     int nssrc = 0;
     usleep(loop_sleep_us);
     pthread_mutex_lock(&session_mutex);
@@ -2836,7 +2881,9 @@ static void *lifetime_refresh_thread(void *arg) {
     while (sp != NULL) {
       // Snapshot SSRCs for active websocket sessions; do control sends after unlocking session_mutex.
       if (sp->ws != NULL && nssrc < MAX_SESSIONS) {
-        ssrcs[nssrc++] = sp->ssrc;
+        targets[nssrc].ssrc = sp->ssrc;
+        targets[nssrc].poll_not_before_ms = sp->poll_not_before_ms;
+        nssrc++;
       }
       sp = sp->next;
     }
@@ -2845,7 +2892,8 @@ static void *lifetime_refresh_thread(void *arg) {
     for (int i = 0; i < nssrc; i++) {
       /* Keep status flowing even when spectrum thread is paused/stopped so UI
          informational fields (A/D, N0, RX rate, uptime, etc) continue to update. */
-      control_poll_ssrc(ssrcs[i]);
+      if (targets[i].poll_not_before_ms == 0 || now_ms() >= targets[i].poll_not_before_ms)
+        control_poll_ssrc(targets[i].ssrc);
       if (elapsed_ms >= refresh_interval_ms) {
         /* Also refresh spectrum SSRC lifetime when client has requested spectrum.
            This keeps the +1 channel from expiring during long-running sessions. */
@@ -2853,7 +2901,7 @@ static void *lifetime_refresh_thread(void *arg) {
         struct session *s = sessions;
         bool refresh_spectrum = false;
         while (s != NULL) {
-          if (s->ssrc == ssrcs[i]) {
+          if (s->ssrc == targets[i].ssrc) {
             refresh_spectrum = s->spectrum_requested_by_client;
             break;
           }
@@ -2861,11 +2909,11 @@ static void *lifetime_refresh_thread(void *arg) {
         }
         pthread_mutex_unlock(&session_mutex);
         if (refresh_spectrum) {
-          control_refresh_lifetime_ssrc(ssrcs[i] + 1);
+          control_refresh_lifetime_ssrc(targets[i].ssrc + 1);
         }
       }
       if (elapsed_ms >= refresh_interval_ms) {
-        control_refresh_lifetime_ssrc(ssrcs[i]);
+        control_refresh_lifetime_ssrc(targets[i].ssrc);
       }
     }
 
@@ -3254,6 +3302,104 @@ static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
 static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
 static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
+static bool tag_cache_seen(uint32_t tag, unsigned long since_ms);
+
+/* ---- BEGIN TAG CACHE / STATUS QUEUE ----
+ * radiod always echoes COMMAND_TAG back in the status update generated for
+ * every command it processes (even a no-op command). The confirmation logic
+ * previously compared the tag inline while decoding each status packet in
+ * ctrl_thread, but ctrl_thread also does the heavier per-session work (session
+ * lookups, websocket sends, frequency-mismatch handling). If that work is slow,
+ * recvfrom() is not called often enough and the kernel can drop status packets
+ * before we ever see them -- including the one carrying our confirming tag.
+ *
+ * To fix this, a dedicated reader thread does nothing but recvfrom() and a
+ * cheap tag-only scan of each packet, so it can keep up with the socket
+ * regardless of how busy the rest of the pipeline is. Every tag it sees is
+ * mirrored into a small ring buffer immediately. The full packet is then
+ * handed off to ctrl_thread (now a consumer) for the existing processing. */
+#define TAG_CACHE_SIZE 128
+struct tag_cache_entry {
+  uint32_t tag;
+  unsigned long seen_ms;
+  bool valid;
+};
+static struct tag_cache_entry tag_cache[TAG_CACHE_SIZE];
+static int tag_cache_idx = 0;
+static pthread_mutex_t tag_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void tag_cache_add(uint32_t tag, unsigned long seen_ms) {
+  pthread_mutex_lock(&tag_cache_mutex);
+  tag_cache[tag_cache_idx].tag = tag;
+  tag_cache[tag_cache_idx].seen_ms = seen_ms;
+  tag_cache[tag_cache_idx].valid = true;
+  tag_cache_idx = (tag_cache_idx + 1) % TAG_CACHE_SIZE;
+  pthread_mutex_unlock(&tag_cache_mutex);
+}
+
+/* Returns true if `tag` was mirrored at or after `since_ms`. */
+static bool tag_cache_seen(uint32_t tag, unsigned long since_ms) {
+  bool found = false;
+  pthread_mutex_lock(&tag_cache_mutex);
+  for (int i = 0; i < TAG_CACHE_SIZE; i++) {
+    if (tag_cache[i].valid && tag_cache[i].tag == tag && tag_cache[i].seen_ms >= since_ms) {
+      found = true;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&tag_cache_mutex);
+  return found;
+}
+
+/* Cheap TLV scan for just COMMAND_TAG, mirroring the walk in decode_radio_status()
+ * without touching Frontend/Channel or any other field. `body`/`body_len` are the
+ * packet bytes after the leading pkt_type byte, matching decode_radio_status()'s
+ * calling convention. */
+static bool peek_command_tag(uint8_t const *body, int body_len, uint32_t *out_tag) {
+  uint8_t const *cp = body;
+  uint8_t const *end = body + body_len;
+  while (cp < end) {
+    enum status_type type = (enum status_type)*cp++;
+    if (type == EOL)
+      break;
+    if (cp >= end)
+      break;
+    unsigned int optlen = *cp++;
+    if (optlen & 0x80) {
+      int length_of_length = optlen & 0x7f;
+      optlen = 0;
+      while (length_of_length > 0 && cp < end) {
+        optlen <<= 8;
+        optlen |= *cp++;
+        length_of_length--;
+      }
+    }
+    if (cp + optlen > end)
+      break;
+    if (type == COMMAND_TAG) {
+      *out_tag = (uint32_t)decode_int64(cp, optlen);
+      return true;
+    }
+    cp += optlen;
+  }
+  return false;
+}
+
+/* Bounded queue of raw packets handed from status_reader_thread to ctrl_thread. */
+#define STATUS_QUEUE_SIZE 64
+struct status_queue_entry {
+  uint8_t buffer[PKTSIZE / sizeof(float)];
+  int rx_length;
+  uint32_t ssrc;
+};
+static struct status_queue_entry status_queue[STATUS_QUEUE_SIZE];
+static int status_queue_head = 0; /* next slot to write */
+static int status_queue_tail = 0; /* next slot to read */
+static int status_queue_count = 0;
+static pthread_mutex_t status_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t status_queue_cond = PTHREAD_COND_INITIALIZER;
+static unsigned long status_queue_drops = 0;
+/* ---- END TAG CACHE / STATUS QUEUE ---- */
 
 /*
 The `ctrl_thread` function is a POSIX thread routine responsible for handling incoming status and spectrum data packets,
@@ -3289,6 +3435,53 @@ and WebSocket connections. The code is robust, handling errors gracefully and pr
 This design allows the application to efficiently process and forward real-time radio or spectrum data to
 multiple clients, supporting features like dynamic scaling, error correction, and session management.
 */
+/* status_reader_thread: the only thread that calls recvfrom() on Status_fd.
+ * Kept intentionally minimal (recv + tag mirror + enqueue) so it can never
+ * fall behind the socket, regardless of how long ctrl_thread's per-session
+ * processing takes. This is what lets the tag cache reliably see every
+ * COMMAND_TAG radiod echoes back, even under load. */
+static void *status_reader_thread(void *arg)
+{
+  uint8_t buffer[PKTSIZE / sizeof(float)];
+
+  while (1) {
+    uint32_t ssrc = 0;
+    ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
+    if (rx_length <= 2) {
+      if (rx_length < 0)
+        usleep(10000);
+      continue;
+    }
+
+    if (rx_length > 2 && (enum pkt_type)buffer[0] == STATUS) {
+      uint32_t tag;
+      if (peek_command_tag(buffer + 1, (int)rx_length - 1, &tag))
+        tag_cache_add(tag, now_ms());
+    }
+
+    pthread_mutex_lock(&status_queue_mutex);
+    if (status_queue_count >= STATUS_QUEUE_SIZE) {
+      /* Consumer is falling behind; drop the oldest entry rather than
+         blocking the reader (which would reintroduce the original problem). */
+      status_queue_tail = (status_queue_tail + 1) % STATUS_QUEUE_SIZE;
+      status_queue_count--;
+      status_queue_drops++;
+      if (debug_mode)
+        fprintf(stderr, "status_reader_thread: queue full, dropped oldest packet (total drops=%lu)\n",
+                status_queue_drops);
+    }
+    struct status_queue_entry *e = &status_queue[status_queue_head];
+    memcpy(e->buffer, buffer, (size_t)rx_length);
+    e->rx_length = (int)rx_length;
+    e->ssrc = ssrc;
+    status_queue_head = (status_queue_head + 1) % STATUS_QUEUE_SIZE;
+    status_queue_count++;
+    pthread_cond_signal(&status_queue_cond);
+    pthread_mutex_unlock(&status_queue_mutex);
+  }
+  return NULL;
+}
+
 void *ctrl_thread(void *arg)
 {
   static double last_sent_backend_frequency = 0.0;
@@ -3299,14 +3492,21 @@ void *ctrl_thread(void *arg)
 
   while (1) {
     uint32_t ssrc = 0;
-    ssize_t rx_length = recv_status_packet(buffer, sizeof(buffer), &ssrc);
-    if (rx_length <= 2) {
-      if (rx_length < 0)
-        usleep(10000);
-      continue;
-    }
+    int rx_length;
+
+    pthread_mutex_lock(&status_queue_mutex);
+    while (status_queue_count == 0)
+      pthread_cond_wait(&status_queue_cond, &status_queue_mutex);
+    struct status_queue_entry *e = &status_queue[status_queue_tail];
+    rx_length = e->rx_length;
+    ssrc = e->ssrc;
+    memcpy(buffer, e->buffer, (size_t)rx_length);
+    status_queue_tail = (status_queue_tail + 1) % STATUS_QUEUE_SIZE;
+    status_queue_count--;
+    pthread_mutex_unlock(&status_queue_mutex);
+
     if (verbose)
-      fprintf(stderr, "ctrl_thread: recv_status_packet len=%zd ssrc=%u\n", rx_length, ssrc);
+      fprintf(stderr, "ctrl_thread: recv_status_packet len=%d ssrc=%u\n", rx_length, ssrc);
 
     if (ssrc % 2 == 1) { /* spectrum */
       struct session *sp = find_session_from_ssrc(ssrc - 1);
@@ -3762,6 +3962,80 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
 
+  /* PRESET is write-only on the nopreset backend. Use the echoed command tag
+     to confirm mode changes and retry a lost mode command a bounded number of times.
+     Consult the tag cache (mirrored by status_reader_thread as soon as any status
+     packet arrives) rather than only this session's just-decoded Channel.status.tag,
+     since the confirming status packet may belong to a different session/ssrc and
+     the single shared Channel struct only reflects the most recently decoded one. */
+  if (sp->mode_command_pending) {
+    if (tag_cache_seen(sp->pending_mode_tag, sp->mode_command_sent_ms)) {
+      sp->mode_command_pending = false;
+      sp->mode_command_retries = 0;
+      if (debug_mode || debug_tag)
+        fprintf(stderr, "SSRC %u: mode command tag %u confirmed\n",
+                sp->ssrc, sp->pending_mode_tag);
+    } else if (now_ms() - sp->mode_command_sent_ms >= MODE_COMMAND_TIMEOUT_MS) {
+      if (sp->mode_command_retries < MODE_COMMAND_MAX_RETRIES) {
+        sp->mode_command_retries++;
+        if (debug_mode || debug_tag)
+          fprintf(stderr, "SSRC %u: mode command tag %u not observed, retry %d/%d\n",
+                  sp->ssrc, sp->pending_mode_tag, sp->mode_command_retries,
+                  MODE_COMMAND_MAX_RETRIES);
+        control_set_mode(sp, sp->pending_mode);
+      } else {
+        sp->mode_command_pending = false;
+        if (debug_mode || debug_tag)
+          fprintf(stderr, "SSRC %u: mode command retries exhausted for '%s'\n",
+                  sp->ssrc, sp->pending_mode);
+      }
+    }
+  }
+
+  if (!sp->mode_command_pending && Channel.preset[0] != '\0') {
+    unsigned long now = now_ms();
+    bool mode_window_expired = sp->last_mode_command_ms == 0
+                            || now - sp->last_mode_command_ms > MODE_ADOPTION_WINDOW_MS;
+    if (mode_window_expired
+        && strcasecmp(sp->requested_preset, Channel.preset) != 0) {
+      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
+      if (debug_tag)
+        fprintf(stderr, "SSRC %u: adopting backend mode '%s' after %lums\n",
+                sp->ssrc, Channel.preset,
+                sp->last_mode_command_ms ? now - sp->last_mode_command_ms : 0UL);
+      char mode_msg[sizeof(Channel.preset) + 3];
+      snprintf(mode_msg, sizeof(mode_msg), "M:%s", Channel.preset);
+      send_ws_text_to_session(sp, mode_msg);
+    }
+  }
+
+  if (sp->frequency_command_pending) {
+    if (tag_cache_seen(sp->pending_frequency_tag, sp->frequency_command_sent_ms)) {
+      sp->frequency_command_pending = false;
+      sp->frequency_command_retries = 0;
+      if (debug_tag)
+        fprintf(stderr, "SSRC %u: frequency command tag %u confirmed\n",
+                sp->ssrc, sp->pending_frequency_tag);
+    } else if (now_ms() - sp->frequency_command_sent_ms >= TAG_COMMAND_TIMEOUT_MS) {
+      if (sp->frequency_command_retries < FREQUENCY_COMMAND_MAX_RETRIES) {
+        char freq_msg[64];
+        sp->frequency_command_retries++;
+        if (debug_tag)
+          fprintf(stderr, "SSRC %u: frequency command tag %u not observed, retry %d/%d\n",
+                  sp->ssrc, sp->pending_frequency_tag, sp->frequency_command_retries,
+                  FREQUENCY_COMMAND_MAX_RETRIES);
+        snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+        sp->frequency_command_retrying = true;
+        control_set_frequency(sp, freq_msg);
+        sp->frequency_command_retrying = false;
+      } else {
+        sp->frequency_command_pending = false;
+        if (debug_tag)
+          fprintf(stderr, "SSRC %u: frequency command retries exhausted\n", sp->ssrc);
+      }
+    }
+  }
+
   if (have_shift) {
     double new_shift = Channel.tune.shift;
     double old_shift = sp->shift;
@@ -3787,20 +4061,20 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         const double SHIFT_CLEAR_EPS_HZ = 0.5;
         unsigned long now = now_ms();
         if (!isnan(old_shift) && fabs(old_shift) > SHIFT_CLEAR_EPS_HZ && fabs(new_shift) <= SHIFT_CLEAR_EPS_HZ) {
-          /* Ensure the backend preset is no longer CW */
-          if (!(strncasecmp(Channel.preset, "cwu", 3) == 0 || strncasecmp(Channel.preset, "cwl", 3) == 0)) {
-            /* reasonable time window: 5 seconds */
-            if (now - sp->left_cw_time_ms <= 5000UL) {
-              if (verbose)
-                fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to recent CW->non-CW mode change (shift=%.3f Hz)\n",
-                        sp->ssrc, Channel.tune.freq * 0.001, new_shift);
-              sp->frequency = (uint32_t)lround(Channel.tune.freq);
-              char freq_msg[64];
-              snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
-              send_ws_text_to_session(sp, freq_msg);
-              *last_sent_backend_frequency = Channel.tune.freq;
-              sp->left_cw_pending = 0;
-            }
+          /* radiod (nopreset branch) no longer echoes PRESET in status, so we can't
+             re-verify against the backend; sp->requested_preset (set locally when
+             the client's mode command was sent) is already known non-CW here. */
+          /* reasonable time window: 5 seconds */
+          if (now - sp->left_cw_time_ms <= 5000UL) {
+            if (verbose)
+              fprintf(stderr, "SSRC %u: adopting polled freq %.3f kHz due to recent CW->non-CW mode change (shift=%.3f Hz)\n",
+                      sp->ssrc, Channel.tune.freq * 0.001, new_shift);
+            sp->frequency = (uint32_t)lround(Channel.tune.freq);
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
+            send_ws_text_to_session(sp, freq_msg);
+            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->left_cw_pending = 0;
           }
         }
       }
@@ -3842,63 +4116,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   if (0 == extract_noise(&n0, buffer + 1, rx_length - 1, sp))
     sp->noise_density_audio = n0;
 
-  /* Handle preset mismatch / adoption */
-  if (strncmp(Channel.preset, sp->requested_preset, sizeof(sp->requested_preset))) {
-    /* Decide whether to adopt a backend-changed preset (because no recent
-       local client command exists) or to retry our requested preset. */
-    const int MAX_PRESET_MISMATCH = 5;
-    const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
-    unsigned long now = now_ms();
-    bool client_recent = ((sp->last_client_command_ms != 0) && (now - sp->last_client_command_ms <= CLIENT_CMD_WINDOW_MS))
-               || ((sp->reattach_time_ms != 0) && (now - sp->reattach_time_ms <= CLIENT_CMD_WINDOW_MS));
-
-    if (!client_recent) {
-      /* No recent local client command: adopt backend-reported preset and notify client. */
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: adopting polled preset %s (no recent local command)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, Channel.preset);
-      }
-      if (debug_send) {
-        fprintf(stderr, "%s: preset_adopt: SSRC %u adopting backend preset '%s' -> sending M_FORCE to client\n", __FUNCTION__, sp->ssrc, Channel.preset);
-      }
-      strlcpy(sp->requested_preset, Channel.preset, sizeof(sp->requested_preset));
-      sp->preset_mismatch_count = 0;
-      sp->last_client_command_ms = 0;
-      /* Notify this client so its UI can update (force update) */
-      char pm[64];
-      snprintf(pm, sizeof(pm), "M_FORCE:%s", sp->requested_preset);
-      send_ws_text_to_session(sp, pm);
-    } else {
-      /* Recent local command exists; track mismatches and resend after threshold. */
-      sp->preset_mismatch_count++;
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u requested preset %s, but poll returned preset %s (mismatch %d/%d)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count, MAX_PRESET_MISMATCH);
-      }
-      if (sp->preset_mismatch_count >= MAX_PRESET_MISMATCH) {
-        if (verbose && debug_send) {
-          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-          fprintf(stderr, "%s: +%lums: SSRC %u: resending requested preset %s after %d mismatches\n",
-                  __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, MAX_PRESET_MISMATCH);
-        }
-        control_set_mode(sp, sp->requested_preset);
-        sp->preset_mismatch_count = 0;
-      }
-    }
-  } else {
-    /* Preset matches; if we previously recorded mismatches, log that they
-       have now been satisfied before clearing the counter. */
-    if (sp->preset_mismatch_count != 0) {
-      if (verbose && debug_send) {
-        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
-        fprintf(stderr, "%s: +%lums: SSRC %u: preset mismatch satisfied: requested %s now polled as %s (cleared after %d mismatches)\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, sp->requested_preset, Channel.preset, sp->preset_mismatch_count);
-      }
-    }
-    sp->preset_mismatch_count = 0;
-  }
+  /* A missing PRESET is unknown; never treat it as a mode mismatch. */
 
   /* Backend frequency change -> notify client (tolerant comparison)
      Use a small tolerance to prevent tiny floating-point differences from
@@ -3942,7 +4160,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
          per-session `shift`, adopt immediately regardless of
          `adoptOnParameterMismatch`. This avoids spurious mismatch churn
          when a CW preset adjusts the carrier by the audio shift amount. */
-      if ((strncmp(Channel.preset, "cwu", 3) == 0 || strncmp(Channel.preset, "cwl", 3) == 0)
+      if ((strncasecmp(sp->requested_preset, "cwu", 3) == 0 || strncasecmp(sp->requested_preset, "cwl", 3) == 0)
           && !isnan(sp->shift)
           && fabs(diff - fabs(sp->shift)) <= FREQ_EPS_HZ) {
         if (verbose && debug_send) {
@@ -3984,7 +4202,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             fprintf(stderr, "%s: +%lums: SSRC %u: frequency mismatch: session %.3f kHz vs backend %.3f kHz (diff=%.3f Hz, mismatch count %d/%d)\n",
               __FUNCTION__, elapsed_ms, sp->ssrc, 0.001 * sp->frequency, 0.001 * Channel.tune.freq, diff, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
           }
-          if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+          if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH && !sp->frequency_command_pending) {
             /* After repeated mismatches reassert our requested frequency by
                resending it to the backend rather than adopting the polled value. */
             if (verbose && debug_send) {

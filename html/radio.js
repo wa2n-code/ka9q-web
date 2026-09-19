@@ -1508,8 +1508,8 @@ function sendFilter2(idx) {
               console.info('[radio.js] server mode message:', modeVal);
               const modeEl = document.getElementById('mode');
               if (modeEl) {
-                // If this is a forced server update, apply regardless of adoptEnabled
-                if (args[0] === 'M_FORCE' || adoptEnabled()) {
+                // Server mode messages were already gated by the backend window.
+                if (args[0] === 'M' || args[0] === 'M_FORCE') {
                   // Prevent sending a mode command while we apply the server-driven change
                   const prevSuppress = suppressProgrammaticUI;
                   suppressProgrammaticUI = true;
