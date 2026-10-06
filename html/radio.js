@@ -781,10 +781,39 @@ function applySampleRateForMode(mode) {
 })();
 
 // Filter2 (secondary sharper post-filter) control: dropdown of index values
-// 0 (off) through 4 (80ms), sent as-is to the backend. Reflects the
+// 0 (off) through 10 (blocks), sent as-is to the backend. Reflects the
 // backend-reported current index (backendFilter2), which typically changes
-// as a side effect of mode/preset changes.
-const FILTER2_LABELS = { 0: 'Off', 1: '20ms', 2: '40ms', 3: '60ms', 4: '80ms' };
+// as a side effect of mode/preset changes. Labels are index * block time,
+// where block time = FILTER_BLOCKSIZE / INPUT_SAMPRATE (from status data).
+const FILTER2_MAX_INDEX = 10;
+let filterBlocksize = 0;
+const FILTER2_LABELS = {};
+let filter2LabelsKey = '';
+
+function rebuildFilter2Labels() {
+  const bt = (input_samprate > 0 && filterBlocksize > 0)
+    ? (Number(filterBlocksize) / Number(input_samprate)) * 1000 : 0; // ms
+  const key = bt + '';
+  const sel = document.getElementById('filter2_select');
+  if (key === filter2LabelsKey && (!sel || sel.options.length > FILTER2_MAX_INDEX)) return;
+  filter2LabelsKey = key;
+  FILTER2_LABELS[0] = 'Off';
+  for (let n = 1; n <= FILTER2_MAX_INDEX; n++) {
+    FILTER2_LABELS[n] = bt > 0 ? (+(n * bt).toFixed(2)) + 'ms' : n + ' blk';
+  }
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '';
+  for (let n = 0; n <= FILTER2_MAX_INDEX; n++) {
+    const o = document.createElement('option');
+    o.value = String(n);
+    o.textContent = FILTER2_LABELS[n];
+    sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+rebuildFilter2Labels();
+document.addEventListener('DOMContentLoaded', rebuildFilter2Labels);
 // Index we most recently requested; suppresses stale backend echoes from
 // overwriting the tooltip/value before the backend catches up.
 let pendingFilter2 = null;
@@ -1861,8 +1890,14 @@ function sendFilter2(idx) {
                     break;
                   case 10: // INPUT_SAMPRATE (variable-length big-endian uint)
                     { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); input_samprate = _v; }
-                    i += l;
-                    break;
+                                        try { rebuildFilter2Labels(); } catch (e) {}
+                                        i += l;
+                                        break;
+                                      case 42: // FILTER_BLOCKSIZE (variable-length big-endian uint)
+                                        { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); filterBlocksize = _v; }
+                                        try { rebuildFilter2Labels(); } catch (e) {}
+                                        i += l;
+                                        break;
                   case 13: // INPUT_SAMPLES (variable-length big-endian uint64)
                     { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); input_samples = _v; }
                     i += l;

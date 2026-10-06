@@ -2664,7 +2664,7 @@ void control_set_samprate(struct session *sp, char *str) {
 }
 
 // Send a request to change the FILTER2 blocking index for a session (0 = off,
-// 1-4 = concatenated post-filter sharpness presets normally chosen via
+// 1-10 = concatenated post-filter sharpness presets normally chosen via
 // presets.conf). The backend rebuilds the second filter when this changes.
 void control_set_filter2(struct session *sp, char *str) {
   uint8_t cmdbuffer[PKTSIZE];
@@ -2673,7 +2673,7 @@ void control_set_filter2(struct session *sp, char *str) {
     return;
   char *endptr;
   long const idx = strtol(str,&endptr,10);
-  if(str == endptr || idx < 0 || idx > 4)
+  if(str == endptr || idx < 0 || idx > 10)
     return;
   *bp++ = CMD;
   encode_int(&bp,OUTPUT_SSRC,sp->ssrc);
@@ -4242,6 +4242,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   encode_int(&bp, OUTPUT_CHANNELS, Channel.output.channels);
   encode_int(&bp, OUTPUT_ENCODING, Channel.output.encoding);
   encode_int(&bp, FILTER2, Channel.filter2.blocking);
+  encode_int(&bp, FILTER_BLOCKSIZE, Frontend.L);
   if (!sp->once) {
     sp->once = true;
     if (description_override)
