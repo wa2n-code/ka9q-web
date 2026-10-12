@@ -37,7 +37,7 @@ sudo dnf install gnutls-devel libgcrypt-devel
 The Orion framework includes a lot of dependencies (like sqlite3, redis, etc) that are not needed just to run ka9q-web. The instructions below build the Onion framework with all the dependencies. See section 3A for instructions to build a lighter version of the Onion framework with only the few necessary dependencies.
 
 ```
-git clone https://github.com/davidmoreno/onion
+git clone https://github.com/ka9q/onion
 cd onion
 mkdir build
 cd build
