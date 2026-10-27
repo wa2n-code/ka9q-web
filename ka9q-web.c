@@ -1362,8 +1362,13 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len) {
   struct session *sp=find_session_from_websocket(ws);
   if(sp==NULL) {
-    //ONION_ERROR("Error did not find session for: ws=%p", ws);
-    return OCS_NEED_MORE_DATA;
+    /* This websocket has no session any more: the writer gave up on it (sp->ws = NULL after a failed or
+       stalled write) or another websocket took the session over.  Close it.  Returning OCS_NEED_MORE_DATA
+       here without reading the pending frame left libonion's onion_websocket_call() in a busy loop: with
+       data_left > 0 it skips the header read that would notice the closed socket, poll() returns at once
+       because the bytes are still unread, and the callback is called again, so the thread ran at 100% of
+       a CPU for as long as the server ran (seen with two such threads, no client connected). */
+    return OCS_CLOSE_CONNECTION;
   }
 
   if ((int) data_ready_len < 0) {
