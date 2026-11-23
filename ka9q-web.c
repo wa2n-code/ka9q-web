@@ -2582,6 +2582,15 @@ void control_set_mode(struct session *sp,char *str) {
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
     encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
+    /* Before ka9q-radio 1c213f62 (2026-09-18) every PRESET reloads the preset and
+       re-resolves the channel's data name, so on a radiod whose [global] has no
+       'data =' the destination init_control() gave this channel became 0.0.0.0
+       after the browser's first mode change, and on one whose [global] does set
+       'data =' it went back there while we stayed on our own group.  radiod applies
+       PRESET first and the socket second, so sending our destination with every
+       mode change keeps the audio where this server listens. */
+    if(Data_dest_socket.ss_family != 0)
+      encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Data_dest_socket);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
