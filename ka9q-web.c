@@ -1386,7 +1386,9 @@ static void zoom_to(struct session *sp, int level) {
   int const last = zoom_level_count() - 1;
   if (level < 0) level = 0;
   if (level > last) level = last;
-  zoom_parameters(level, &sp->bin_width, &sp->bins);
+  int bin_width;
+  zoom_parameters(level, &bin_width, &sp->bins);
+  sp->bin_width = (uint32_t)bin_width; /* zoom_parameters() returns >= 1 Hz. */
   sp->zoom_index = level;
 }
 
