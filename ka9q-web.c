@@ -90,7 +90,7 @@
     race entirely.
 */
 
-const char *webserver_version = "2.87";
+const char *webserver_version = "2.88";
 
 /* Set to 1 to avoid performing hostname lookups for incoming clients.
   When enabled the server will record numeric IP addresses instead of
@@ -528,6 +528,12 @@ void delete_session(struct session *sp);
 struct frontend Frontend;
 struct sockaddr Metadata_source_socket;       // Source of metadata
 struct sockaddr Metadata_dest_socket;         // Dest of metadata (typically multicast)
+/* Where radiod sends this server's audio.  radiod gave a new channel the
+   [global] data default "<name>-pcm.local" until ka9q-radio 9c2e3ce9
+   (2026-08-07); since then a channel created without a destination gets
+   none, and the audio thread waits forever.  So we name one ourselves. */
+static struct sockaddr_storage Data_dest_socket;
+static void set_data_dest(char const *data_name, char const *status_name);
 
 static int const DEFAULT_IP_TOS = 48;
 
@@ -1505,8 +1511,13 @@ onion_connection_status websocket_cb(void *data, onion_websocket * ws,
                                                ssize_t data_ready_len) {
   struct session *sp=find_session_from_websocket(ws);
   if(sp==NULL) {
-    //ONION_ERROR("Error did not find session for: ws=%p", ws);
-    return OCS_NEED_MORE_DATA;
+    /* This websocket has no session any more: the writer gave up on it (sp->ws = NULL after a failed or
+       stalled write) or another websocket took the session over.  Close it.  Returning OCS_NEED_MORE_DATA
+       here without reading the pending frame left libonion's onion_websocket_call() in a busy loop: with
+       data_left > 0 it skips the header read that would notice the closed socket, poll() returns at once
+       because the bytes are still unread, and the callback is called again, so the thread ran at 100% of
+       a CPU for as long as the server ran (seen with two such threads, no client connected). */
+    return OCS_CLOSE_CONNECTION;
   }
 
   if ((int) data_ready_len < 0) {
@@ -1579,6 +1590,7 @@ int main(int argc,char **argv) {
   char const *port="8081";
   char const *dirname=PKGDATADIR "/html";
   char const *mcast="hf.local";
+  char const *data_name=NULL;
   App_path=argv[0];
   /* Open syslog and record the current git commit index. Prefer the build-time
      embedded `GIT_COMMIT_INDEX` if available; otherwise fall back to runtime git. */
@@ -1612,7 +1624,7 @@ int main(int argc,char **argv) {
 #endif
   {
     int c;
-    while((c = getopt(argc,argv,"d:p:m:hn:vb:rT:")) != -1){
+    while((c = getopt(argc,argv,"d:D:p:m:hn:vb:rT:")) != -1){
       switch(c) {
       case 'T':
         ConnTimeoutSeconds = atoi(optarg);
@@ -1620,6 +1632,9 @@ int main(int argc,char **argv) {
         break;
         case 'd':
           dirname=optarg;
+          break;
+        case 'D':
+          data_name=optarg;
           break;
         case 'p':
           port=optarg;
@@ -1639,7 +1654,7 @@ int main(int argc,char **argv) {
         case 'h':
         default:
           fprintf(stderr,"Usage: %s\n",App_path);
-          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address] [-n radio description] [-r]\n",App_path);
+          fprintf(stderr,"       %s [-d directory] [-p port] [-m mcast_address] [-D data_mcast_name] [-n radio description] [-r]\n",App_path);
           exit(EX_USAGE);
           break;
       }
@@ -1676,6 +1691,7 @@ int main(int argc,char **argv) {
 
   fprintf(stderr, "ka9q-web version: v%s\n", webserver_version);
   pthread_mutex_init(&session_mutex,NULL);
+  set_data_dest(data_name, mcast);
   if (init_connections(mcast) != EX_OK) {
     fprintf(stderr, "Failed to initialize multicast connections; exiting\n");
     return EX_IOERR;
@@ -2417,6 +2433,8 @@ int init_control(struct session *sp) {
   sent_tag = arc4random();
   encode_int(&bp,COMMAND_TAG,sent_tag); // Append a command tag
   encode_string(&bp,PRESET,"am",strlen("am"));
+  if(Data_dest_socket.ss_family != 0)
+    encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Data_dest_socket);
   encode_eol(&bp);
   int command_len = bp - cmdbuffer;
   pthread_mutex_lock(&ctl_mutex);
@@ -2767,6 +2785,15 @@ void control_set_mode(struct session *sp,char *str) {
     encode_int(&bp,LIFETIME,DEFAULT_CHANNEL_LIFETIME); /* refresh lifetime (seconds) */
     encode_int(&bp,COMMAND_TAG,tag); // Append a command tag
     encode_string(&bp,PRESET,str,strlen(str));
+    /* Before ka9q-radio 1c213f62 (2026-09-18) every PRESET reloads the preset and
+       re-resolves the channel's data name, so on a radiod whose [global] has no
+       'data =' the destination init_control() gave this channel became 0.0.0.0
+       after the browser's first mode change, and on one whose [global] does set
+       'data =' it went back there while we stayed on our own group.  radiod applies
+       PRESET first and the socket second, so sending our destination with every
+       mode change keeps the audio where this server listens. */
+    if(Data_dest_socket.ss_family != 0)
+      encode_socket(&bp,OUTPUT_DATA_DEST_SOCKET,&Data_dest_socket);
     encode_eol(&bp);
     int const command_len = bp - cmdbuffer;
     pthread_mutex_lock(&ctl_mutex);
@@ -4672,3 +4699,31 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
 }
 
 
+
+/* Name the multicast group radiod should send our audio to: -D NAME if given,
+   else radiod's old default derived from the status name, so
+   "AC0G-B4-status.local" -> "AC0G-B4-pcm.local".  The address comes from
+   make_maddr(), the hash radiod itself uses for a name nobody advertises. */
+static void set_data_dest(char const *data_name, char const *status_name) {
+  char name[256];
+  if(data_name != NULL && data_name[0] != '\0') {
+    snprintf(name, sizeof name, "%s", data_name);
+  } else {
+    char base[256];
+    snprintf(base, sizeof base, "%s", status_name);
+    size_t len = strlen(base);
+    if(len > 6 && strcasecmp(base + len - 6, ".local") == 0)
+      base[len -= 6] = '\0';
+    if(len > 7 && strcasecmp(base + len - 7, "-status") == 0)
+      base[len -= 7] = '\0';
+    snprintf(name, sizeof name, "%s-pcm.local", base);
+  }
+  struct sockaddr_in *sin = (struct sockaddr_in *)&Data_dest_socket;
+  memset(&Data_dest_socket, 0, sizeof Data_dest_socket);
+  sin->sin_family = AF_INET;
+  sin->sin_addr.s_addr = htonl(make_maddr(name));
+  sin->sin_port = htons(DEFAULT_RTP_PORT);
+  char addr[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &sin->sin_addr, addr, sizeof addr);
+  fprintf(stderr, "audio: asking radiod to send to %s (%s:%u)\n", name, addr, DEFAULT_RTP_PORT);
+}
