@@ -249,18 +249,6 @@ function Spectrum(id, options) {
         }
     };
 
-    this.checkFrequencyIsValid = function(frequencyRequested) {
-        if (typeof this.input_samprate !== "number" || isNaN(this.input_samprate)) {
-            console.warn("input_samprate is not set on spectrum object.");
-            return false;
-        }
-        const validFrequency = frequencyRequested >= 0 && frequencyRequested <= this.input_samprate / 2;
-        if (!validFrequency) {
-            console.warn("Requested frequency is out of range: " + frequencyRequested);
-        }
-        return validFrequency;
-    };
-
     this.canvas.addEventListener('mousedown', function(e) {
         if (e.button === 0) { // Left mouse button: start possible click or drag, or filter-edge drag
             const edgePixels = window.filterEdgeDragEnabled ? spectrum.getFilterEdgeScreenX() : null;
@@ -1756,31 +1744,49 @@ Spectrum.prototype.rangeDecrease = function() {
     this.saveSettings();
 }
 
-Spectrum.prototype.setCenterHz = function(hz) {
-    // Ensure span/center do not exceed hardware limits when input_samprate is known
-    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const nyquist = this.input_samprate / 2;
-        let halfSpan = Math.max(0, this.spanHz / 2);
-        // If requested span is larger than the available sample bandwidth, clamp span
-        if (halfSpan > nyquist) {
-            halfSpan = nyquist;
-            this.spanHz = 2 * nyquist;
-        }
-        const minCenter = halfSpan;
-        const maxCenter = nyquist - halfSpan;
-        if (minCenter > maxCenter) {
-            // Degenerate case: force center to mid-Nyquist
-            hz = nyquist / 2;
-        } else {
-            if (hz < minCenter) hz = minCenter;
-            if (hz > maxCenter) hz = maxCenter;
-        }
+// Front-end RF bounds are absolute: tuners often publish a non-zero first LO
+// and an asymmetric (occasionally entirely negative) IF window.
+Spectrum.prototype.getRfBounds = function() {
+    const lo = this.frontendLoHz;
+    const lowIf = this.frontendLowIfHz;
+    const highIf = this.frontendHighIfHz;
+    if (Number.isFinite(lo) && Number.isFinite(lowIf) &&
+        Number.isFinite(highIf) && highIf > lowIf) {
+        const minHz = lo + lowIf;
+        const maxHz = lo + highIf;
+        if (Number.isFinite(minHz) && Number.isFinite(maxHz) &&
+            minHz >= 0 && maxHz > minHz)
+            return { minHz, maxHz };
     }
-    //console.log("spectrum.setCenterHz: ", hz);
+    // Legacy direct-sampling fallback for backends without FE edge metadata.
+    if (Number.isFinite(this.input_samprate) && this.input_samprate > 0)
+        return { minHz: 0, maxHz: this.input_samprate / 2 };
+    return null;
+};
+
+Spectrum.prototype.checkFrequencyIsValid = function(frequencyRequested) {
+    const bounds = this.getRfBounds();
+    const valid = Number.isFinite(frequencyRequested) && !!bounds &&
+        frequencyRequested >= bounds.minHz && frequencyRequested <= bounds.maxHz;
+    if (!valid) console.warn("Requested frequency is outside RF coverage:",
+                              frequencyRequested, bounds);
+    return valid;
+};
+
+Spectrum.prototype.setCenterHz = function(hz) {
+    const bounds = this.getRfBounds();
+    if (bounds) {
+        const width = bounds.maxHz - bounds.minHz;
+        this.spanHz = Math.max(0, Math.min(Number(this.spanHz) || 0, width));
+        const halfSpan = this.spanHz / 2;
+        const minCenter = bounds.minHz + halfSpan;
+        const maxCenter = bounds.maxHz - halfSpan;
+        hz = Math.min(maxCenter, Math.max(minCenter, hz));
+    }
     this.centerHz = hz;
     this.updateAxes();
     this.saveSettings();
-}
+};
 
 Spectrum.prototype.setSpanHz = function(hz) {
     // Remember previous span and visibility of tuned frequency so we can detect
@@ -1790,25 +1796,18 @@ Spectrum.prototype.setSpanHz = function(hz) {
     const prevEnd = this.centerHz + (prevSpan / 2);
     const wasVisible = (typeof this.frequency === 'number') && (this.frequency >= prevStart && this.frequency <= prevEnd);
 
-    // Clamp span to available sample rate if known, and adjust center if needed
-    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const maxSpan = this.input_samprate; // cannot exceed sample rate
-        if (hz > maxSpan) hz = maxSpan;
-        if (hz < 0) hz = 0;
-    }
+    // Never clamp against RF=0..Nyquist on a tuner: use the actual LO+IF
+    // limits supplied by the backend (or the legacy HF fallback).
+    const bounds = this.getRfBounds();
+    const width = bounds ? bounds.maxHz - bounds.minHz : null;
+    if (Number.isFinite(width))
+        hz = Math.max(0, Math.min(hz, width));
     this.spanHz = hz;
-    // After changing span, ensure current center still yields min/max within limits
-    if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const nyquist = this.input_samprate / 2;
-        let halfSpan = Math.max(0, this.spanHz / 2);
-        if (halfSpan > nyquist) {
-            halfSpan = nyquist;
-            this.spanHz = 2 * nyquist;
-        }
-        const minCenter = halfSpan;
-        const maxCenter = nyquist - halfSpan;
-        if (this.centerHz < minCenter) this.centerHz = minCenter;
-        if (this.centerHz > maxCenter) this.centerHz = maxCenter;
+    if (bounds) {
+        const halfSpan = this.spanHz / 2;
+        const minCenter = bounds.minHz + halfSpan;
+        const maxCenter = bounds.maxHz - halfSpan;
+        this.centerHz = Math.min(maxCenter, Math.max(minCenter, this.centerHz));
     }
     // If this was a zoom-in (span shrank) and the tuned frequency was visible
     // before but is now outside the new window, request the backend to center

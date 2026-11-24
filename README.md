@@ -108,6 +108,59 @@ ka9q-web
 
 Finally open a browser and connect locally to http://localhost:8081 , or from a remote browser to http://<your computer name/IP>:8081
 
+### URL startup arguments
+
+The receiver can be tuned when the page opens by adding query arguments to
+either `/` or `/radio.html`:
+
+| Argument | Value | Example | Description |
+| --- | --- | --- | --- |
+| `freq` | Frequency in **kHz** | `freq=612.000` | Sets the receiver frequency. Decimal values are accepted. |
+| `mode` | Preset name | `mode=am` | Sets the mode. The name is case-insensitive and must be available in the mode selector. |
+| `audio` | `1`, `true`, `yes`, `on`, or `start` | `audio=1` | Starts the audio stream after the WebSocket session is ready. |
+
+For example, start on 612 kHz in AM mode with audio enabled:
+
+```
+http://localhost:8081/?freq=612.000&mode=am&audio=1
+```
+
+Or start on 14.2 MHz in USB mode:
+
+```
+http://localhost:8081/radio.html?freq=14200.000&mode=usb&audio=1
+```
+
+Each argument is optional. URL values override saved browser frequency and mode
+settings for that page's active WebSocket session.
+
+#### Allowing automatic audio playback
+
+Browsers commonly block audio until the user interacts with the page. In that
+case, `audio=1` starts the server-side audio stream but the browser may leave its
+local audio context suspended.
+
+On Firefox, including the Firefox builds commonly supplied with Linux Mint:
+
+1. Enter `about:config` in the Firefox address bar.
+2. Accept the warning.
+3. Search for `media.autoplay.default`.
+4. Change its value to `0` (`0` allows autoplay).
+5. Close the ka9q-web tab and open the URL again.
+
+The commonly used values are `0` to allow autoplay, `1` to block audible
+autoplay, and `5` to block all autoplay. This preference is global and affects
+all websites. To restore Firefox's default later, use the reset button beside
+`media.autoplay.default` in `about:config`.
+
+On Chromium/Chrome in a dedicated or kiosk environment, it can be launched with:
+
+```
+chromium --autoplay-policy=no-user-gesture-required \
+  'http://localhost:8081/?freq=612.000&mode=am&audio=1'
+```
+
+
 NOTE: to start ka9q-web on a different ka9q-radio control address, the command line option is '-m', for instance:
 ```
 ka9q-web -m hf.local
@@ -145,3 +198,65 @@ The line above that is different from the original [usb] mode is high = +3.5k, w
 ## Copyright
 
 (C) 2023-2025 John Melton G0ORX - Licensed under the GNU GPL V3 (see [LICENSE](LICENSE))
+
+### FM squelch controls (development branch)
+
+FM and WFM sessions expose **Open**, **Close** and **Hysteresis** in the mode
+controls, but only when an FM demodulator is active. Values are in **dB SNR**.
+Hysteresis is calculated as Open minus Close: editing Open preserves the current
+hysteresis and adjusts Close; editing Close recomputes hysteresis; editing
+Hysteresis adjusts Close. The receiver supports the two threshold fields, not
+an independent third hysteresis field.
+
+Press **Apply** to send both thresholds to this session's audio SSRC. The UI
+reports success only after the backend confirms the values in a subsequent
+status packet. Settings are never automatically replayed on reconnect and do
+not change the RX888's RF gains or other sessions (including AIS). Other
+modes retain existing squelch/PLL behaviour and do not expose these controls.
+
+### Frontend-aware startup frequency
+
+The browser waits for receiver RF coverage metadata (first LO and usable IF
+edges) before sending initial frequency or zoom-centre commands. A supplied
+`?freq=` parameter or saved browser frequency is restored when it falls
+inside the current receiver's coverage; otherwise a valid backend frequency
+wins, falling back to the RF coverage midpoint if necessary. This prevents the
+legacy 10 MHz HF default from overriding a live VHF/UHF receiver. On
+HF-capable receivers 10 MHz is still a valid default. Nothing is retuned
+until complete frontend metadata arrives.
+
+### FM Monitor / unsquelched receive audio
+
+FM and WFM mode now offer a separate **Monitor (squelch OFF)** checkbox.
+This is different from an *Open threshold of 0 dB SNR*, which is a
+**linear power ratio of 1**, not an always-open squelch. The server sends
+finite -500 dB thresholds in Monitor mode. Radiod converts these into
+zero-valued float SNR thresholds, which opens FM squelch even at its
+zero-clamped noise SNR floor. The server sends a finite -500 dB readback
+marker for internal zero thresholds; the browser recognizes it as Monitor.
+When Monitor is disabled, the last received normal Open/Close values are
+restored. The UI times out after 8 seconds if there is no matching receiver
+status, instead of waiting indefinitely. The server logs per-session squelch
+commands for diagnostics. No RX888 RF gains or AIS session settings change.
+
+**Normal FM squelch range:** Open and Close each support **−30.0 to +40.0 dB SNR**,
+with Close no higher than Open, and with hysteresis (Open − Close) in
+**0.0–30.0 dB**. Negative dB is a valid positive SNR power ratio below 1,
+not a negative linear power or an indication that squelch is disabled.
+For example, Open −3.0 / Close −7.0 / Hysteresis 4.0 is a normal
+threshold pair; Open −30.0 / Close −30.0 / Hysteresis 0.0 is the lower
+supported boundary. Open 0.0 dB is a ratio of 1 and is also normal squelch.
+
+The browser correctly decodes KA9Q compressed floating-point readbacks for
+**both** Open and Close, including a zero-length TLV for exactly 0.0 dB.
+The earlier minimum-Open restrictions were web-client/backend validation
+choices, not restrictions in radiod's dB conversion. The separate
+**Monitor (SQ OFF)** checkbox sends a much lower finite −500 dB threshold
+which underflows to an internal zero power ratio and is reported back as
+the special −500 dB marker; this is not confused with ordinary negative
+thresholds. Using the Monitor checkbox is preferred to passing −999 dB,
+which is intentionally outside the normal input range.
+
+After updating, rebuild and restart **only ka9q-web** for the C server-side
+validation change; do not rebuild or restart radiod. Live-check
+Open=−3.0 / Close=−7.0 / Hysteresis=4.0 and verify receiver readback.

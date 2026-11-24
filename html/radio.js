@@ -518,6 +518,128 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 14;
+      // Optional startup controls from the page URL. `freq` is expressed in
+      // kHz (for example, ?freq=14200&mode=usb). These values take precedence
+      // over localStorage when the websocket is opened.
+      var urlControlOverrides = { frequencyHz: null, mode: null, audio: false };
+      var urlAudioStartAttempted = false;
+
+      // Wait for FIRST_LO_FREQUENCY and usable IF edges before startup tuning.
+      // Sending the old 10 MHz HF default immediately overrides a VHF default.
+      let startupFrequencyPending = false;
+      let startupRequestedHz = null;
+      let startupFrequencyEpoch = 0;
+      function resolveStartupFrequencyFromFrontend() {
+        if (!startupFrequencyPending || !spectrum || !window.Ka9qStartupFrequency ||
+            !ws || ws.readyState !== WebSocket.OPEN) return;
+        const chosen = window.Ka9qStartupFrequency.choose(
+          startupRequestedHz, backendFrequencyHz, spectrum.frontendLoHz,
+          spectrum.frontendLowIfHz, spectrum.frontendHighIfHz);
+        if (!chosen) return;
+        startupFrequencyPending = false;
+        const epoch = startupFrequencyEpoch;
+        const hz = chosen.frequencyHz, khz = (hz / 1000).toFixed(3);
+        console.info('[radio.js] startup frequency', hz, 'Hz via', chosen.source);
+        target_frequency = hz;
+        frequencyHz = hz;
+        const input = document.getElementById('freq');
+        if (input) input.value = khz;
+        spectrum.setFrequency(hz);
+        if (!Number.isFinite(spectrum.centerHz) ||
+            spectrum.centerHz < chosen.lowHz ||
+            spectrum.centerHz > chosen.highHz)
+          spectrum.setCenterHz((chosen.lowHz + chosen.highHz) / 2);
+        try { saveSettings(); } catch (e) {}
+        const active = () => epoch === startupFrequencyEpoch &&
+                             ws && ws.readyState === WebSocket.OPEN;
+        const zoomEl = document.getElementById('zoom_level');
+        // For a tuner-based VHF/UHF frontend, start with its full available
+        // spectrum rather than an old HF zoom level restored from localStorage.
+        // Do this only after valid LO/IF metadata establishes the RF range.
+        const vhfFrontend = Number.isFinite(chosen.lowHz) &&
+          Number.isFinite(chosen.highHz) &&
+          chosen.lowHz >= 30000000 && chosen.highHz > chosen.lowHz;
+        const zoom = vhfFrontend ? 0 :
+          (zoomEl && zoomEl.value !== '' ? Number(zoomEl.value) : target_zoom_level);
+        if (vhfFrontend) {
+          target_zoom_level = 0;
+          if (zoomEl) zoomEl.value = '0';
+          try { localStorage.setItem('zoom_level', '0'); } catch (_) {}
+        }
+        setTimeout(() => { if (active()) sendControl('zoom', 'Z:' + String(zoom), undefined, true); }, 40);
+        setTimeout(() => { if (active()) sendControl('zoom_center', 'Z:c:' + khz, undefined, true); }, 100);
+        setTimeout(() => { if (active()) sendControl('freq', 'F:' + khz, undefined, true); }, 160);
+      }
+
+
+      function resumeUrlAudioAfterGesture() {
+        try { document.removeEventListener('pointerdown', resumeUrlAudioAfterGesture, true); } catch (e) {}
+        try { document.removeEventListener('keydown', resumeUrlAudioAfterGesture, true); } catch (e) {}
+        try {
+          if (player && player.audioCtx && player.audioCtx.state === 'suspended') {
+            player.audioCtx.resume().catch(function() {});
+          }
+        } catch (e) {}
+      }
+
+      function applyUrlControlParameters() {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const freqParam = params.get('freq');
+          const modeParam = params.get('mode');
+          const audioParam = params.get('audio');
+
+          if (freqParam !== null && freqParam.trim() !== '') {
+            const frequencyKHz = Number(freqParam);
+            const requestedHz = frequencyKHz * 1000.0;
+            // The hardware sample rate is learned from the backend only after
+            // the websocket opens, so checkFrequencyIsValid() cannot be used
+            // during URL startup. Keep the value within the uint32 range used
+            // by the server and let normal backend status enforce its actual
+            // tuning limits once connected.
+            if (Number.isFinite(requestedHz) && requestedHz >= 0 &&
+                requestedHz <= 0xFFFFFFFF && spectrum) {
+              urlControlOverrides.frequencyHz = requestedHz;
+              frequencyHz = requestedHz;
+              target_frequency = requestedHz;
+              centerHz = requestedHz;
+              target_center = requestedHz;
+              spectrum.setFrequency(requestedHz);
+              try { spectrum.setCenterHz(requestedHz); } catch (e) {
+                spectrum.centerHz = requestedHz;
+              }
+              const freqEl = document.getElementById('freq');
+              if (freqEl) freqEl.value = (requestedHz / 1000.0).toFixed(3);
+            } else {
+              console.warn('[radio.js] Ignoring invalid URL frequency (kHz):', freqParam);
+            }
+          }
+
+          if (modeParam !== null && modeParam.trim() !== '') {
+            const requestedMode = modeParam.trim().toLowerCase();
+            const modeEl = document.getElementById('mode');
+            const validMode = modeEl && Array.from(modeEl.options).some(function(option) {
+              return option.value.toLowerCase() === requestedMode && !option.disabled;
+            });
+            if (validMode) {
+              urlControlOverrides.mode = requestedMode;
+              target_preset = requestedMode;
+              modeEl.value = requestedMode;
+            } else {
+              console.warn('[radio.js] Ignoring invalid URL mode:', modeParam);
+            }
+          }
+
+          if (audioParam !== null) {
+            const requestedAudio = audioParam.trim().toLowerCase();
+            urlControlOverrides.audio = requestedAudio === '1' ||
+              requestedAudio === 'true' || requestedAudio === 'yes' ||
+              requestedAudio === 'on' || requestedAudio === 'start';
+          }
+        } catch (e) {
+          console.warn('[radio.js] Failed to apply URL control parameters:', e);
+        }
+      }
       var switchModesByFrequency = false;
       // If the user manually types or clicks Set, avoid automatic mode switching
       let userTypedFreq = false;
@@ -875,6 +997,24 @@ function sendFilter2(idx) {
       }
 
       function on_ws_open() {
+        try { window.Ka9qFmSquelch.reset(); } catch (e) {}
+        startupFrequencyEpoch++;
+        startupFrequencyPending = true;
+        // Capture the browser's requested frequency before backend status can
+        // replace it. URL ?freq has priority over saved browser tuning.
+        const input = document.getElementById('freq');
+        const tuneKhz = input ? Number(input.value) : NaN;
+        startupRequestedHz = Number.isFinite(urlControlOverrides.frequencyHz)
+          ? urlControlOverrides.frequencyHz
+          : (Number.isFinite(tuneKhz) && tuneKhz > 0
+             ? Math.round(tuneKhz * 1000) : target_frequency);
+        backendFrequencyHz = 0;
+        // Require frontend limits from this websocket, not stale cached values.
+        if (spectrum) {
+          spectrum.frontendLoHz = NaN;
+          spectrum.frontendLowIfHz = NaN;
+          spectrum.frontendHighIfHz = NaN;
+        }
           // Prevent server-driven programmatic UI writes for a short window
           // while we force-send stored settings so the UI doesn't flash defaults.
           try { blockProgrammaticUpdates(1500); } catch (e) {}
@@ -898,9 +1038,9 @@ function sendFilter2(idx) {
           const freqEl = document.getElementById('freq');
           const zoomEl = document.getElementById('zoom_level');
           const _savedPreset = window.localStorage ? localStorage.getItem('preset') : null;
-          const modeToSend = _savedPreset || (modeEl && modeEl.value) || target_preset || 'am';
+          const modeToSend = urlControlOverrides.mode || _savedPreset || (modeEl && modeEl.value) || target_preset || 'am';
           // Also restore the DOM to the saved preset now so subsequent reconnect reads are correct
-          if (_savedPreset && modeEl && modeEl.value !== _savedPreset) { modeEl.value = _savedPreset; }
+          if (!urlControlOverrides.mode && _savedPreset && modeEl && modeEl.value !== _savedPreset) { modeEl.value = _savedPreset; }
           const freqToSend = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
           const zoomToSend = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
           try { sendControl('mode', 'M:' + modeToSend, undefined, true); } catch (e) { console.warn('Immediate mode send failed', e); }
@@ -912,23 +1052,14 @@ function sendFilter2(idx) {
         updateCWMarker();
         // Stagger remaining initial control messages slightly to avoid overwhelming backend
         // Force these reconnect-sends to bypass programmatic suppression so backend receives them
-        // Stagger reconnect sends: zoom, optional center, then frequency
-        try {
-          const zoomEl = document.getElementById('zoom_level');
-          const freqEl = document.getElementById('freq');
-          const zoomVal = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
-          const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
-          setTimeout(() => { try { sendControl('zoom','Z:' + String(zoomVal), undefined, true); } catch (e) {} }, 60);
-          setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('zoom_center','Z:c:' + (Number(freqVal)).toFixed(3), undefined, true); } catch (e) {} }, 120);
-          setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('freq','F:' + (Number(freqVal) / 1.0).toFixed(3), undefined, true); } catch (e) {} }, 180);
-        } catch (e) {}
+        // Frequency and zoom sent after valid LO/IF status arrives.
         // Resend tuned frequency and, if audio was running prior to reconnect,
         // perform a short stop/start to force the backend audio channel to
         // match the UI-displayed tuned frequency.
         try {
           setTimeout(() => {
             try {
-              if (ws && ws.readyState === WebSocket.OPEN) {
+              if (ws && ws.readyState === WebSocket.OPEN && !startupFrequencyPending) {
                 // Bypass programmatic-UI guard on these reconnect sends
                 try { const freqEl = document.getElementById('freq'); const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0); if (!isNaN(freqVal)) sendControl('freq','F:' + (Number(freqVal) / 1.0).toFixed(3), undefined, true); } catch (e) {}
                 try { const freqEl2 = document.getElementById('freq'); const freqVal2 = (freqEl2 && freqEl2.value) ? parseFloat(freqEl2.value) : (target_frequency/1000.0); if (!isNaN(freqVal2)) sendControl('zoom_center','Z:c:' + (Number(freqVal2)).toFixed(3), undefined, true); } catch (e) {}
@@ -943,7 +1074,7 @@ function sendFilter2(idx) {
                   try {
                     const modeEl = document.getElementById('mode');
                     const savedPreset = (window.localStorage) ? localStorage.getItem('preset') : null;
-                    const modeToReassert = savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
+                    const modeToReassert = urlControlOverrides.mode || savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
                     await prepareAudioStartupMode(modeToReassert);
                     if (usePcm) {
                       try { sendControl('audio', "O:PCM:" + ssrc.toString(), 50); } catch (e) {}
@@ -1413,6 +1544,29 @@ function sendFilter2(idx) {
           } catch (e) {}
           if(args[0]=='S') { // get our ssrc
             ssrc=parseInt(args[1]);
+            // Wait until the startup mode/frequency messages have been sent,
+            // then start audio for URLs containing audio=1. The AudioContext
+            // resume is best-effort; browser autoplay policy may defer sound
+            // until the first click/key press, so install a gesture fallback.
+            if (urlControlOverrides.audio && !urlAudioStartAttempted && Number.isFinite(ssrc)) {
+              urlAudioStartAttempted = true;
+              setTimeout(async function() {
+                try {
+                  const btn = document.getElementById('audio_button');
+                  if (btn && btn.value === 'START') await audio_start_stop();
+                  if (player && player.audioCtx && player.audioCtx.state === 'suspended') {
+                    document.addEventListener('pointerdown', resumeUrlAudioAfterGesture, { once: true, capture: true });
+                    document.addEventListener('keydown', resumeUrlAudioAfterGesture, { once: true, capture: true });
+                  }
+                } catch (e) {
+                  console.warn('[radio.js] URL audio auto-start failed:', e);
+                }
+              }, 400);
+            }
+          }
+          if (args[0] === 'SQERR') {
+            try { window.Ka9qFmSquelch.error(args.slice(1).join(':')); } catch (e) {}
+            return;
           }
           // BFREQ: server-sent backend frequency in Hz (e.g., "BFREQ:470000.000")
           // BFREQ_FORCE: server-forced backend frequency update (UI should always apply)
@@ -1423,6 +1577,7 @@ function sendFilter2(idx) {
               // heuristic here previously misinterpreted sub-1MHz Hz values as kHz.
               const hz = Math.round(f_raw);
               backendFrequencyHz = hz;
+              if (startupFrequencyPending) return;
               try {
                 const freqEl = document.getElementById('freq');
                 if (freqEl) {
@@ -1557,7 +1712,7 @@ function sendFilter2(idx) {
                   // adoptEnabled() (shiftHz > 1) can cause plain M: updates to overwrite the UI.
                   if (Date.now() < suppressProgrammaticUpdatesUntil) {
                     try {
-                      const storedMode = window.localStorage ? localStorage.getItem('preset') : null;
+                      const storedMode = urlControlOverrides.mode || (window.localStorage ? localStorage.getItem('preset') : null);
                       if (storedMode && storedMode !== modeVal) {
                         console.info('[radio.js] server mode conflicts with stored mode during reconnect window; will re-assert', storedMode, 'in 500ms');
                         setTimeout(() => {
@@ -1730,7 +1885,7 @@ function sendFilter2(idx) {
               if (!spectrum._leftDragging) {
                 spectrum.setCenterHz(centerHz);
               }
-              if (adoptEnabled()) {
+              if (adoptEnabled() && !startupFrequencyPending) {
                 spectrum.setFrequency(frequencyHz);
               } else {
                 // console.debug('[radio.js] adopt disabled; skipping server-driven tuned frequency marker update');
@@ -1744,8 +1899,9 @@ function sendFilter2(idx) {
                   const maxVal = (typeof zoomTableSize === 'number' && !isNaN(zoomTableSize)) ? (zoomTableSize - 1) : Number(zoomEl.max) || 0;
                   zoomEl.max = maxVal;
                   try { updateZoomMarkers(); } catch (e) {}
-                  // If the frontend sample rate is the lower value (<= 64.8 MHz) disallow zoom level 0
-                  const minVal = (typeof input_samprate === 'number' && input_samprate > 0 && input_samprate <= 64800000) ? 1 : 0;
+                  // Respect the backend zoom table: sample rate alone does not
+                  // make level 0 invalid. The server determines the actual span.
+                  const minVal = 0;
                   zoomEl.min = minVal;
                   // Clamp incoming server-provided zoom level to the allowed range before showing
                   let clamped = z_level;
@@ -1771,8 +1927,8 @@ function sendFilter2(idx) {
                 if (freqEl) {
                   // console.debug('[radio.js] spectrum update -> frequencyHz (Hz)=', frequencyHz);
                   backendFrequencyHz = frequencyHz;
-                  if (!adoptEnabled()) {
-                    // console.debug('[radio.js] adopt disabled; skipping spectrum-driven freq UI write');
+                  if (!adoptEnabled() || startupFrequencyPending) {
+                    // Don't overwrite requested tuning before RF metadata arrives.
                   } else if (Date.now() < suppressProgrammaticUpdatesUntil) {
                     // console.debug('[radio.js] spectrum update skipped UI write until stabilization window expires');
                   } else {
@@ -1813,6 +1969,7 @@ function sendFilter2(idx) {
             update_stats();
             break;
             case 0x7E: // Channel Data
+              let sqOpenDb = null, sqCloseDb = null, sqDemodType = null;
               while(i<data.byteLength) {
                 var v=view.getInt8(i++);
                 var l=view.getInt8(i++);
@@ -1914,6 +2071,47 @@ function sendFilter2(idx) {
                     if (l >= 4) noise_density_audio = view.getFloat32(i, false);
                     i += l;
                     break;
+                  case 34: // FIRST_LO_FREQUENCY: IEEE double, absolute RF Hz
+                    if (l >= 8) {
+                      const lo = view.getFloat64(i, false);
+                      if (Number.isFinite(lo)) spectrum.frontendLoHz = lo;
+                    }
+                    i += l;
+                    break;
+                  case 100: // FE_LOW_EDGE: float32, IF relative to first LO
+                    if (l >= 4) {
+                      const low = view.getFloat32(i, false);
+                      if (Number.isFinite(low)) spectrum.frontendLowIfHz = low;
+                    }
+                    i += l;
+                    break;
+                  case 101: // FE_HIGH_EDGE: float32
+                    if (l >= 4) {
+                      const high = view.getFloat32(i, false);
+                      if (Number.isFinite(high)) spectrum.frontendHighIfHz = high;
+                    }
+                    i += l;
+                    break;
+                  case 102: // FE_ISREAL
+                    if (l >= 1) spectrum.frontendIsReal = !!view.getUint8(i);
+                    i += l;
+                    break;
+                  case 48: // DEMOD_TYPE (KA9Q zero-length integer is valid mode 0)
+                    if (l >= 0 && l <= 4) {
+                      let x = 0;
+                      for (let k = 0; k < l; k++) x = x * 256 + view.getUint8(i + k);
+                      sqDemodType = x;
+                    }
+                    i += l;
+                    break;
+                  case 83: // SQUELCH_OPEN (KA9Q compressed float32, including +0 as len 0)
+                    sqOpenDb = window.Ka9qFmSquelch.decodeStatusFloat(view, i, l);
+                    i += l;
+                    break;
+                  case 84: // SQUELCH_CLOSE (KA9Q compressed float32, including +0 as len 0)
+                    sqCloseDb = window.Ka9qFmSquelch.decodeStatusFloat(view, i, l);
+                    i += l;
+                    break;
                   case 104: // AD_OVER (variable-length big-endian uint64)
                     { let _v = 0n; for (let _k = 0; _k < l; _k++) _v = (_v << 8n) | BigInt(view.getUint8(i + _k)); ad_over = _v; }
                     i += l;
@@ -1971,6 +2169,8 @@ function sendFilter2(idx) {
                     break;
                 }
               }
+              try { window.Ka9qFmSquelch.onStatus(sqDemodType, sqOpenDb, sqCloseDb); } catch (e) {}
+              resolveStartupFrequencyFromFrontend();
               // Update status display from status packet (runs even when spectrum is paused)
               try { update_stats(); } catch (e) {}
               try { ensurePcmPlayer(); } catch (e) {}
@@ -2176,6 +2376,7 @@ function sendFilter2(idx) {
               setDefaultSettings(true);
             }
           } catch (e) { console.warn('loadSettings failed', e); }
+          applyUrlControlParameters();
           // Run a diagnostic to surface any missing saved keys (alerts the user)
           try { diagnosticCheckSettings(true); } catch (e) { /* ignore */ }
 
@@ -3022,6 +3223,7 @@ function sendFilter2(idx) {
       const modeEl = document.getElementById('mode');
       const prevMode = modeEl ? (modeEl.value || '').toLowerCase() : '';
       if (modeEl) modeEl.value = selected_mode;
+      try { window.Ka9qFmSquelch.refreshMode(); } catch (e) {}
       if (forceSend || !suppressProgrammaticUI) {
         blockProgrammaticUpdates(600);
         // Pass `forceSend` as 4th argument to allow bypassing the programmatic
@@ -3463,9 +3665,9 @@ function sendFilter2(idx) {
           btn.innerHTML = "Stop Audio";
           const modeEl = document.getElementById('mode');
           const savedPreset = (window.localStorage) ? localStorage.getItem('preset') : null;
-          const modeToReassert = savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
+          const modeToReassert = urlControlOverrides.mode || savedPreset || (modeEl ? (modeEl.value || 'am') : 'am');
           try {
-            if (savedPreset && modeEl && modeEl.value !== savedPreset) modeEl.value = savedPreset;
+            if (!urlControlOverrides.mode && savedPreset && modeEl && modeEl.value !== savedPreset) modeEl.value = savedPreset;
           } catch (e) {}
           await prepareAudioStartupMode(modeToReassert);
           const usePcm = document.getElementById('pcm_checkbox') &&
@@ -4499,7 +4701,12 @@ const bandOptions = {
         { label: "15M", freq: 21300000 },
         { label: "12M", freq: 24930000 },
         { label: "10M", freq: 28500000 },
-	{ label: "6M",  freq: 50100000 }
+	{ label: "6M",  freq: 50100000 },
+	// 2m/70cm: the list stopped at 6M, which is as far as a direct-sampling
+	// HF front end reaches. With a tuner-based front end (RTL-SDR, Airspy)
+	// these bands are receivable and previously had no quick-select entry.
+	{ label: "2M", freq: 145500000 },
+	{ label: "70CM", freq: 433500000 }
     ],
     broadcast: [
         { label: "120M", freq:2397500 },
@@ -4884,6 +5091,19 @@ function getZoomTableSize() {
     // Temporary event listener for the ZSIZE response
     function handleZoomTableSize(event) {
       try {
+        if (typeof event.data === "string" && event.data.startsWith("ZPROFILE:")) {
+          const entries = event.data.slice("ZPROFILE:".length).split(";").map(function(pair) {
+            const values = pair.split(",").map(Number);
+            return { bin_width: values[0], bin_count: values[1] };
+          });
+          if (entries.length > 0 && entries.every(function(e) {
+            return Number.isFinite(e.bin_width) && e.bin_width > 0 &&
+                   Number.isFinite(e.bin_count) && e.bin_count > 0;
+          })) {
+            window.zoomTable = entries; // Backend profile is authoritative.
+          }
+          return;
+        }
         if (typeof event.data === "string" && event.data.startsWith("ZSIZE:")) {
           const size = parseInt(event.data.split(":")[1], 10);
           ws.removeEventListener("message", handleZoomTableSize);
@@ -4946,11 +5166,24 @@ window.zoomTable = [
  // { bin_width: 50000, bin_count: 1620 },
   { bin_width: 40000, bin_count: 1620 },
   { bin_width: 20000, bin_count: 1620 },
+  // The three entries below must stay in lockstep with the server's
+  // zoom_table[] in ka9q-web.c, in the same index order: the "Z:<n>" command
+  // sends a bare index into that table, so an entry present on one side and
+  // not the other silently shifts every wider selection by one step.
+  // 18790 Hz -> 30,439,800 Hz, the widest step that still fits a typical
+  // direct-sampling HF front end's real coverage (~30.44 MHz).
+  { bin_width: 18790, bin_count: 1620 },
   { bin_width: 10000, bin_count: 1620 },
   { bin_width: 8000, bin_count: 1620 },
+  // 5432 Hz -> 8,799,840 Hz, the widest step fitting an Airspy R2's 8.8 MHz
+  // real-sampling window (max_IF=-600kHz, min_IF=-0.47*20Msps, src/airspy.c).
+  { bin_width: 5432, bin_count: 1620 },
   { bin_width: 5000, bin_count: 1620 },
   { bin_width: 4000, bin_count: 1620 },
   { bin_width: 2000, bin_count: 1620 },
+  // 1480 Hz -> 2,397,600 Hz, the widest step fitting a full 2.4 Msps
+  // complex/IQ capture (e.g. an RTL-SDR at its usual rate).
+  { bin_width: 1480, bin_count: 1620 },
   { bin_width: 1000, bin_count: 1620 },
   { bin_width: 800, bin_count: 1620 },
   { bin_width: 500, bin_count: 1620 },
@@ -5579,22 +5812,23 @@ function fetchAndDisplayWWVSolarData() {
       const table = window.zoomTable || [];
       const entry = table[idx] || table[Math.min(idx, table.length-1)] || null;
       let bwHz = 0;
-      // Prefer runtime `binWidthHz * binCount` which is provided by the server
-      // and represents the actual per-bin width and FFT size. If not available,
-      // fall back to the zoom table's nominal entry span.
-      if (typeof binWidthHz === 'number' && binWidthHz > 0 && typeof binCount === 'number' && binCount > 0) {
+      // The popup describes the slider position being selected, not the
+      // previous spectrum frame (which can arrive before the zoom command
+      // has taken effect). ZPROFILE is supplied by the backend and gives
+      // the exact bin geometry for each index.
+      if (entry && Number.isFinite(entry.bin_width) && entry.bin_width > 0 &&
+          Number.isFinite(entry.bin_count) && entry.bin_count > 0) {
+        bwHz = entry.bin_width * entry.bin_count;
+      } else if (typeof binWidthHz === 'number' && binWidthHz > 0 &&
+                 typeof binCount === 'number' && binCount > 0) {
         bwHz = binWidthHz * binCount;
-      } else if (entry && typeof entry.bin_width === 'number' && typeof entry.bin_count === 'number') {
-        bwHz = (entry.bin_width * entry.bin_count);
-      } else {
-        bwHz = (typeof binWidthHz === 'number' ? binWidthHz : 1) * (typeof binCount === 'number' ? binCount : 1);
       }
 
-      // If the calculated bandwidth exceeds the system Nyquist (fs/2), clamp to fs/2.
-      // This commonly happens when the slider reaches zoom level 0; the proper displayed
-      // value should not exceed input_samprate/2 and is effectively zoom level 1's fs/2.
-      if (typeof input_samprate === 'number' && input_samprate > 0 && bwHz > (input_samprate / 2)) {
-        bwHz = input_samprate / 2;
+      // A complex/baseband spectrum can span the full sample rate.
+      // The server-reported bin width/count are authoritative; do not
+      // halve a wide zoom level merely for the popup display.
+      if (typeof input_samprate === 'number' && input_samprate > 0 && bwHz > input_samprate) {
+        bwHz = input_samprate;
       }
 
       // Always format bandwidth in kHz with one decimal digit (e.g. "2.5 kHz")

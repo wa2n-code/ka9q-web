@@ -9,6 +9,8 @@
     <script src="spectrum.js"></script>
     <script src="pcm-player.js"></script>
     <script src="opus-decoder.min.js"></script>
+    <script src="fm-squelch.js"></script>
+    <script src="startup-frequency.js"></script>
     <script src="radio.js"></script>
     <script src="smeter.js" defer></script>
     <style>
@@ -311,9 +313,49 @@
                 </tr>
             </table>
         </div>
-        <div style="display: flex; align-items: center; margin-left: 4px;">
+        <!-- The S-meter and FM squelch form their own right-hand column.
+             Do not put a multi-line squelch panel inside a receiver control
+             table cell: it stretches that row and misaligns its neighbours. -->
+        <div style="display:flex; flex-direction:column; align-items:center; flex:0 0 232px; gap:6px; margin-left:4px;">
             <div id="analog_smeter_box" style="border: solid; border-color: dimgray; border-radius: 10px; padding: 2px 2px; background: transparent; display: block;">
                 <canvas id="sMeter" width="220" height="140"></canvas>
+            </div>
+            <!-- Keep IDs and events unchanged: fm-squelch.js targets these
+                 elements directly. Hidden automatically outside FM/WFM. -->
+            <div id="fmSquelchControls" hidden
+                 style="display:none; box-sizing:border-box; width:230px; border:2px solid dimgray; border-radius:10px; padding:6px; font-size:12px;">
+                <strong style="display:block; text-align:center; margin-bottom:6px;">FM Squelch (dB SNR)</strong>
+                <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; align-items:end;">
+                    <label for="fmSqOpen" style="display:flex; flex-direction:column; align-items:center; gap:3px; min-width:0;">
+                        Open
+                        <input id="fmSqOpen" type="number" min="-30" max="40" step="0.1"
+                               style="box-sizing:border-box; width:100%; max-width:67px; min-width:0; font-size:12px;"
+                               title="Open SNR threshold: -30 to +40 dB. Use Monitor for guaranteed squelch OFF." />
+                    </label>
+                    <label for="fmSqClose" style="display:flex; flex-direction:column; align-items:center; gap:3px; min-width:0;">
+                        Close
+                        <input id="fmSqClose" type="number" min="-30" max="40" step="0.1"
+                               style="box-sizing:border-box; width:100%; max-width:67px; min-width:0; font-size:12px;"
+                               title="SNR below which squelch begins closing" />
+                    </label>
+                    <label for="fmSqHysteresis" style="display:flex; flex-direction:column; align-items:center; gap:3px; min-width:0;">
+                        Hysteresis
+                        <input id="fmSqHysteresis" type="number" min="0" max="30" step="0.1"
+                               style="box-sizing:border-box; width:100%; max-width:67px; min-width:0; font-size:12px;"
+                               title="Open minus Close; changing this adjusts Close" />
+                    </label>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:3px; margin-top:7px;">
+                    <label title="Disable FM SNR squelch to hear continuous receiver noise" style="font-size:12px; white-space:nowrap;">
+                        <input id="fmSqMonitor" type="checkbox" />
+                        Monitor (SQ OFF)
+                    </label>
+                    <button id="fmSqApply" type="button" disabled style="font-size:12px;">Apply</button>
+                </div>
+                <div id="fmSqStatus" role="status" aria-live="polite"
+                     style="margin-top:6px; font-size:11px; line-height:1.3; overflow-wrap:anywhere; min-height:2.5em;">
+                    Waiting for FM status
+                </div>
             </div>
         </div>
     </div>

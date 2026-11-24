@@ -25,3 +25,9 @@ Network Trash Folder
 Temporary Items
 # Ignore analysis / tooling outputs
 tools/
+
+# Local regression test and development instance outputs
+__pycache__/
+*.pyc
+logs/
+ka9q-web-squelch
